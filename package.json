@@ -1,0 +1,38 @@
+{
+  "name": "sdkwork-payment-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --dir apps/sdkwork-payment-pc dev",
+    "build": "pnpm --dir apps/sdkwork-payment-pc build",
+    "start": "cargo run -p sdkwork-payment-api-server --bin payment-server",
+    "test": "pnpm test:node && pnpm test:vitest && cargo test --workspace",
+    "test:node": "node --test --test-reporter=spec tests/static/placeholder.test.mjs",
+    "test:vitest": "vitest run --config vitest.config.ts --configLoader native --pool vmThreads",
+    "typecheck": "tsc --noEmit",
+    "verify": "pnpm typecheck && pnpm test:vitest && cargo test --workspace",
+    "fmt:rust:check": "cargo fmt --all -- --check"
+  },
+  "devDependencies": {
+    "@sdkwork/appbase-pc-react": "workspace:*",
+    "@sdkwork/ui-pc-react": "workspace:*",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "jsdom": "^29.0.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.3",
+    "vitest": "^4.1.2",
+    "lucide-react": "^1.7.0",
+    "qrcode": "^1.5.4",
+    "@types/qrcode": "^1.5.5"
+  }
+}

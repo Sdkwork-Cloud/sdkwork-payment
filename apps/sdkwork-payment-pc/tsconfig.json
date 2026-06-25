@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@sdkwork/payment-pc-core": ["packages/sdkwork-payment-pc-core/src/index.ts"],
+      "@sdkwork/payment-pc-shell": ["packages/sdkwork-payment-pc-shell/src/index.tsx"],
+      "@sdkwork/payment-pc-payment": ["packages/sdkwork-payment-pc-payment/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "packages/**/*.ts", "packages/**/*.tsx"]
+}

@@ -1,0 +1,26 @@
+[package]
+name = "sdkwork-router-payment-app-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+sdkwork_commerce_contract_service.workspace = true
+sdkwork_commerce_order_repository_sqlx.workspace = true
+sdkwork_commerce_order_service.workspace = true
+sdkwork_commerce_payment_repository_sqlx.workspace = true
+sdkwork_commerce_payment_service.workspace = true
+sdkwork_iam_context_service.workspace = true
+sdkwork_payment_service_host.workspace = true
+sdkwork_database_sqlx.workspace = true
+sdkwork-web-core.workspace = true
+sdkwork-web-axum.workspace = true
+sdkwork-iam-web-adapter.workspace = true

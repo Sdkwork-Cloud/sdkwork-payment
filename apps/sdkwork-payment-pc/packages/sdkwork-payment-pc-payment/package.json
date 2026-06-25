@@ -1,0 +1,47 @@
+{
+  "name": "@sdkwork/payment-pc-payment",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Payment orchestration, payment methods, status tracking, and QR-aware payment center surfaces.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sdkwork/appbase-pc-react": "workspace:*",
+    "@sdkwork/payment-service": "workspace:*"
+  },
+  "devDependencies": {
+    "@sdkwork/ui-pc-react": "workspace:*",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "qrcode": "^1.5.4",
+    "@types/qrcode": "^1.5.5"
+  },
+  "peerDependencies": {
+    "@sdkwork/ui-pc-react": "*",
+    "react": ">=18.2.0 <20.0.0",
+    "react-dom": ">=18.2.0 <20.0.0"
+  },
+  "sdkwork": {
+    "workspace": "sdkwork-payment",
+    "architecture": "pc-react",
+    "domain": "commerce",
+    "capability": "payment",
+    "status": "ready"
+  }
+}

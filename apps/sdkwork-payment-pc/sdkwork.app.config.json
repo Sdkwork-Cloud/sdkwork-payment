@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 3,
+  "kind": "sdkwork.app",
+  "app": {
+    "key": "sdkwork-payment-pc",
+    "name": "SDKWork Payment PC",
+    "displayName": "SDKWork Payment PC",
+    "description": "Payment capability PC surface for payment methods, intents, and reconciliation.",
+    "vendor": "SDKWork",
+    "appType": "APP_REACT",
+    "versionSource": "package.json",
+    "identifiers": {
+      "desktopAppId": "com.sdkwork.payment.pc.desktop",
+      "containerImage": "registry.sdkwork.com/apps/sdkwork-payment-pc"
+    }
+  },
+  "backend": {
+    "profileKey": "backend-root-admin",
+    "ownerMode": "tenant",
+    "grantMode": "current",
+    "platform": "WEB",
+    "tenantId": "100001",
+    "organizationId": "0"
+  },
+  "runtime": {
+    "family": "web",
+    "framework": "react",
+    "runtimes": ["WEB", "BROWSER"],
+    "deliveryModes": ["WEB_URL"],
+    "supportedDeploymentProfiles": ["standalone", "cloud"],
+    "defaultDeploymentProfile": "standalone"
+  },
+  "publish": {
+    "config": {
+      "workspaceRoot": "sdkwork-payment",
+      "managedBy": "sdkwork-payment-workspace"
+    }
+  },
+  "devApp": {
+    "sourceRoot": "apps/sdkwork-payment-pc"
+  },
+  "metadata": {
+    "standardOwner": "sdkwork-payment",
+    "initializedAt": "2026-06-24T00:00:00.000Z"
+  }
+}

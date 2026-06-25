@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.component.spec",
+  "component": {
+    "name": "sdkwork-payment-workspace",
+    "domain": "commerce",
+    "capability": "payment",
+    "root": "sdkwork-payment"
+  }
+}

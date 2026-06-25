@@ -1,0 +1,11 @@
+{
+  "name": "@sdkwork/payment-service",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@sdkwork/payment-sdk-ports": "workspace:*",
+    "@sdkwork/utils": "workspace:*"
+  }
+}

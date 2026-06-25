@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@sdkwork/appbase-pc-react": ["../sdkwork-appbase/packages/pc-react/foundation/sdkwork-appbase-pc-react/src/index.ts"],
+      "@sdkwork/ui-pc-react": ["../sdkwork-ui/sdkwork-ui-pc-react/src/index.ts"],
+      "@sdkwork/ui-pc-react/theme": ["../sdkwork-ui/sdkwork-ui-pc-react/src/theme/index.ts"],
+      "@sdkwork/utils": ["../sdkwork-utils/packages/sdkwork-utils-typescript/src/index.ts"],
+      "@sdkwork/payment-contracts": ["packages/common/payment/sdkwork-payment-contracts/src/index.ts"],
+      "@sdkwork/payment-service": ["packages/common/payment/sdkwork-payment-service/src/index.ts"],
+      "@sdkwork/payment-sdk-ports": ["packages/common/payment/sdkwork-payment-sdk-ports/src/index.ts"],
+      "@sdkwork/payment-pc-core": ["apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-core/src/index.ts"],
+      "@sdkwork/payment-pc-shell": ["apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-shell/src/index.tsx"],
+      "@sdkwork/payment-pc-payment": ["apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-payment/src/index.ts"]
+    },
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["node", "@testing-library/jest-dom"]
+  }
+}

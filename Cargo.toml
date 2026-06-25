@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/sdkwork-commerce-payment-service",
+  "crates/sdkwork-commerce-payment-repository-sqlx",
+  "crates/sdkwork-router-payment-app-api",
+  "crates/sdkwork-router-payment-backend-api",
+  "crates/sdkwork-payment-database-host",
+  "crates/sdkwork-payment-service-host",
+  "crates/sdkwork-payment-api-server",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+axum = "0.8"
+tokio = { version = "1.51", features = ["macros", "rt-multi-thread", "net", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+dotenvy = "0.15"
+thiserror = "1"
+async-trait = "0.1"
+sdkwork_commerce_contract_service = { path = "../sdkwork-commerce/crates/sdkwork-commerce-contract-service", package = "sdkwork-commerce-contract-service" }
+sdkwork-web-core = { path = "../sdkwork-web-framework/crates/sdkwork-web-core" }
+sdkwork-web-axum = { path = "../sdkwork-web-framework/crates/sdkwork-web-axum" }
+sdkwork-web-contract = { path = "../sdkwork-web-framework/crates/sdkwork-web-contract" }
+sdkwork-iam-web-adapter = { path = "../sdkwork-iam/crates/sdkwork-iam-web-adapter" }
+sdkwork_iam_context_service = { path = "../sdkwork-iam/crates/sdkwork-iam-context-service", package = "sdkwork-iam-context-service" }
+sdkwork-database-config = { path = "../sdkwork-database/crates/sdkwork-database-config" }
+sdkwork-database-lifecycle = { path = "../sdkwork-database/crates/sdkwork-database-lifecycle" }
+sdkwork-database-spi = { path = "../sdkwork-database/crates/sdkwork-database-spi" }
+sdkwork-database-sqlx = { path = "../sdkwork-database/crates/sdkwork-database-sqlx" }
+sdkwork_database_config = { path = "../sdkwork-database/crates/sdkwork-database-config", package = "sdkwork-database-config" }
+sdkwork_database_lifecycle = { path = "../sdkwork-database/crates/sdkwork-database-lifecycle", package = "sdkwork-database-lifecycle" }
+sdkwork_database_spi = { path = "../sdkwork-database/crates/sdkwork-database-spi", package = "sdkwork-database-spi" }
+sdkwork_database_sqlx = { path = "../sdkwork-database/crates/sdkwork-database-sqlx", package = "sdkwork-database-sqlx" }
+sdkwork_commerce_order_repository_sqlx = { path = "../sdkwork-order/crates/sdkwork-commerce-order-repository-sqlx", package = "sdkwork-commerce-order-repository-sqlx" }
+sdkwork_commerce_order_service = { path = "../sdkwork-order/crates/sdkwork-commerce-order-service", package = "sdkwork-commerce-order-service" }
+sdkwork_commerce_payment_service = { path = "crates/sdkwork-commerce-payment-service", package = "sdkwork-commerce-payment-service" }
+sdkwork_commerce_payment_repository_sqlx = { path = "crates/sdkwork-commerce-payment-repository-sqlx", package = "sdkwork-commerce-payment-repository-sqlx" }
+sdkwork_router_payment_app_api = { path = "crates/sdkwork-router-payment-app-api", package = "sdkwork-router-payment-app-api" }
+sdkwork_router_payment_backend_api = { path = "crates/sdkwork-router-payment-backend-api", package = "sdkwork-router-payment-backend-api" }
+sdkwork_payment_database_host = { path = "crates/sdkwork-payment-database-host", package = "sdkwork-payment-database-host" }
+sdkwork_payment_service_host = { path = "crates/sdkwork-payment-service-host", package = "sdkwork-payment-service-host" }
