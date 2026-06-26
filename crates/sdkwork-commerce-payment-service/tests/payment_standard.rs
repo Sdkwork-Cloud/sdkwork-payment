@@ -7,7 +7,7 @@ use sdkwork_commerce_payment_service::{
 #[test]
 fn creates_payment_intent_with_method_provider_and_order_reference() {
     let intent = PaymentIntentDraft::new(
-        "tenant-1",
+        "100001",
         "order-1",
         "wechat_pay",
         "wechat_pay",

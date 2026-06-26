@@ -259,8 +259,8 @@ mod tests {
 
     #[test]
     fn stable_command_request_hash_is_deterministic() {
-        let first = stable_command_request_hash("scope", &["tenant-1", "request-1"]);
-        let second = stable_command_request_hash("scope", &["tenant-1", "request-1"]);
+        let first = stable_command_request_hash("scope", &["100001", "request-1"]);
+        let second = stable_command_request_hash("scope", &["100001", "request-1"]);
         assert_eq!(first, second);
         assert!(!first.is_empty());
     }
