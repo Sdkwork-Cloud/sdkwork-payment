@@ -1,8 +1,14 @@
 # Payment Technical Architecture
+Specs: ARCHITECTURE_DECISION_SPEC.md, DOCUMENTATION_SPEC.md
 
 Status: active
 Owner: SDKWork maintainers
 Updated: 2026-06-24
+
+## 1. Architecture Overview
+
+Describe the repository/application architecture.
+
 
 ## Capability stack
 
@@ -12,7 +18,7 @@ Updated: 2026-06-24
 | --- | --- |
 | Domain (Rust) | `crates/sdkwork-commerce-payment-service/` |
 | SQL | `crates/sdkwork-commerce-payment-repository-sqlx/` |
-| HTTP routers | `crates/sdkwork-router-payment-*-api/` |
+| HTTP routers | `crates/sdkwork-routes-payment-*-api/` |
 | API server | `crates/sdkwork-payment-api-server/` |
 | PC client | `apps/sdkwork-payment-pc/` |
 | Client facade | `packages/common/payment/sdkwork-payment-service/` |

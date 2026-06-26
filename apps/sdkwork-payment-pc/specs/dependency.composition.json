@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.dependency.composition",
+  "applicationCode": "payment",
+  "clientArchitecture": "pc",
+  "surfaces": [
+    {
+      "surface": "app",
+      "corePackage": "@sdkwork/payment-pc-core",
+      "sdkClients": [],
+      "reusableModules": [],
+      "hostAdapters": [],
+      "dependencyApiExports": [],
+      "dependencyApiSurfaces": []
+    }
+  ],
+  "buildToolEntries": {
+    "pnpm": {
+      "workspacePackages": [
+        "@sdkwork/payment-pc-core",
+        "@sdkwork/payment-pc-payment",
+        "@sdkwork/payment-pc-shell"
+      ]
+    }
+  }
+}

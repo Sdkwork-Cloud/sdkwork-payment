@@ -26,3 +26,11 @@ pub use refund_router::{
 };
 pub use routes::build_payment_app_router_with_framework;
 pub use web_bootstrap::wrap_router_with_web_framework_from_env;
+
+use axum::Router;
+use sdkwork_payment_service_host::PaymentServiceHost;
+use std::sync::Arc;
+
+pub async fn gateway_mount(host: Arc<PaymentServiceHost>) -> Router {
+    build_payment_app_router_with_framework(host).await
+}

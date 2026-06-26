@@ -13,7 +13,9 @@
     "test:vitest": "vitest run --config vitest.config.ts --configLoader native --pool vmThreads",
     "typecheck": "tsc --noEmit",
     "verify": "pnpm typecheck && pnpm test:vitest && cargo test --workspace",
-    "fmt:rust:check": "cargo fmt --all -- --check"
+    "fmt:rust:check": "cargo fmt --all -- --check",
+    "gateway:assembly:materialize": "node scripts/gateway/assembly-materialize.mjs",
+    "gateway:assembly:validate": "node scripts/gateway/assembly-validate.mjs"
   },
   "devDependencies": {
     "@sdkwork/appbase-pc-react": "workspace:*",

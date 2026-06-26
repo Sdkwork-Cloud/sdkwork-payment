@@ -15,3 +15,11 @@ pub use backend_payment_intent_router::{
     build_backend_payment_intent_router, CommerceBackendPaymentIntentStore,
 };
 pub use routes::build_payment_backend_router_with_framework;
+
+use axum::Router;
+use sdkwork_payment_service_host::PaymentServiceHost;
+use std::sync::Arc;
+
+pub async fn gateway_mount(host: Arc<PaymentServiceHost>) -> Router {
+    build_payment_backend_router_with_framework(host).await
+}

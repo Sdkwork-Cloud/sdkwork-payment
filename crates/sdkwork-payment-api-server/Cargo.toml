@@ -9,15 +9,12 @@ publish.workspace = true
 name = "payment-server"
 path = "src/main.rs"
 
-[lib]
-path = "src/lib.rs"
-
 [dependencies]
+sdkwork_payment_gateway_assembly = { package = "sdkwork-payment-gateway-assembly", path = "../sdkwork-payment-gateway-assembly" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-sdkwork_router_payment_app_api.workspace = true
-sdkwork_router_payment_backend_api.workspace = true
+sdkwork-web-bootstrap.workspace = true
 sdkwork_payment_service_host.workspace = true

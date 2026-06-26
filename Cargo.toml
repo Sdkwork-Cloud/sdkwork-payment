@@ -1,10 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/sdkwork-payment-gateway-assembly",
   "crates/sdkwork-commerce-payment-service",
   "crates/sdkwork-commerce-payment-repository-sqlx",
-  "crates/sdkwork-router-payment-app-api",
-  "crates/sdkwork-router-payment-backend-api",
+  "crates/sdkwork-routes-payment-app-api",
+  "crates/sdkwork-routes-payment-backend-api",
   "crates/sdkwork-payment-database-host",
   "crates/sdkwork-payment-service-host",
   "crates/sdkwork-payment-api-server",
@@ -35,6 +36,7 @@ sdkwork_commerce_contract_service = { path = "../sdkwork-commerce/crates/sdkwork
 sdkwork-web-core = { path = "../sdkwork-web-framework/crates/sdkwork-web-core" }
 sdkwork-web-axum = { path = "../sdkwork-web-framework/crates/sdkwork-web-axum" }
 sdkwork-web-contract = { path = "../sdkwork-web-framework/crates/sdkwork-web-contract" }
+sdkwork-web-bootstrap = { path = "../sdkwork-web-framework/crates/sdkwork-web-bootstrap" }
 sdkwork-iam-web-adapter = { path = "../sdkwork-iam/crates/sdkwork-iam-web-adapter" }
 sdkwork_iam_context_service = { path = "../sdkwork-iam/crates/sdkwork-iam-context-service", package = "sdkwork-iam-context-service" }
 sdkwork-database-config = { path = "../sdkwork-database/crates/sdkwork-database-config" }
@@ -49,7 +51,7 @@ sdkwork_commerce_order_repository_sqlx = { path = "../sdkwork-order/crates/sdkwo
 sdkwork_commerce_order_service = { path = "../sdkwork-order/crates/sdkwork-commerce-order-service", package = "sdkwork-commerce-order-service" }
 sdkwork_commerce_payment_service = { path = "crates/sdkwork-commerce-payment-service", package = "sdkwork-commerce-payment-service" }
 sdkwork_commerce_payment_repository_sqlx = { path = "crates/sdkwork-commerce-payment-repository-sqlx", package = "sdkwork-commerce-payment-repository-sqlx" }
-sdkwork_router_payment_app_api = { path = "crates/sdkwork-router-payment-app-api", package = "sdkwork-router-payment-app-api" }
-sdkwork_router_payment_backend_api = { path = "crates/sdkwork-router-payment-backend-api", package = "sdkwork-router-payment-backend-api" }
+sdkwork_routes_payment_app_api = { path = "crates/sdkwork-routes-payment-app-api", package = "sdkwork-routes-payment-app-api" }
+sdkwork_routes_payment_backend_api = { path = "crates/sdkwork-routes-payment-backend-api", package = "sdkwork-routes-payment-backend-api" }
 sdkwork_payment_database_host = { path = "crates/sdkwork-payment-database-host", package = "sdkwork-payment-database-host" }
 sdkwork_payment_service_host = { path = "crates/sdkwork-payment-service-host", package = "sdkwork-payment-service-host" }
