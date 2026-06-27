@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
 use crate::command_headers::validate_app_write_payload;
+use crate::problem_details::problem_error_response;
 use crate::subject::app_runtime_subject_from_extension;
 
 pub type CommercePaymentIntentFuture<'a, T> =
@@ -161,14 +162,6 @@ impl<T: Serialize> AppPaymentIntentApiResult<T> {
             code: "0".to_owned(),
             msg: "success".to_owned(),
             data: Some(data),
-        }
-    }
-
-    fn error(code: &str, msg: impl Into<String>) -> Self {
-        Self {
-            code: code.to_owned(),
-            msg: msg.into(),
-            data: None,
         }
     }
 }
@@ -370,49 +363,27 @@ fn map_payment_attempt(value: CreateOwnerPaymentAttemptOutcome) -> PaymentAttemp
 }
 
 fn unauthorized_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(AppPaymentIntentApiResult::<()>::error("4010", message)),
-    )
-        .into_response()
+    problem_error_response(StatusCode::UNAUTHORIZED, "4010", message)
 }
 
 fn validation_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(AppPaymentIntentApiResult::<()>::error("4001", message)),
-    )
-        .into_response()
+    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
 }
 
 fn not_found_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(AppPaymentIntentApiResult::<()>::error("4040", message)),
-    )
-        .into_response()
+    problem_error_response(StatusCode::NOT_FOUND, "4040", message)
 }
 
 fn payment_intent_system_response(context: &str, error: CommerceServiceError) -> Response {
     match error.code() {
         "validation" => validation_response(error.message()),
         "not_found" => not_found_response(error.message()),
-        "conflict" => (
-            StatusCode::CONFLICT,
-            Json(AppPaymentIntentApiResult::<()>::error(
-                "4090",
-                error.message(),
-            )),
-        )
-            .into_response(),
+        "conflict" => problem_error_response(StatusCode::CONFLICT, "4090", error.message()),
         "unauthenticated" => unauthorized_response(error.message()),
-        _ => (
+        _ => problem_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(AppPaymentIntentApiResult::<()>::error(
-                "5000",
-                format!("{context}: {}", error.message()),
-            )),
-        )
-            .into_response(),
+            "5000",
+            format!("{context}: {}", error.message()),
+        ),
     }
 }

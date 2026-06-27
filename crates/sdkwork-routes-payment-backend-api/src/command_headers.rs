@@ -1,7 +1,8 @@
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::Serialize;
+
+use crate::problem_details::problem_error_response;
 
 pub(crate) const IDEMPOTENCY_KEY_HEADER: &str = "Idempotency-Key";
 pub(crate) const REQUEST_HASH_HEADER: &str = "Sdkwork-Request-Hash";
@@ -18,12 +19,6 @@ pub(crate) struct AppWriteCommandHeaders {
 pub(crate) enum WriteCommandHeaderError {
     MissingHeader(&'static str),
     InvalidHeader(&'static str),
-}
-
-#[derive(Debug, Serialize)]
-struct CommandHeaderErrorBody {
-    code: &'static str,
-    msg: String,
 }
 
 pub(crate) fn stable_command_request_hash(scope: &str, parts: &[&str]) -> String {
@@ -217,25 +212,15 @@ fn optional_text_header(headers: &HeaderMap, name: &'static str) -> Option<Strin
 }
 
 fn command_header_error_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(CommandHeaderErrorBody {
-            code: "4010",
-            msg: message.into(),
-        }),
-    )
-        .into_response()
+    // H12 修复：缺失 Idempotency-Key / Sdkwork-Request-Hash 属于请求参数缺失，应返回 400 Bad Request，
+    // 而非 401 Unauthorized（鉴权不存在）。原 401 会让客户端误以为凭证失效。
+    // C16 修复：使用 RFC 9457 Problem+json 响应。
+    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
 }
 
 fn validation_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(CommandHeaderErrorBody {
-            code: "4001",
-            msg: message.into(),
-        }),
-    )
-        .into_response()
+    // C16 修复：使用 RFC 9457 Problem+json 响应。
+    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
 }
 
 #[cfg(test)]

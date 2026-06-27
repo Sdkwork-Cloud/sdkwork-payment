@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "pnpm --dir apps/sdkwork-payment-pc dev",
     "build": "pnpm --dir apps/sdkwork-payment-pc build",
-    "start": "cargo run -p sdkwork-payment-api-server --bin payment-server",
+    "start": "cargo run -p sdkwork-payment-standalone-gateway --bin payment-server",
     "test": "pnpm test:node && pnpm test:vitest && cargo test --workspace",
     "test:node": "node --test --test-reporter=spec tests/static/placeholder.test.mjs",
     "test:vitest": "vitest run --config vitest.config.ts --configLoader native --pool vmThreads",

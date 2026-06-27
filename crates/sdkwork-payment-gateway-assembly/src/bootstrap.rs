@@ -3,6 +3,7 @@
 
 use axum::Router;
 use sdkwork_payment_service_host::PaymentServiceHost;
+use sdkwork_web_bootstrap::ContractFallbackConfig;
 use std::sync::Arc;
 
 pub struct ApplicationAssembly {
@@ -14,4 +15,26 @@ pub async fn assemble_application_router(host: Arc<PaymentServiceHost>) -> Appli
     router = router.merge(sdkwork_routes_payment_app_api::gateway_mount(host.clone()).await);
     router = router.merge(sdkwork_routes_payment_backend_api::gateway_mount(host).await);
     ApplicationAssembly { router }
+}
+
+/// C17 修复：构造组合的 contract fallback config。
+///
+/// 合并 app-api 与 backend-api 两个 route manifest 的所有 (method, path) 对，
+/// 供 `service_router` 挂载为 axum `fallback`：
+/// - manifest 内声明但运行时未挂载 handler 的路径 → 501 Problem+json
+/// - 完全未知的路径 → 404 Problem+json
+///
+/// 这样即使某些 manifest 路由尚未实现 handler，客户端也能得到符合 RFC 9457 的
+/// 标准错误响应，而非 axum 默认的空 404。
+pub fn gateway_contract_fallback_config() -> ContractFallbackConfig {
+    let app_manifest = sdkwork_routes_payment_app_api::gateway_route_manifest();
+    let backend_manifest = sdkwork_routes_payment_backend_api::gateway_route_manifest();
+
+    let mut config = ContractFallbackConfig::from_manifest(&app_manifest);
+    config.manifest_paths.extend(
+        ContractFallbackConfig::from_manifest(&backend_manifest)
+            .manifest_paths
+            .into_iter(),
+    );
+    config
 }

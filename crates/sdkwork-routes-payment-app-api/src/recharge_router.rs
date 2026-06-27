@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
 use crate::command_headers::validate_app_write_payload;
+use crate::problem_details::problem_error_response;
 use crate::subject::{
     app_runtime_subject_from_extension, optional_app_runtime_subject_from_headers,
     AppRuntimeSubject,
@@ -264,16 +265,6 @@ impl<T: Serialize> AppRechargeApiResult<T> {
     }
 }
 
-impl AppRechargeApiResult<()> {
-    fn error(code: impl Into<String>, msg: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            msg: msg.into(),
-            data: None,
-        }
-    }
-}
-
 pub fn app_recharge_checkout_router_with_sqlite_pool(pool: SqlitePool) -> Router {
     build_app_recharge_checkout_router(Arc::new(SqliteCommerceRechargeStore::new(pool)))
 }
@@ -431,14 +422,11 @@ async fn fetch_checkout_status(
         Ok(Some(snapshot)) => {
             Json(AppRechargeApiResult::success(map_checkout_status(snapshot))).into_response()
         }
-        Ok(None) => (
+        Ok(None) => problem_error_response(
             StatusCode::CONFLICT,
-            Json(AppRechargeApiResult::error(
-                "4090",
-                "checkout order was not found",
-            )),
-        )
-            .into_response(),
+            "4090",
+            "checkout order was not found",
+        ),
         Err(error) => commerce_error_response(error),
     }
 }
@@ -617,38 +605,20 @@ fn commerce_error_response(error: CommerceServiceError) -> Response {
     match error.code() {
         "validation" => validation_response(error.message()),
         "unauthenticated" | "unauthorized" => unauthorized_response(error.message().to_string()),
-        "not-found" => (
-            StatusCode::NOT_FOUND,
-            Json(AppRechargeApiResult::error("4040", error.message())),
-        )
-            .into_response(),
-        "conflict" | "invalid-state" | "unsupported-capability" => (
-            StatusCode::CONFLICT,
-            Json(AppRechargeApiResult::error("4090", error.message())),
-        )
-            .into_response(),
-        _ => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(AppRechargeApiResult::error("5000", error.message())),
-        )
-            .into_response(),
+        "not-found" => problem_error_response(StatusCode::NOT_FOUND, "4040", error.message()),
+        "conflict" | "invalid-state" | "unsupported-capability" => {
+            problem_error_response(StatusCode::CONFLICT, "4090", error.message())
+        }
+        _ => problem_error_response(StatusCode::INTERNAL_SERVER_ERROR, "5000", error.message()),
     }
 }
 
 fn unauthorized_response(message: String) -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(AppRechargeApiResult::error("4010", message)),
-    )
-        .into_response()
+    problem_error_response(StatusCode::UNAUTHORIZED, "4010", message)
 }
 
 fn validation_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(AppRechargeApiResult::error("4001", message)),
-    )
-        .into_response()
+    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
 }
 
 fn fallback_request_no(

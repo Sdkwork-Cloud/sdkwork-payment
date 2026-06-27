@@ -1,4 +1,4 @@
-﻿import {
+import {
   APP_PAYMENT_METHOD_TREE,
   type ClientFromMethodTree,
   type PaymentAppSdkClient,
@@ -118,10 +118,61 @@ export function createSdkworkPaymentAppService(
   };
 }
 
+/**
+ * C16/C17 对齐：RFC 9457 Problem+json 错误响应。
+ *
+ * 后端所有错误响应统一使用 `application/problem+json`，包含
+ * `type/title/status/detail/code/traceId` 字段。前端 MUST 识别此结构并抛出
+ * 结构化错误，而非静默吞掉或将 problem 对象误判为成功 data。
+ */
+export interface SdkworkPaymentProblemDetail {
+  type?: string;
+  title?: string;
+  status?: number;
+  detail?: string;
+  code?: string;
+  traceId?: string;
+  errors?: unknown[];
+  [key: string]: unknown;
+}
+
+export class SdkworkPaymentProblemError extends Error {
+  readonly problem: SdkworkPaymentProblemDetail;
+  readonly statusCode: number | undefined;
+  readonly errorCode: string | undefined;
+  readonly traceId: string | undefined;
+
+  constructor(problem: SdkworkPaymentProblemDetail, fallbackMessage: string) {
+    const message = String(problem.detail || problem.title || fallbackMessage).trim();
+    super(message);
+    this.name = "SdkworkPaymentProblemError";
+    this.problem = problem;
+    this.statusCode = problem.status;
+    this.errorCode = problem.code;
+    this.traceId = problem.traceId;
+  }
+}
+
+function isProblemDetail(value: unknown): value is SdkworkPaymentProblemDetail {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  // RFC 9457 Problem+json 至少包含 type 和 title 字段
+  return typeof record.type === "string" && typeof record.title === "string";
+}
+
 export function unwrapSdkworkPaymentResponse<T>(value: unknown, fallbackMessage = "Request failed."): T {
   if (!value || typeof value !== "object") {
     return value as T;
   }
+
+  // C16 对齐：优先检测 RFC 9457 Problem+json 错误响应，避免将 problem 对象
+  // 误判为成功 data 静默返回。
+  if (isProblemDetail(value)) {
+    throw new SdkworkPaymentProblemError(value, fallbackMessage);
+  }
+
   if (!("data" in value) && !("code" in value)) {
     return value as T;
   }

@@ -8,7 +8,7 @@ members = [
   "crates/sdkwork-routes-payment-backend-api",
   "crates/sdkwork-payment-database-host",
   "crates/sdkwork-payment-service-host",
-  "crates/sdkwork-payment-api-server",
+  "crates/sdkwork-payment-standalone-gateway",
 ]
 
 [workspace.package]
@@ -19,14 +19,14 @@ publish = false
 
 [workspace.dependencies]
 axum = "0.8"
-tokio = { version = "1.51", features = ["macros", "rt-multi-thread", "net", "sync"] }
+tokio = { version = "1.51", features = ["macros", "rt-multi-thread", "net", "sync", "signal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tower = "0.5"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "timeout", "limit"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 dotenvy = "0.15"

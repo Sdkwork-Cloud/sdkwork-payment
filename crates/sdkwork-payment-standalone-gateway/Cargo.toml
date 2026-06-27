@@ -1,12 +1,12 @@
 [package]
-name = "sdkwork-payment-api-server"
+name = "sdkwork-payment-standalone-gateway"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "payment-server"
+name = "sdkwork-payment-standalone-gateway"
 path = "src/main.rs"
 
 [dependencies]

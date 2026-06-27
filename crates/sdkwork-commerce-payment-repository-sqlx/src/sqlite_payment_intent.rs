@@ -68,7 +68,7 @@ impl SqliteCommercePaymentIntentStore {
         }
 
         let mut tx =
-            self.pool().begin().await.map_err(|error| {
+            self.pool().begin_with("BEGIN IMMEDIATE").await.map_err(|error| {
                 store_error("failed to begin payment intent transaction", error)
             })?;
         let method = load_payment_method_for_intent(&mut tx, &command).await?;
@@ -76,7 +76,8 @@ impl SqliteCommercePaymentIntentStore {
         let payment_intent_id = payment_intent_id(&command);
         let status = CommercePaymentStatus::Pending.as_str();
 
-        sqlx::query(
+        // C5 修复：使用 ON CONFLICT (id) DO NOTHING 原子化幂等插入，消除 TOCTOU 竞态。
+        let inserted = sqlx::query(
             r#"
             INSERT INTO commerce_payment_intent
                 (id, tenant_id, organization_id, owner_user_id, order_id, payment_intent_no,
@@ -84,6 +85,7 @@ impl SqliteCommercePaymentIntentStore {
                  idempotency_key, created_at, updated_at)
             VALUES
                 (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CNY', ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO NOTHING
             "#,
         )
         .bind(&payment_intent_id)
@@ -103,6 +105,21 @@ impl SqliteCommercePaymentIntentStore {
         .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to insert payment intent", error))?;
+
+        if inserted.rows_affected() == 0 {
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit payment intent transaction after conflict", error)
+            })?;
+            if let Some(existing) = self
+                .find_owner_payment_intent_by_idempotency(&command)
+                .await?
+            {
+                return Ok(existing);
+            }
+            return Err(CommerceServiceError::conflict(
+                "payment intent idempotency conflict: existing record not found",
+            ));
+        }
 
         tx.commit()
             .await

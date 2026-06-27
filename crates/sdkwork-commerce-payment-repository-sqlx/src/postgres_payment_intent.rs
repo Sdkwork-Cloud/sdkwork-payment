@@ -76,7 +76,9 @@ impl PostgresCommercePaymentIntentStore {
         let payment_intent_id = payment_intent_id(&command);
         let status = CommercePaymentStatus::Pending.as_str();
 
-        sqlx::query(
+        // C5 修复：使用 ON CONFLICT (id) DO NOTHING 原子化幂等插入，消除 SELECT-then-INSERT 的 TOCTOU 竞态。
+        // 并发同 idempotency_key 请求：第一个 INSERT 成功，第二个 conflict 后回查已存在记录返回。
+        let inserted = sqlx::query(
             r#"
             INSERT INTO commerce_payment_intent
                 (id, tenant_id, organization_id, owner_user_id, order_id, payment_intent_no,
@@ -84,6 +86,7 @@ impl PostgresCommercePaymentIntentStore {
                  idempotency_key, created_at, updated_at)
             VALUES
                 ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'CNY', $10, $11, $12, $13, $14)
+            ON CONFLICT (id) DO NOTHING
            "#,
         )
         .bind(&payment_intent_id)
@@ -103,6 +106,23 @@ impl PostgresCommercePaymentIntentStore {
         .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to insert payment intent", error))?;
+
+        if inserted.rows_affected() == 0 {
+            // 并发竞态下另一请求已写入，回查并返回已有记录，保证幂等语义。
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit payment intent transaction after conflict", error)
+            })?;
+            if let Some(existing) = self
+                .find_owner_payment_intent_by_idempotency(&command)
+                .await?
+            {
+                return Ok(existing);
+            }
+            // 极端情况：conflict 但查不到（如已被删除），回退为错误而非裸 panic。
+            return Err(CommerceServiceError::conflict(
+                "payment intent idempotency conflict: existing record not found",
+            ));
+        }
 
         tx.commit()
             .await

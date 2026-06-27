@@ -9,6 +9,11 @@ use sdkwork_commerce_payment_service::{
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
+use crate::shared::{
+    current_timestamp_string, money_to_minor_cents, resolve_refund_amount,
+    stable_storage_id, store_error, validate_refund_bounds,
+};
+
 
 
 #[derive(Debug, Clone)]
@@ -48,7 +53,9 @@ impl PostgresCommerceRefundStore {
         let Some(detail) = self.order_store.retrieve_owner_order(detail_query).await? else {
             return Err(CommerceServiceError::not_found("order was not found"));
         };
-        if detail.summary.status != "paid" && detail.summary.pay_time.is_none() {
+        // C3 修复：退款资格必须用 OR 语义——订单状态非 paid 或 无支付时间 任一不满足即拒绝。
+        // 原逻辑用 && 导致 status=refunded 但 pay_time 非空的订单仍可退款。
+        if detail.summary.status != "paid" || detail.summary.pay_time.is_none() {
             return Err(CommerceServiceError::conflict(
                 "order is not eligible for refund",
             ));
@@ -62,10 +69,16 @@ impl PostgresCommerceRefundStore {
                 .ok_or_else(|| CommerceServiceError::not_found("payment attempt was not found"))?,
         };
 
-        let refund_amount = command
-            .amount
-            .clone()
-            .unwrap_or_else(|| detail.summary.total_amount.as_str().to_owned());
+        let refund_amount = resolve_refund_amount(&command, &detail.summary.total_amount)?;
+        let total_minor = money_to_minor_cents(detail.summary.total_amount.as_str())?;
+        let refund_minor = money_to_minor_cents(&refund_amount)?;
+        validate_refund_bounds(refund_minor, total_minor)?;
+        let already_refunded_minor = self.sum_refunded_amount(&command).await?;
+        if refund_minor > total_minor.saturating_sub(already_refunded_minor) {
+            return Err(CommerceServiceError::conflict(
+                "refund amount exceeds remaining refundable amount",
+            ));
+        }
 
         let mut tx = self
             .pool()
@@ -150,7 +163,8 @@ impl PostgresCommerceRefundStore {
            "#,
         );
         if query.status.is_some() {
-            sql.push_str(" AND r.status = CAST(? AS TEXT)");
+            // C6 修复：PostgreSQL 占位符必须用 $N，原代码误用 SQLite 的 ? 会导致 sqlx 解析失败。
+            sql.push_str(" AND r.status = CAST($5 AS TEXT)");
         }
         sql.push_str(" ORDER BY r.created_at DESC, r.id DESC");
 
@@ -252,6 +266,31 @@ impl PostgresCommerceRefundStore {
 
         Ok(row.map(|row| string_cell(&row, "id")))
     }
+
+    /// C4 修复：累计该订单下已发起/处理中/成功的退款金额（minor cents），
+    /// 不含 failed/canceled 的退款，避免重复计数。
+    async fn sum_refunded_amount(
+        &self,
+        command: &CreateOwnerRefundCommand,
+    ) -> Result<i64, CommerceServiceError> {
+        let row = sqlx::query(
+            r#"
+            SELECT COALESCE(SUM(CAST(amount AS NUMERIC)), 0) AS refunded_total
+            FROM commerce_refund
+            WHERE tenant_id = CAST($1 AS TEXT)
+              AND order_id = CAST($2 AS TEXT)
+              AND LOWER(COALESCE(status, '')) IN ('submitted', 'processing', 'succeeded')
+           "#,
+        )
+        .bind(&command.tenant_id)
+        .bind(&command.order_id)
+        .fetch_one(self.pool())
+        .await
+        .map_err(|error| store_error("failed to sum refunded amount", error))?;
+
+        let total_str = string_cell(&row, "refunded_total");
+        money_to_minor_cents(&total_str)
+    }
 }
 
 async fn insert_refund_event(
@@ -319,37 +358,6 @@ fn refund_id(command: &CreateOwnerRefundCommand) -> String {
         &command.order_id,
         &command.idempotency_key,
     ])
-}
-
-fn stable_storage_id(parts: &[&str]) -> String {
-    parts
-        .iter()
-        .map(|part| {
-            part.chars()
-                .map(|character| {
-                    if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
-                        character
-                    } else {
-                        '-'
-                    }
-                })
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-fn store_error(message: &str, error: impl std::fmt::Display) -> CommerceServiceError {
-    CommerceServiceError::storage(format!("{message}: {error}"))
-}
-
-fn current_timestamp_string() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    format!("{seconds}")
 }
 
 fn optional_string_cell(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {

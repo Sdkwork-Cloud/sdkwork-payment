@@ -6,7 +6,7 @@
     "displayName": "SDKWork Commerce Payment",
     "version": "0.1.0",
     "type": "rust-crate",
-    "root": "sdkwork-commerce/crates/sdkwork-commerce-payment-service",
+    "root": "crates/sdkwork-commerce-payment-service",
     "domain": "commerce",
     "declaredDomain": null,
     "capability": "payment",

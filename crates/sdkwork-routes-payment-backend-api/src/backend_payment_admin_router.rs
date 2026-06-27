@@ -15,10 +15,23 @@ use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
 use crate::command_headers::{
     validate_write_payload, AppWriteCommandHeaders, WriteCommandHeaderError,
 };
-use crate::subject::app_runtime_subject_from_extension;
+use crate::problem_details::problem_error_response;
+use crate::subject::backend_runtime_subject_from_extension;
 
 pub type CommerceBackendPaymentAdminFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CommerceServiceError>> + Send + 'a>>;
+
+/// C15 修复：webhook 单事件最大重放次数。超过即拒绝并返回 409 Conflict。
+/// 行业实践（Stripe/Adyen）通常限制 5-10 次，这里取 5 次作为保守上限。
+const WEBHOOK_MAX_RETRIES: i64 = 5;
+
+/// C15 修复：webhook 重放结果，用于 handler 区分 404/409/200。
+#[derive(Debug, Clone, Serialize)]
+pub enum WebhookReplayResult {
+    Queued(serde_json::Value),
+    NotFound,
+    LimitExceeded { current_retries: i64 },
+}
 
 pub trait CommerceBackendPaymentAdminStore: Send + Sync {
     fn list_payment_methods<'a>(
@@ -81,7 +94,7 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
         &'a self,
         scope: BackendTenantScope,
         event_id: String,
-    ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value>;
+    ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult>;
 
     fn list_reconciliation_runs<'a>(
         &'a self,
@@ -728,21 +741,45 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
         &'a self,
         scope: BackendTenantScope,
         event_id: String,
-    ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value> {
+    ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult> {
         Box::pin(async move {
             let now = current_timestamp_string();
+            // C15 修复：UPDATE 带 retries < MAX 谓词，原子化阻止超限重放。
             let row = sqlx::query(
-                "UPDATE commerce_payment_webhook_event SET status = 'queued', processed_at = NULL, retries = COALESCE(retries, 0) + 1, updated_at = ? WHERE event_id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) RETURNING id, event_id, provider_code, event_type, status, received_at, processed_at, retries",
+                "UPDATE commerce_payment_webhook_event SET status = 'queued', processed_at = NULL, retries = COALESCE(retries, 0) + 1, updated_at = ? WHERE event_id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) AND COALESCE(retries, 0) < ? RETURNING id, event_id, provider_code, event_type, status, received_at, processed_at, retries",
             )
             .bind(&now)
             .bind(&event_id)
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
             .bind(scope.organization_id.as_deref())
-            .fetch_one(&self.pool)
+            .bind(WEBHOOK_MAX_RETRIES)
+            .fetch_optional(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to replay webhook event: {error}")))?;
-            Ok(map_webhook_event_sqlite(&row))
+
+            if let Some(row) = row {
+                return Ok(WebhookReplayResult::Queued(map_webhook_event_sqlite(&row)));
+            }
+
+            // C15 修复：UPDATE 未命中，需区分 404（事件不存在）与 409（达到重放上限）。
+            let existing = sqlx::query(
+                "SELECT retries FROM commerce_payment_webhook_event WHERE event_id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))",
+            )
+            .bind(&event_id)
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .bind(scope.organization_id.as_deref())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| CommerceServiceError::storage(format!("failed to inspect webhook event: {error}")))?;
+
+            match existing {
+                None => Ok(WebhookReplayResult::NotFound),
+                Some(row) => Ok(WebhookReplayResult::LimitExceeded {
+                    current_retries: row.try_get::<i64, _>("retries").unwrap_or(WEBHOOK_MAX_RETRIES),
+                }),
+            }
         })
     }
 
@@ -1194,20 +1231,43 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
         &'a self,
         scope: BackendTenantScope,
         event_id: String,
-    ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value> {
+    ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult> {
         Box::pin(async move {
             let now = current_timestamp_string();
+            // C15 修复：UPDATE 带 retries < MAX 谓词，原子化阻止超限重放。
             let row = sqlx::query(
-                "UPDATE commerce_payment_webhook_event SET status = 'queued', processed_at = NULL, retries = COALESCE(retries, 0) + 1, updated_at = $1 WHERE event_id = CAST($2 AS TEXT) AND tenant_id = CAST($3 AS TEXT) AND (organization_id IS NULL AND $4::text IS NULL OR organization_id = CAST($4 AS TEXT)) RETURNING id, event_id, provider_code, event_type, status, received_at, processed_at, retries",
+                "UPDATE commerce_payment_webhook_event SET status = 'queued', processed_at = NULL, retries = COALESCE(retries, 0) + 1, updated_at = $1 WHERE event_id = CAST($2 AS TEXT) AND tenant_id = CAST($3 AS TEXT) AND (organization_id IS NULL AND $4::text IS NULL OR organization_id = CAST($4 AS TEXT)) AND COALESCE(retries, 0) < $5 RETURNING id, event_id, provider_code, event_type, status, received_at, processed_at, retries",
             )
             .bind(&now)
             .bind(&event_id)
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
-            .fetch_one(&self.pool)
+            .bind(WEBHOOK_MAX_RETRIES)
+            .fetch_optional(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to replay webhook event: {error}")))?;
-            Ok(map_webhook_event_pg(&row))
+
+            if let Some(row) = row {
+                return Ok(WebhookReplayResult::Queued(map_webhook_event_pg(&row)));
+            }
+
+            // C15 修复：UPDATE 未命中，需区分 404（事件不存在）与 409（达到重放上限）。
+            let existing = sqlx::query(
+                "SELECT retries FROM commerce_payment_webhook_event WHERE event_id = CAST($1 AS TEXT) AND tenant_id = CAST($2 AS TEXT) AND (organization_id IS NULL AND $3::text IS NULL OR organization_id = CAST($3 AS TEXT))",
+            )
+            .bind(&event_id)
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| CommerceServiceError::storage(format!("failed to inspect webhook event: {error}")))?;
+
+            match existing {
+                None => Ok(WebhookReplayResult::NotFound),
+                Some(row) => Ok(WebhookReplayResult::LimitExceeded {
+                    current_retries: row.try_get::<i64, _>("retries").unwrap_or(WEBHOOK_MAX_RETRIES),
+                }),
+            }
         })
     }
 
@@ -1274,14 +1334,6 @@ impl<T: Serialize> BackendPaymentAdminApiResult<T> {
             data: Some(data),
         }
     }
-
-    fn error(code: &str, msg: impl Into<String>) -> Self {
-        Self {
-            code: code.to_owned(),
-            msg: msg.into(),
-            data: None,
-        }
-    }
 }
 
 pub fn backend_payment_admin_router_with_sqlite_pool(pool: SqlitePool) -> Router {
@@ -1345,7 +1397,7 @@ async fn list_methods(
     Query(params): Query<BackendPaymentMethodListParams>,
     runtime_context: Option<Extension<IamAppContext>>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1370,7 +1422,7 @@ async fn create_method(
     headers: HeaderMap,
     Json(body): Json<UpsertPaymentMethodBody>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1410,7 +1462,7 @@ async fn update_method(
     Path(method_key): Path<String>,
     Json(body): Json<UpsertPaymentMethodBody>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1445,7 +1497,7 @@ async fn list_provider_accounts(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1494,7 +1546,7 @@ async fn upsert_provider_account_inner(
     provider_account_id: Option<String>,
     body: UpsertProviderAccountBody,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1543,7 +1595,7 @@ async fn list_channels(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1563,7 +1615,7 @@ async fn create_channel(
     headers: HeaderMap,
     Json(body): Json<UpsertChannelBody>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1604,7 +1656,7 @@ async fn list_route_rules(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1646,7 +1698,7 @@ async fn upsert_route_rule_inner(
     route_rule_id: Option<String>,
     body: UpsertRouteRuleBody,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1694,7 +1746,7 @@ async fn delete_route_rule(
     runtime_context: Option<Extension<IamAppContext>>,
     Path(route_rule_id): Path<String>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1712,7 +1764,7 @@ async fn list_attempts(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1730,7 +1782,7 @@ async fn list_webhook_events(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1751,7 +1803,7 @@ async fn replay_webhook_event(
     runtime_context: Option<Extension<IamAppContext>>,
     Path(event_id): Path<String>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1760,7 +1812,21 @@ async fn replay_webhook_event(
         organization_id: subject.organization_id,
     };
     match state.store.replay_webhook_event(scope, event_id).await {
-        Ok(item) => Json(BackendPaymentAdminApiResult::success(item)).into_response(),
+        Ok(WebhookReplayResult::Queued(item)) => {
+            Json(BackendPaymentAdminApiResult::success(item)).into_response()
+        }
+        Ok(WebhookReplayResult::NotFound) => problem_error_response(
+            StatusCode::NOT_FOUND,
+            "4040",
+            "payment webhook event was not found",
+        ),
+        Ok(WebhookReplayResult::LimitExceeded { current_retries }) => problem_error_response(
+            StatusCode::CONFLICT,
+            "4091",
+            format!(
+                "webhook event has reached the replay limit ({WEBHOOK_MAX_RETRIES}); current retries = {current_retries}"
+            ),
+        ),
         Err(error) => backend_payment_error_response("payment webhook replay failed", error),
     }
 }
@@ -1769,7 +1835,7 @@ async fn list_reconciliation_runs(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1791,7 +1857,7 @@ async fn create_reconciliation_run(
     headers: HeaderMap,
     Json(body): Json<CreateReconciliationRunBody>,
 ) -> Response {
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
@@ -1848,22 +1914,17 @@ fn map_method(value: BackendPaymentMethodView) -> BackendPaymentMethodResponse {
 }
 
 fn backend_payment_error_response(context: &str, error: CommerceServiceError) -> Response {
-    (
+    // C16 修复：500 错误使用 Problem+json。
+    problem_error_response(
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(BackendPaymentAdminApiResult::<()>::error(
-            "5000",
-            format!("{context}: {}", error.message()),
-        )),
+        "5000",
+        format!("{context}: {}", error.message()),
     )
-        .into_response()
 }
 
 fn unauthorized_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(BackendPaymentAdminApiResult::<()>::error("4010", message)),
-    )
-        .into_response()
+    // C16 修复：401 错误使用 Problem+json。
+    problem_error_response(StatusCode::UNAUTHORIZED, "4010", message)
 }
 
 fn map_method_row_sqlite(row: &SqliteRow) -> BackendPaymentMethodView {
@@ -2060,11 +2121,8 @@ fn backend_write_header_error(error: WriteCommandHeaderError) -> Response {
         WriteCommandHeaderError::MissingHeader(name) => format!("{name} header is required"),
         WriteCommandHeaderError::InvalidHeader(message) => message.to_owned(),
     };
-    (
-        StatusCode::BAD_REQUEST,
-        Json(BackendPaymentAdminApiResult::<()>::error("4001", message)),
-    )
-        .into_response()
+    // C16 修复：400 错误使用 Problem+json。
+    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
 }
 
 fn current_timestamp_string() -> String {

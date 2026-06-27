@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::extract::{Extension, Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -22,6 +22,8 @@ use sdkwork_iam_context_service::IamAppContext;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
+use crate::command_headers::validate_app_write_payload;
+use crate::problem_details::problem_error_response;
 use crate::subject::app_runtime_subject_from_extension;
 
 pub type CommercePaymentFuture<'a, T> =
@@ -165,7 +167,7 @@ struct ReconcilePaymentRequest {
     reconcile_type: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreatePaymentRequest {
     order_id: String,
@@ -208,14 +210,6 @@ impl<T: Serialize> AppPaymentApiResult<T> {
             code: "0".to_owned(),
             msg: "success".to_owned(),
             data: Some(data),
-        }
-    }
-
-    fn error(code: &str, msg: impl Into<String>) -> Self {
-        Self {
-            code: code.to_owned(),
-            msg: msg.into(),
-            data: None,
         }
     }
 }
@@ -766,11 +760,23 @@ async fn reconcile_payment(
 async fn create_payment(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    headers: HeaderMap,
     body: Json<CreatePaymentRequest>,
 ) -> Response {
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
+    };
+    // C9 修复：所有写操作必须校验 Idempotency-Key 与 Sdkwork-Request-Hash 命令头，
+    // 保证客户端重试不会触发非幂等副作用。原代码完全跳过此校验。
+    let _write_headers = match validate_app_write_payload(
+        &headers,
+        "payment-create",
+        &body.0,
+        |idempotency_key| format!("payment-create-{idempotency_key}"),
+    ) {
+        Ok(headers) => headers,
+        Err(response) => return response,
     };
     let payment_method = body
         .payment_method
@@ -981,39 +987,19 @@ fn payment_system_response(context: &str, error: CommerceServiceError) -> Respon
         "validation" => validation_response(error.message()),
         "unauthenticated" | "unauthorized" => unauthorized_response(error.message().to_owned()),
         "not-found" => not_found_response(error.message()),
-        "conflict" => (
-            StatusCode::CONFLICT,
-            Json(AppPaymentApiResult::<()>::error("4090", error.message())),
-        )
-            .into_response(),
-        _ => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(AppPaymentApiResult::<()>::error("5000", error.message())),
-        )
-            .into_response(),
+        "conflict" => problem_error_response(StatusCode::CONFLICT, "4090", error.message()),
+        _ => problem_error_response(StatusCode::INTERNAL_SERVER_ERROR, "5000", error.message()),
     }
 }
 
 fn unauthorized_response(message: String) -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(AppPaymentApiResult::<()>::error("4010", message)),
-    )
-        .into_response()
+    problem_error_response(StatusCode::UNAUTHORIZED, "4010", message)
 }
 
 fn validation_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(AppPaymentApiResult::<()>::error("4001", message)),
-    )
-        .into_response()
+    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
 }
 
 fn not_found_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(AppPaymentApiResult::<()>::error("4040", message)),
-    )
-        .into_response()
+    problem_error_response(StatusCode::NOT_FOUND, "4040", message)
 }

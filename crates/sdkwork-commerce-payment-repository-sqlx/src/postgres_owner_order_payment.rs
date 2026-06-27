@@ -27,13 +27,22 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         command: CancelOwnerOrderCommand,
     ) -> Result<(), CommerceServiceError> {
         let now = current_command_timestamp();
-        sqlx::query(
+        // C1/C2 修复：取消操作必须在单事务内执行，且只能取消未终结状态的支付意图/尝试，
+        // 严禁覆盖 succeeded/refunded/closed 等终态，避免"已收款但订单显示已取消"的资金事故。
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error("failed to begin cancel owner order payment transaction", error))?;
+
+        let affected_intent = sqlx::query(
             r#"
             UPDATE commerce_payment_intent
             SET status = $1, updated_at = $2
             WHERE tenant_id = CAST($3 AS TEXT)
               AND owner_user_id = CAST($4 AS TEXT)
               AND order_id = CAST($5 AS TEXT)
+              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
             "#,
         )
         .bind(CommercePaymentStatus::Canceled.as_str())
@@ -41,7 +50,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .bind(&command.tenant_id)
         .bind(&command.owner_user_id)
         .bind(&command.order_id)
-        .execute(self.pool())
+        .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to close order payment intents", error))?;
 
@@ -52,6 +61,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             WHERE tenant_id = CAST($3 AS TEXT)
               AND owner_user_id = CAST($4 AS TEXT)
               AND order_id = CAST($5 AS TEXT)
+              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
             "#,
         )
         .bind(CommercePaymentStatus::Canceled.as_str())
@@ -59,9 +69,41 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .bind(&command.tenant_id)
         .bind(&command.owner_user_id)
         .bind(&command.order_id)
-        .execute(self.pool())
+        .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to close order payment attempts", error))?;
+
+        tx.commit().await.map_err(|error| {
+            store_error("failed to commit cancel owner order payment transaction", error)
+        })?;
+
+        // 事务提交后校验是否存在已成功但未取消的支付意图，若有则上报冲突，
+        // 避免调用方误以为取消成功而实际仍存在有效支付。
+        if affected_intent.rows_affected() == 0 {
+            let existing = sqlx::query(
+                r#"
+                SELECT 1
+                FROM commerce_payment_intent
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND owner_user_id = CAST($2 AS TEXT)
+                  AND order_id = CAST($3 AS TEXT)
+                  AND LOWER(COALESCE(status, '')) NOT IN ('created', 'pending', 'processing', 'canceled')
+                LIMIT 1
+                "#,
+            )
+            .bind(&command.tenant_id)
+            .bind(&command.owner_user_id)
+            .bind(&command.order_id)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(|error| store_error("failed to verify cancel owner order payment state", error))?;
+
+            if existing.is_some() {
+                return Err(CommerceServiceError::conflict(
+                    "order payment is in a terminal state and cannot be canceled",
+                ));
+            }
+        }
 
         Ok(())
     }

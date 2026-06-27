@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@sdkwork/payment-pc-core": "workspace:*",
+    "@sdkwork/payment-pc-payment": "workspace:*",
     "@sdkwork/payment-pc-shell": "workspace:*",
     "@sdkwork/payment-service": "workspace:*",
     "react": "catalog:",
