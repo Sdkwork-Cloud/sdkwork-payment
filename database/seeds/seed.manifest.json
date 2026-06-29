@@ -1,0 +1,16 @@
+{
+    "schemaVersion":  1,
+    "moduleId":  "payment",
+    "defaultLocale":  "zh-CN",
+    "profiles":  {
+                     "standard":  {
+                                      "locales":  {
+
+                                                  },
+                                      "common":  [
+
+                                                 ]
+                                  }
+                 },
+    "kind":  "sdkwork.database.seed"
+}

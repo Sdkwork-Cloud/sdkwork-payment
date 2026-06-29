@@ -1,0 +1,50 @@
+{
+    "owner":  "sdkwork-payment",
+    "spi":  {
+                "hooks":  [
+
+                          ],
+                "provider":  "default"
+            },
+    "modules":  [
+
+                ],
+    "defaultEngine":  "postgres",
+    "paths":  {
+                  "driftPolicy":  "drift/policy.yaml",
+                  "contract":  "contract/schema.yaml",
+                  "seeds":  "seeds",
+                  "migrations":  "migrations"
+              },
+    "displayName":  "Payment Database",
+    "tablePrefix":  "commerce_",
+    "kind":  "sdkwork.database.module",
+    "serviceCode":  "PAYMENT",
+    "engines":  [
+                    "postgres",
+                    "sqlite"
+                ],
+    "lifecycle":  {
+                      "activeSeedLocales":  [
+                                                "zh-CN"
+                                            ],
+                      "supportedSeedLocales":  [
+                                                   "zh-CN",
+                                                   "en-US",
+                                                   "ja-JP",
+                                                   "de-DE",
+                                                   "fr-FR",
+                                                   "ru-RU",
+                                                   "ko-KR"
+                                               ],
+                      "driftCheckIntervalSec":  60,
+                      "defaultSeedLocale":  "zh-CN",
+                      "defaultSeedProfile":  "standard",
+                      "seedOnBoot":  false,
+                      "autoMigrate":  true
+                  },
+    "baselineStrategy":  "baseline-plus-migrations",
+    "schemaVersion":  1,
+    "contractVersion":  "1.0.0",
+    "moduleId":  "payment"
+}

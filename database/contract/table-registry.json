@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.database.table-registry",
+  "tables": [
+    {
+      "name": "commerce_payment_intent",
+      "owner": "sdkwork-payment",
+      "profile": "user_entity",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
+      "name": "commerce_payment_attempt",
+      "owner": "sdkwork-payment",
+      "profile": "event_log",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
+      "name": "commerce_payment_method",
+      "owner": "sdkwork-payment",
+      "profile": "tenant_entity",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
+      "name": "commerce_payment_channel",
+      "owner": "sdkwork-payment",
+      "profile": "tenant_entity",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
+      "name": "commerce_payment_provider_account",
+      "owner": "sdkwork-payment",
+      "profile": "tenant_entity",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
+      "name": "commerce_payment_route_rule",
+      "owner": "sdkwork-payment",
+      "profile": "tenant_entity",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
+      "name": "commerce_payment_webhook_event",
+      "owner": "sdkwork-payment",
+      "profile": "event_log",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
+      "name": "commerce_payment_reconciliation_run",
+      "owner": "sdkwork-payment",
+      "profile": "event_log",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    }
+  ]
+}
