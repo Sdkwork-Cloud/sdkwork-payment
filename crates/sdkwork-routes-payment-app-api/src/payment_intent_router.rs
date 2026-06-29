@@ -7,13 +7,13 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use sdkwork_commerce_contract_service::CommerceServiceError;
-use sdkwork_commerce_payment_service::{
+use sdkwork_contract_service::CommerceServiceError;
+use sdkwork_payment_service::{
     CancelOwnerPaymentIntentCommand, CreateOwnerPaymentAttemptCommand,
     CreateOwnerPaymentAttemptOutcome, CreateOwnerPaymentIntentCommand, PaymentIntentDetailQuery,
     PaymentIntentView,
 };
-use sdkwork_commerce_payment_repository_sqlx::{
+use sdkwork_payment_repository_sqlx::{
     PostgresCommercePaymentIntentStore, SqliteCommercePaymentIntentStore,
 };
 use sdkwork_iam_context_service::IamAppContext;

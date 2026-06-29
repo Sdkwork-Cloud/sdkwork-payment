@@ -1,0 +1,13 @@
+[package]
+publish.workspace = true
+name = "sdkwork-payment-service"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+description = "SDKWork commerce payment and refund domain rules for local/private Rust deployments."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+sdkwork_contract_service.workspace = true

@@ -3,9 +3,9 @@
 SDKWork commerce **payment** capability building-block repository (domain `commerce`).
 
 - Standards: `../sdkwork-specs/README.md`
-- Composition consumer: `../sdkwork-clawrouter/vendor/sdkwork-commerce` (archived transitional platform snapshot)
-- Domain service: `crates/sdkwork-commerce-payment-service/`
-- Repository SQL: `crates/sdkwork-commerce-payment-repository-sqlx/`
+- Composition consumer: `../sdkwork-clawrouter/vendor/sdkwork-commerce (deleted)` (archived transitional platform snapshot)
+- Domain service: `crates/sdkwork-payment-service/`
+- Repository SQL: `crates/sdkwork-commerce (deleted)-payment-repository-sqlx/`
 - HTTP API server: `crates/sdkwork-payment-standalone-gateway/`
 
 ## Quick start

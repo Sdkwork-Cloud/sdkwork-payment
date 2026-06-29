@@ -2,8 +2,8 @@
 resolver = "2"
 members = [
     "crates/sdkwork-payment-gateway-assembly",
-  "crates/sdkwork-commerce-payment-service",
-  "crates/sdkwork-commerce-payment-repository-sqlx",
+  "crates/sdkwork-payment-service",
+  "crates/sdkwork-payment-repository-sqlx",
   "crates/sdkwork-routes-payment-app-api",
   "crates/sdkwork-routes-payment-backend-api",
   "crates/sdkwork-payment-database-host",
@@ -32,7 +32,7 @@ tracing-subscriber = "0.3"
 dotenvy = "0.15"
 thiserror = "1"
 async-trait = "0.1"
-sdkwork_commerce_contract_service = { path = "../sdkwork-account/crates/sdkwork-commerce-contract-service", package = "sdkwork-commerce-contract-service" }
+sdkwork_contract_service = { path = "../sdkwork-account/crates/sdkwork-contract-service", package = "sdkwork-contract-service" }
 sdkwork-web-core = { path = "../sdkwork-web-framework/crates/sdkwork-web-core" }
 sdkwork-web-axum = { path = "../sdkwork-web-framework/crates/sdkwork-web-axum" }
 sdkwork-web-contract = { path = "../sdkwork-web-framework/crates/sdkwork-web-contract" }
@@ -47,10 +47,10 @@ sdkwork_database_config = { path = "../sdkwork-database/crates/sdkwork-database-
 sdkwork_database_lifecycle = { path = "../sdkwork-database/crates/sdkwork-database-lifecycle", package = "sdkwork-database-lifecycle" }
 sdkwork_database_spi = { path = "../sdkwork-database/crates/sdkwork-database-spi", package = "sdkwork-database-spi" }
 sdkwork_database_sqlx = { path = "../sdkwork-database/crates/sdkwork-database-sqlx", package = "sdkwork-database-sqlx" }
-sdkwork_commerce_order_repository_sqlx = { path = "../sdkwork-order/crates/sdkwork-commerce-order-repository-sqlx", package = "sdkwork-commerce-order-repository-sqlx" }
-sdkwork_commerce_order_service = { path = "../sdkwork-order/crates/sdkwork-commerce-order-service", package = "sdkwork-commerce-order-service" }
-sdkwork_commerce_payment_service = { path = "crates/sdkwork-commerce-payment-service", package = "sdkwork-commerce-payment-service" }
-sdkwork_commerce_payment_repository_sqlx = { path = "crates/sdkwork-commerce-payment-repository-sqlx", package = "sdkwork-commerce-payment-repository-sqlx" }
+sdkwork_order_repository_sqlx = { path = "../sdkwork-order/crates/sdkwork-order-repository-sqlx", package = "sdkwork-order-repository-sqlx" }
+sdkwork_order_service = { path = "../sdkwork-order/crates/sdkwork-order-service", package = "sdkwork-order-service" }
+sdkwork_payment_service = { path = "crates/sdkwork-payment-service", package = "sdkwork-payment-service" }
+sdkwork_payment_repository_sqlx = { path = "crates/sdkwork-payment-repository-sqlx", package = "sdkwork-payment-repository-sqlx" }
 sdkwork_routes_payment_app_api = { path = "crates/sdkwork-routes-payment-app-api", package = "sdkwork-routes-payment-app-api" }
 sdkwork_routes_payment_backend_api = { path = "crates/sdkwork-routes-payment-backend-api", package = "sdkwork-routes-payment-backend-api" }
 sdkwork_payment_database_host = { path = "crates/sdkwork-payment-database-host", package = "sdkwork-payment-database-host" }

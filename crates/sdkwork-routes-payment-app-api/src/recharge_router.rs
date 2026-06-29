@@ -8,15 +8,15 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use sdkwork_commerce_contract_service::{CommerceMoney, CommerceServiceError};
+use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use std::collections::BTreeMap;
 
-use sdkwork_commerce_payment_service::{
+use sdkwork_payment_service::{
     CheckoutStatusQuery, CheckoutStatusSnapshot, CreatePointsRechargeOrderCommand,
     CreatePointsRechargeOrderOutcome, RechargeGrantPreview, RechargePackageItem,
     RechargePackageListQuery, RechargeSettingsQuery, RechargeSettingsSnapshot,
 };
-use sdkwork_commerce_payment_repository_sqlx::{
+use sdkwork_payment_repository_sqlx::{
     PostgresCommerceRechargeStore, SqliteCommerceRechargeStore,
 };
 use sdkwork_iam_context_service::IamAppContext;

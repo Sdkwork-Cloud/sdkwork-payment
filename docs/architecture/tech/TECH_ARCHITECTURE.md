@@ -13,8 +13,8 @@ Updated: 2026-06-27
 
 | Layer | Path |
 | --- | --- |
-| Domain (Rust) | `crates/sdkwork-commerce-payment-service/` |
-| SQL | `crates/sdkwork-commerce-payment-repository-sqlx/` |
+| Domain (Rust) | `crates/sdkwork-payment-service/` |
+| SQL | `crates/sdkwork-commerce (deleted)-payment-repository-sqlx/` |
 | HTTP routers | `crates/sdkwork-routes-payment-*-api/` |
 | API server | `crates/sdkwork-payment-standalone-gateway/` |
 | PC client | `apps/sdkwork-payment-pc/` |
@@ -26,7 +26,7 @@ Updated: 2026-06-27
 apps/sdkwork-payment-pc/
   packages/sdkwork-payment-pc-core/
   packages/sdkwork-payment-pc-shell/
-  packages/sdkwork-payment-pc-payment/    ← migrated from sdkwork-commerce-pc
+  packages/sdkwork-payment-pc-payment/    ← migrated from sdkwork-commerce (deleted)-pc
 ```
 
 Composition apps (`sdkwork-mall`, etc.) consume `@sdkwork/payment-pc-payment` via workspace paths — not a central commerce PC repo.
