@@ -8,6 +8,8 @@ use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::shared::{payment_attempt_is_terminal_success, ConfirmOwnerOrderPaymentOutcome};
+
 #[derive(Debug, Clone)]
 pub struct SqliteCommerceOwnerOrderPaymentStore {
     pool: SqlitePool,
@@ -205,6 +207,11 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .await
         .map_err(|error| store_error("failed to insert owner order payment intent", error))?;
 
+        let callback_payload = command
+            .payment_attempt_callback_payload
+            .as_deref()
+            .unwrap_or("{}");
+
         sqlx::query(
             r#"
             INSERT INTO commerce_payment_attempt
@@ -212,7 +219,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
                  payment_method, provider_code, out_trade_no, amount, currency_code, status,
                  callback_payload, created_at, paid_at, updated_at)
             VALUES
-                (?, CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), ?, ?, ?, ?, ?, ?, 'CNY', ?, '{}', ?, NULL, ?)
+                (?, CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), ?, ?, ?, ?, ?, ?, 'CNY', ?, ?, ?, NULL, ?)
             "#,
         )
         .bind(&payment_attempt_id)
@@ -226,6 +233,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .bind(&out_trade_no)
         .bind(total_amount.as_str())
         .bind(CommercePaymentStatus::Pending.as_str())
+        .bind(callback_payload)
         .bind(&now)
         .bind(&now)
         .execute(&mut *tx)
@@ -248,6 +256,123 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             payment_id: payment_attempt_id,
             payment_method: method.method_key,
             payment_params,
+        })
+    }
+
+    pub async fn confirm_owner_order_payment(
+        &self,
+        tenant_id: &str,
+        organization_id: Option<&str>,
+        owner_user_id: &str,
+        order_id: &str,
+    ) -> Result<ConfirmOwnerOrderPaymentOutcome, CommerceServiceError> {
+        let paid_at = current_command_timestamp();
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|error| {
+                store_error("failed to begin owner order payment confirmation transaction", error)
+            })?;
+
+        let attempt_row = sqlx::query(
+            r#"
+            SELECT id, status
+            FROM commerce_payment_attempt
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(owner_user_id)
+        .bind(order_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to load owner order payment attempt", error))?;
+
+        let Some(attempt_row) = attempt_row else {
+            return Err(CommerceServiceError::not_found(
+                "owner order payment attempt was not found",
+            ));
+        };
+
+        let attempt_status = string_cell(&attempt_row, "status");
+        if payment_attempt_is_terminal_success(&attempt_status) {
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit idempotent payment confirmation", error)
+            })?;
+            return Ok(ConfirmOwnerOrderPaymentOutcome {
+                tenant_id: tenant_id.to_owned(),
+                organization_id: organization_id.map(str::to_owned),
+                owner_user_id: owner_user_id.to_owned(),
+                order_id: order_id.to_owned(),
+                paid_at,
+                replayed: true,
+            });
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE commerce_payment_intent
+            SET status = ?, updated_at = ?
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
+            "#,
+        )
+        .bind(CommercePaymentStatus::Succeeded.as_str())
+        .bind(&paid_at)
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(owner_user_id)
+        .bind(order_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to mark owner payment intent succeeded", error))?;
+
+        sqlx::query(
+            r#"
+            UPDATE commerce_payment_attempt
+            SET status = ?, paid_at = ?, updated_at = ?
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
+            "#,
+        )
+        .bind(CommercePaymentStatus::Succeeded.as_str())
+        .bind(&paid_at)
+        .bind(&paid_at)
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(owner_user_id)
+        .bind(order_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to mark owner payment attempt succeeded", error))?;
+
+        tx.commit().await.map_err(|error| {
+            store_error("failed to commit owner order payment confirmation transaction", error)
+        })?;
+
+        Ok(ConfirmOwnerOrderPaymentOutcome {
+            tenant_id: tenant_id.to_owned(),
+            organization_id: organization_id.map(str::to_owned),
+            owner_user_id: owner_user_id.to_owned(),
+            order_id: order_id.to_owned(),
+            paid_at,
+            replayed: false,
         })
     }
 

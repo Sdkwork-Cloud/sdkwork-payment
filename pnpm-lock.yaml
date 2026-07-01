@@ -88,6 +88,10 @@ importers:
         version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.1.0(@types/node@25.9.4)(jiti@2.7.0))
 
   ../sdkwork-appbase/packages/common/foundation/sdkwork-runtime-bootstrap:
+    dependencies:
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
     devDependencies:
       typescript:
         specifier: ^6.0.2
@@ -98,6 +102,9 @@ importers:
       '@sdkwork/runtime-bootstrap':
         specifier: workspace:*
         version: link:../../../common/foundation/sdkwork-runtime-bootstrap
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
       react:
         specifier: '>=18.2.0 <20.0.0'
         version: 19.2.4
@@ -114,6 +121,9 @@ importers:
 
   ../sdkwork-appbase/packages/pc-react/foundation/sdkwork-i18n-pc-react:
     dependencies:
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
       i18next:
         specifier: ^26.1.0
         version: 26.3.2(typescript@6.0.3)
@@ -296,17 +306,33 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  apps/sdkwork-payment-common/packages/sdkwork-payment-contracts: {}
+
+  apps/sdkwork-payment-common/packages/sdkwork-payment-sdk-ports: {}
+
+  apps/sdkwork-payment-common/packages/sdkwork-payment-service:
+    dependencies:
+      '@sdkwork/payment-sdk-ports':
+        specifier: workspace:*
+        version: link:../sdkwork-payment-sdk-ports
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
+
   apps/sdkwork-payment-pc:
     dependencies:
       '@sdkwork/payment-pc-core':
         specifier: workspace:*
         version: link:packages/sdkwork-payment-pc-core
+      '@sdkwork/payment-pc-payment':
+        specifier: workspace:*
+        version: link:packages/sdkwork-payment-pc-payment
       '@sdkwork/payment-pc-shell':
         specifier: workspace:*
         version: link:packages/sdkwork-payment-pc-shell
       '@sdkwork/payment-service':
         specifier: workspace:*
-        version: link:../../packages/common/payment/sdkwork-payment-service
+        version: link:../sdkwork-payment-common/packages/sdkwork-payment-service
       react:
         specifier: 'catalog:'
         version: 19.2.4
@@ -339,7 +365,7 @@ importers:
         version: link:../../../../../sdkwork-appbase/packages/pc-react/foundation/sdkwork-appbase-pc-react
       '@sdkwork/payment-service':
         specifier: workspace:*
-        version: link:../../../../packages/common/payment/sdkwork-payment-service
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-service
     devDependencies:
       '@sdkwork/ui-pc-react':
         specifier: workspace:*
@@ -377,19 +403,6 @@ importers:
       react-dom:
         specifier: '>=18.2.0 <20.0.0'
         version: 19.2.4(react@19.2.4)
-
-  packages/common/payment/sdkwork-payment-contracts: {}
-
-  packages/common/payment/sdkwork-payment-sdk-ports: {}
-
-  packages/common/payment/sdkwork-payment-service:
-    dependencies:
-      '@sdkwork/payment-sdk-ports':
-        specifier: workspace:*
-        version: link:../sdkwork-payment-sdk-ports
-      '@sdkwork/utils':
-        specifier: workspace:*
-        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
 
 packages:
 

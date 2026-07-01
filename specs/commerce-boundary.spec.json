@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.commerce.boundary.spec",
+  "capability": "payment",
+  "domain": "commerce",
+  "role": "payment-executor",
+  "ownedTables": [
+    "commerce_payment_intent",
+    "commerce_payment_attempt",
+    "commerce_payment_record",
+    "commerce_refund",
+    "commerce_payment_provider_account",
+    "commerce_payment_channel",
+    "commerce_payment_webhook_event"
+  ],
+  "ownedApiPrefixes": {
+    "app": [
+      "/app/v3/api/payments"
+    ],
+    "backend": [
+      "/backend/v3/api/payments"
+    ]
+  },
+  "deprecatedApiPrefixes": {
+    "app": [
+      "/app/v3/api/recharges"
+    ],
+    "reason": "Migrate to sdkwork-order; proxy then remove",
+    "targetRemovalPhase": "P3"
+  },
+  "requiredForeignKeys": {
+    "orderId": {
+      "owner": "order",
+      "table": "commerce_order",
+      "requiredOn": [
+        "payments.intents.create",
+        "refunds.create",
+        "owner-order pay"
+      ]
+    }
+  },
+  "upstreamDependencies": [
+    {
+      "capability": "order",
+      "purpose": "Validate order exists and payment_status transitions"
+    }
+  ],
+  "downstreamConsumers": [],
+  "forbidden": [
+    "insert commerce_order",
+    "insert commerce_order_item",
+    "commerce_recharge_package CRUD",
+    "direct account wallet adjustments",
+    "recharges.orders.create in target state"
+  ],
+  "migrationOut": {
+    "status": "complete",
+    "rechargeProxy": "crates/sdkwork-routes-payment-app-api/src/recharge_proxy_router.rs",
+    "targetCapability": "order"
+  },
+  "implementationPhases": [
+    {
+      "id": "P1",
+      "title": "Payment executor spec frozen",
+      "status": "complete"
+    },
+    {
+      "id": "P2",
+      "title": "Order owns recharge; payment /recharges proxy",
+      "status": "complete",
+      "blockedBy": ["O3"]
+    },
+    {
+      "id": "P3",
+      "title": "Remove payment recharge routes and insert_order",
+      "status": "complete",
+      "blockedBy": ["O5", "P2"]
+    },
+    {
+      "id": "P4",
+      "title": "Payment confirmation orchestrates order fulfillment saga",
+      "status": "complete",
+      "blockedBy": ["O6", "P3"],
+      "deliverables": [
+        "POST /backend/v3/api/payments/owner-orders/{orderId}/confirmations",
+        "OrderPointsRechargeFulfillmentClient HTTP adapter",
+        "confirm_owner_order_payment repository method"
+      ]
+    }
+  ],
+  "backendOperationIds": {
+    "payments": [
+      "payments.ownerOrders.confirmations.create"
+    ]
+  }
+}

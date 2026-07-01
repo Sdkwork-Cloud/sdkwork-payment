@@ -6,5 +6,17 @@
     "domain": "commerce",
     "capability": "payment",
     "root": "sdkwork-payment"
-  }
+  },
+  "localExtensionSpecs": [
+    {
+      "file": "PAYMENT_EXECUTOR_SPEC.md",
+      "path": "specs/PAYMENT_EXECUTOR_SPEC.md",
+      "purpose": "Payment executor scope; no order header ownership."
+    },
+    {
+      "file": "commerce-boundary.spec.json",
+      "path": "specs/commerce-boundary.spec.json",
+      "purpose": "Deprecation of payment-owned recharge routes."
+    }
+  ]
 }

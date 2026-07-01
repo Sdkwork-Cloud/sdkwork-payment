@@ -1,4 +1,5 @@
 # sdkwork-payment
+repository-kind: application
 
 SDKWork commerce **payment** capability building-block repository (domain `commerce`).
 

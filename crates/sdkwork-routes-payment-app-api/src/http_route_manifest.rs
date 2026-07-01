@@ -214,7 +214,7 @@ mod tests {
         let manifest = app_route_manifest();
         let mut seen = std::collections::HashSet::new();
         for route in manifest.routes() {
-            let key = (route.method, route.path);
+            let key = (format!("{:?}", route.method), route.path);
             assert!(
                 seen.insert(key),
                 "duplicate (method, path) pair in app-api manifest: {:?} {}",

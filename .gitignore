@@ -46,3 +46,13 @@ apps/*/config/*/*.local.toml
 **/.sdkwork/cache/
 **/.sdkwork/secrets/
 **/.sdkwork/manual-backups/
+**/.runtime/
+!.env.postgres.example
+coverage/
+**/.pnpm-store/
+.idea/
+.vscode/
+**/.sdkwork/dart/pub-cache/
+**/.sdkwork/sdkwork-generator-changes.json
+**/.sdkwork/sdkwork-generator-manifest.json
+**/.sdkwork/sdkwork-generator-report.json

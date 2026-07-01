@@ -7,6 +7,23 @@
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use sdkwork_payment_service::CreateOwnerRefundCommand;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfirmOwnerOrderPaymentOutcome {
+    pub tenant_id: String,
+    pub organization_id: Option<String>,
+    pub owner_user_id: String,
+    pub order_id: String,
+    pub paid_at: String,
+    pub replayed: bool,
+}
+
+pub(crate) fn payment_attempt_is_terminal_success(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "succeeded" | "success" | "paid"
+    )
+}
+
 /// Wrap a storage-layer error with a descriptive context message.
 ///
 /// Accepts any `Display` type so it works uniformly with `sqlx::Error`,

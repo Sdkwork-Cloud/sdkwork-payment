@@ -18,7 +18,7 @@ Updated: 2026-06-27
 | HTTP routers | `crates/sdkwork-routes-payment-*-api/` |
 | API server | `crates/sdkwork-payment-standalone-gateway/` |
 | PC client | `apps/sdkwork-payment-pc/` |
-| Client facade | `packages/common/payment/sdkwork-payment-service/` |
+| Client facade | `apps/sdkwork-payment-common/packages/sdkwork-payment-service/` |
 
 ## PC surface
 

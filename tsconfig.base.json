@@ -10,9 +10,9 @@
       "@sdkwork/ui-pc-react": ["../sdkwork-ui/sdkwork-ui-pc-react/src/index.ts"],
       "@sdkwork/ui-pc-react/theme": ["../sdkwork-ui/sdkwork-ui-pc-react/src/theme/index.ts"],
       "@sdkwork/utils": ["../sdkwork-utils/packages/sdkwork-utils-typescript/src/index.ts"],
-      "@sdkwork/payment-contracts": ["packages/common/payment/sdkwork-payment-contracts/src/index.ts"],
-      "@sdkwork/payment-service": ["packages/common/payment/sdkwork-payment-service/src/index.ts"],
-      "@sdkwork/payment-sdk-ports": ["packages/common/payment/sdkwork-payment-sdk-ports/src/index.ts"],
+      "@sdkwork/payment-contracts": ["apps/sdkwork-payment-common/packages/sdkwork-payment-contracts/src/index.ts"],
+      "@sdkwork/payment-service": ["apps/sdkwork-payment-common/packages/sdkwork-payment-service/src/index.ts"],
+      "@sdkwork/payment-sdk-ports": ["apps/sdkwork-payment-common/packages/sdkwork-payment-sdk-ports/src/index.ts"],
       "@sdkwork/payment-pc-core": ["apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-core/src/index.ts"],
       "@sdkwork/payment-pc-shell": ["apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-shell/src/index.tsx"],
       "@sdkwork/payment-pc-payment": ["apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-payment/src/index.ts"]

@@ -112,10 +112,10 @@ function SdkworkPaymentPageContent({
   ];
 
   useEffect(() => {
-    if (!state.isBootstrapped && !state.isLoading) {
-      void controller.bootstrap();
+    if (!state.isBootstrapped && !state.isLoading && !state.lastError) {
+      void controller.bootstrap().catch(() => undefined);
     }
-  }, [controller, state.isBootstrapped, state.isLoading]);
+  }, [controller, state.isBootstrapped, state.isLoading, state.lastError]);
 
   return (
     <div className="relative h-full overflow-y-auto">

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.composition.resolved",
+  "repository": "sdkwork-payment",
+  "integrations": [
+    {
+      "workspace": "sdkwork-iam-app-sdk",
+      "surface": "app-api",
+      "apiPrefix": "/app/v3/api",
+      "connectivityPlane": "platform",
+      "runtimeMode": "external-via-platform-gateway",
+      "mountStatus": null,
+      "envKey": "VITE_SDKWORK_APPBASE_APP_API_BASE_URL",
+      "forbidProductSameOriginFallback": false,
+      "corePackage": "@sdkwork/payment-pc-core",
+      "source": "apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-core/specs/component.spec.json"
+    },
+    {
+      "workspace": "sdkwork-payment-app-sdk",
+      "surface": "app-api",
+      "apiPrefix": "/app/v3/api",
+      "connectivityPlane": "application",
+      "runtimeMode": "same-origin-embedded",
+      "mountStatus": null,
+      "envKey": "VITE_SDKWORK_PAYMENT_APP_API_BASE_URL",
+      "forbidProductSameOriginFallback": false,
+      "corePackage": "@sdkwork/payment-pc-core",
+      "source": "apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-core/specs/component.spec.json"
+    }
+  ],
+  "permissions": {
+    "inheritanceMode": "module-catalog-with-overrides",
+    "inheritedManifests": [
+      {
+        "workspace": "sdkwork-iam-app-sdk",
+        "manifestRef": "../sdkwork-iam/iam/modules/iam-kernel/iam.module.manifest.json",
+        "inheritPermissions": true
+      }
+    ]
+  },
+  "env": {},
+  "requiresPlatformGatewayProcess": true,
+  "issues": [],
+  "meta": {
+    "resolver": "sdkwork-specs/tools/lib/composition-resolver.mjs",
+    "credentialModes": {
+      "sdkwork-iam-app-sdk": "authenticated-app-api",
+      "sdkwork-payment-app-sdk": "authenticated-app-api"
+    }
+  }
+}

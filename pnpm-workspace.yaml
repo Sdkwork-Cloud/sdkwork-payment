@@ -1,5 +1,6 @@
 packages:
-  - "packages/common/payment/*"
+  - "apps/sdkwork-payment-common"
+  - "apps/sdkwork-payment-common/packages/*"
   - "apps/sdkwork-payment-pc"
   - "apps/sdkwork-payment-pc/packages/*"
   - "../sdkwork-appbase/packages/common/foundation/sdkwork-runtime-bootstrap"
