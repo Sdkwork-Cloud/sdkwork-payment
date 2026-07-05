@@ -1,6 +1,19 @@
 use crate::registry::{AlipayRegistryConfig, WeChatPayRegistryConfig};
 use crate::stripe::StripePaymentProviderConfig;
 
+/// Canonical PSP notify path (HTTP owned by sdkwork-order).
+pub const ORDER_PAYMENT_WEBHOOK_PATH: &str =
+    "/app/v3/api/orders/payments/webhooks/{providerCode}";
+
+/// Builds the order-gateway PSP notify URL for `provider_code`.
+pub fn build_order_payment_webhook_url(base: &str, provider_code: &str) -> String {
+    format!(
+        "{}{}",
+        base.trim_end_matches('/'),
+        ORDER_PAYMENT_WEBHOOK_PATH.replace("{providerCode}", provider_code)
+    )
+}
+
 /// Resolves a `secret_ref` pointer to a runtime secret.
 ///
 /// `secret_ref` stores the **name** of an environment variable (never the plaintext secret).
@@ -34,17 +47,13 @@ impl ProviderCredentialBundle {
             stripe: load_stripe(),
             alipay: load_alipay(),
             wechat_pay: load_wechat_pay(),
-            webhook_base_url: env_optional("PAYMENT_WEBHOOK_BASE_URL"),
+            webhook_base_url: load_webhook_base_url(),
         }
     }
 
     pub fn provider_notify_url(&self, provider_code: &str) -> Option<String> {
         let base = self.webhook_base_url.as_deref()?;
-        Some(format!(
-            "{}/app/v3/api/payments/webhooks/{}",
-            base.trim_end_matches('/'),
-            provider_code
-        ))
+        Some(build_order_payment_webhook_url(base, provider_code))
     }
 
     /// Merges tenant-scoped `commerce_payment_provider_account` credentials.
@@ -104,6 +113,11 @@ fn env_required(key: &str) -> Option<String> {
 
 fn env_optional(key: &str) -> Option<String> {
     env_required(key)
+}
+
+fn load_webhook_base_url() -> Option<String> {
+    env_optional("ORDER_PAYMENT_WEBHOOK_BASE_URL")
+        .or_else(|| env_optional("PAYMENT_WEBHOOK_BASE_URL"))
 }
 
 pub struct EnvPaymentCredentialResolver;

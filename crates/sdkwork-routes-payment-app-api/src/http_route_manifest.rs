@@ -125,6 +125,7 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     .with_idempotent(true),
     HttpRoute::public(
         HttpMethod::Post,
+        // Deprecated 410 shim — live PSP webhooks: order POST /orders/payments/webhooks/{providerCode}
         "/app/v3/api/payments/webhooks/{providerCode}",
         "payments",
         "payments.webhooks.receive",

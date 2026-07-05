@@ -101,7 +101,8 @@ DDL baselines: `database/ddl/baseline/sqlite/` and `database/ddl/baseline/postgr
 
 | Variable | Provider | Purpose |
 | --- | --- | --- |
-| `PAYMENT_WEBHOOK_BASE_URL` | all | Base URL for `{base}/app/v3/api/payments/webhooks/{providerCode}` notify endpoints |
+| `ORDER_PAYMENT_WEBHOOK_BASE_URL` | all | Base URL for `{base}/app/v3/api/orders/payments/webhooks/{providerCode}` notify endpoints (order gateway) |
+| `PAYMENT_WEBHOOK_BASE_URL` | all | **Deprecated alias** for `ORDER_PAYMENT_WEBHOOK_BASE_URL` |
 | `STRIPE_SECRET_KEY` | stripe | API secret |
 | `STRIPE_WEBHOOK_SECRET` | stripe | Webhook HMAC verification |
 | `ALIPAY_APP_ID` | alipay | Application ID |

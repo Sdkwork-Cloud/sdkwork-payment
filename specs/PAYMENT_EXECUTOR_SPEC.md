@@ -48,7 +48,8 @@ Queued webhook worker (`process_queued_webhook_events`) drains `commerce_payment
 
 ## 5. Provider credentials
 
-- Deployment defaults: env vars (`STRIPE_*`, `ALIPAY_*`, `WECHAT_PAY_*`, `PAYMENT_WEBHOOK_BASE_URL`).
+- Deployment defaults: env vars (`STRIPE_*`, `ALIPAY_*`, `WECHAT_PAY_*`, `ORDER_PAYMENT_WEBHOOK_BASE_URL`; legacy alias `PAYMENT_WEBHOOK_BASE_URL`).
+- Notify URL pattern: `{base}/app/v3/api/orders/payments/webhooks/{providerCode}` (order gateway owns HTTP).
 - Tenant overrides: `commerce_payment_provider_account.secret_ref` stores env var **names** resolved at runtime for pay, close, refund, and webhook verify (Stripe/Alipay route via `out_trade_no` or Alipay `app_id`; WeChat Pay uses deployment env until `out_trade_no` routing is available pre-decrypt).
 
 ## 6. API prefixes
@@ -86,4 +87,4 @@ Deprecated `/app/v3/api/recharges/*` proxy is **opt-in only** (`SDKWORK_PAYMENT_
 - Payment tests: intent requires valid orderId
 - No test inserts `commerce_order` in payment crate (after migration)
 
-Track phases in [commerce-boundary.spec.json](./commerce-boundary.spec.json).
+Track phases in [commerce-boundary.spec.json](./commerce-boundary.spec.json). Webhook boundary: [commerce-payment-webhook.spec.json](./commerce-payment-webhook.spec.json).

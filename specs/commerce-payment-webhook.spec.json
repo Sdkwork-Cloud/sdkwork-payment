@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.commerce.payment.webhook-boundary",
+  "capability": "payment",
+  "domain": "commerce",
+  "role": "payment-webhook-port-provider",
+  "dependencyDirection": "order -> payment (in-process ports + payment-providers lib); payment -X-> order",
+  "httpOwner": {
+    "capability": "order",
+    "appRoute": "POST /app/v3/api/orders/payments/webhooks/{providerCode}",
+    "backendConfirmRoute": "POST /backend/v3/api/orders/{orderId}/payment_confirmations",
+    "authoritySpec": "../sdkwork-order/specs/commerce-payment-webhook.spec.json"
+  },
+  "paymentOwnedRoutes": {
+    "deprecatedShim": [
+      "POST /app/v3/api/payments/webhooks/{providerCode}"
+    ],
+    "shimBehavior": "410 Gone with migration ProblemDetail pointing to order route"
+  },
+  "exposedPorts": {
+    "crate": "sdkwork-payment-repository-sqlx",
+    "operations": [
+      "ingest_provider_webhook_sqlite",
+      "ingest_provider_webhook_postgres",
+      "confirm_owner_order_payment"
+    ],
+    "contextType": "PaymentWebhookAttemptContext",
+    "note": "Ingest persists commerce_payment_webhook_event and updates attempt status; no commerce_order JOIN"
+  },
+  "providerNotifyUrls": {
+    "webhookBaseUrlEnvPrimary": "ORDER_PAYMENT_WEBHOOK_BASE_URL",
+    "webhookBaseUrlEnvLegacyAlias": "PAYMENT_WEBHOOK_BASE_URL",
+    "pathPattern": "{base}/app/v3/api/orders/payments/webhooks/{providerCode}",
+    "builder": "sdkwork-payment-providers::build_order_payment_webhook_url"
+  },
+  "forbiddenInPayment": [
+    "Live PSP webhook HTTP handlers (except deprecated 410 shim)",
+    "HTTP callback to order backend",
+    "JOIN commerce_order in webhook ingest",
+    "settle_owner_order_after_payment_success",
+    "OrderPointsRechargeFulfillmentClient",
+    "SDKWORK_PAYMENT_ORDER_SERVICE_AUTH_TOKEN"
+  ],
+  "migration": {
+    "phase": "P6",
+    "status": "complete",
+    "shimSource": "crates/sdkwork-routes-payment-app-api/src/webhook_router.rs",
+    "boundarySpec": "specs/commerce-boundary.spec.json"
+  }
+}

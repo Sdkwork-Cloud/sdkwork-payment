@@ -19,8 +19,8 @@ pub use adapter::{
 };
 pub use checkout::{enrich_pay_owner_order_outcome, CheckoutContext};
 pub use credentials::{
-    EnvPaymentCredentialResolver, ProviderAccountBinding, ProviderCredentialBundle,
-    resolve_secret_ref,
+    build_order_payment_webhook_url, EnvPaymentCredentialResolver, ProviderAccountBinding,
+    ProviderCredentialBundle, resolve_secret_ref, ORDER_PAYMENT_WEBHOOK_PATH,
 };
 pub use operations::{cancel_provider_payment, create_provider_refund};
 pub use registry::{provider_registry_for_account, PaymentProviderRegistry};

@@ -17,6 +17,11 @@
       "file": "commerce-boundary.spec.json",
       "path": "specs/commerce-boundary.spec.json",
       "purpose": "Deprecation of payment-owned recharge routes."
+    },
+    {
+      "file": "commerce-payment-webhook.spec.json",
+      "path": "specs/commerce-payment-webhook.spec.json",
+      "purpose": "PSP webhook HTTP owned by order; payment ingest ports only."
     }
   ]
 }

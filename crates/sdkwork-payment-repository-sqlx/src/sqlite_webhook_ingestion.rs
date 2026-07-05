@@ -328,7 +328,7 @@ mod sqlite_webhook_ingestion_tests {
             .payment_attempt_context
             .expect("payment attempt context for succeeded recharge");
         assert_eq!(context.order_id, "order-rch-1");
-        assert_eq!(context.owner_user_id, "user-rch-1");
+        assert_eq!(context.owner_user_id, "user-1");
 
         let status: String = sqlx::query_scalar(
             "SELECT status FROM commerce_payment_attempt WHERE order_id = 'order-rch-1'",

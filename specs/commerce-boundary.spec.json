@@ -66,6 +66,7 @@
     "status": "complete",
     "rechargeProxy": "crates/sdkwork-routes-payment-app-api/src/recharge_proxy_router.rs",
     "webhookShim": "crates/sdkwork-routes-payment-app-api/src/webhook_router.rs",
+    "webhookBoundarySpec": "specs/commerce-payment-webhook.spec.json",
     "targetCapability": "order",
     "orderWebhookRoute": "POST /app/v3/api/orders/payments/webhooks/{providerCode}",
     "orderConfirmRoute": "POST /backend/v3/api/orders/{orderId}/payment_confirmations"

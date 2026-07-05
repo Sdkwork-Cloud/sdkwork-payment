@@ -1755,6 +1755,7 @@ version = "0.1.0"
 dependencies = [
  "sdkwork-contract-service",
  "sdkwork-utils-rust",
+ "tracing",
 ]
 
 [[package]]
@@ -1865,7 +1866,6 @@ dependencies = [
  "sdkwork-payment-repository-sqlx",
  "sdkwork-payment-service",
  "sdkwork-payment-service-host",
- "sdkwork-routes-payment-backend-api",
  "sdkwork-utils-rust",
  "sdkwork-web-axum",
  "sdkwork-web-bootstrap",
@@ -1881,12 +1881,10 @@ name = "sdkwork-routes-payment-backend-api"
 version = "0.1.0"
 dependencies = [
  "axum",
- "reqwest",
  "sdkwork-contract-service",
  "sdkwork-database-sqlx",
  "sdkwork-iam-context-service",
  "sdkwork-iam-web-adapter",
- "sdkwork-order-service",
  "sdkwork-payment-repository-sqlx",
  "sdkwork-payment-service",
  "sdkwork-payment-service-host",

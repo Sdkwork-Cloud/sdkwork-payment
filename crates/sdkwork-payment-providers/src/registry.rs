@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use crate::adapter::PaymentProviderAdapter;
 use crate::alipay::{AlipayPaymentProviderAdapter, AlipayPaymentProviderConfig, RsaAlipaySigner};
-use crate::credentials::{ProviderAccountBinding, ProviderCredentialBundle};
+use crate::credentials::{
+    build_order_payment_webhook_url, ProviderAccountBinding, ProviderCredentialBundle,
+};
 use crate::stripe::{StripePaymentProviderAdapter, StripePaymentProviderConfig};
 use crate::wechat_pay::{WeChatPayProviderAdapter, WeChatPayProviderConfig};
 
@@ -55,12 +57,8 @@ impl PaymentProviderRegistry {
             return;
         };
         if config.notify_url.is_none() {
-            config.notify_url = webhook_base.map(|base| {
-                format!(
-                    "{}/app/v3/api/payments/webhooks/alipay",
-                    base.trim_end_matches('/')
-                )
-            });
+            config.notify_url =
+                webhook_base.map(|base| build_order_payment_webhook_url(base, "alipay"));
         }
         if let Some(notify_url) = config.notify_url.clone() {
             self.notify_urls
@@ -90,12 +88,8 @@ impl PaymentProviderRegistry {
             return;
         };
         if config.notify_url.is_none() {
-            config.notify_url = webhook_base.map(|base| {
-                format!(
-                    "{}/app/v3/api/payments/webhooks/wechat_pay",
-                    base.trim_end_matches('/')
-                )
-            });
+            config.notify_url =
+                webhook_base.map(|base| build_order_payment_webhook_url(base, "wechat_pay"));
         }
         if let Some(notify_url) = config.notify_url.clone() {
             self.notify_urls
