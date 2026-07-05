@@ -3,19 +3,24 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::extract::{Extension, Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::HeaderMap;
+use axum::response::Response;
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
 use sdkwork_iam_context_service::IamAppContext;
+use sdkwork_utils_rust::OffsetListPageParams;
+use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
 
+use crate::api_response::{
+    conflict, map_service_error, not_found, success_command_accepted, success_item, success_list,
+    unauthorized, validation,
+};
 use crate::command_headers::{
     validate_write_payload, AppWriteCommandHeaders, WriteCommandHeaderError,
 };
-use crate::problem_details::problem_error_response;
 use crate::subject::backend_runtime_subject_from_extension;
 
 pub type CommerceBackendPaymentAdminFuture<'a, T> =
@@ -37,7 +42,7 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
     fn list_payment_methods<'a>(
         &'a self,
         query: BackendPaymentMethodListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<BackendPaymentMethodView>>;
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendPaymentMethodListPage>;
 
     fn upsert_payment_method<'a>(
         &'a self,
@@ -46,8 +51,8 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
 
     fn list_provider_accounts<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>>;
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
 
     fn upsert_provider_account<'a>(
         &'a self,
@@ -56,8 +61,8 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
 
     fn list_channels<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>>;
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
 
     fn upsert_channel<'a>(
         &'a self,
@@ -66,8 +71,8 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
 
     fn list_route_rules<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>>;
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
 
     fn upsert_route_rule<'a>(
         &'a self,
@@ -82,13 +87,13 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
 
     fn list_attempts<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>>;
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
 
     fn list_webhook_events<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>>;
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
 
     fn replay_webhook_event<'a>(
         &'a self,
@@ -98,8 +103,8 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
 
     fn list_reconciliation_runs<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>>;
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
 
     fn create_reconciliation_run<'a>(
         &'a self,
@@ -119,8 +124,23 @@ pub struct BackendTenantScope {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct BackendPaymentMethodListParams {
+    #[serde(default)]
     status: Option<String>,
+    #[serde(default)]
+    page: Option<i64>,
+    #[serde(default)]
+    page_size: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendListQueryParams {
+    #[serde(default)]
+    page: Option<i64>,
+    #[serde(default)]
+    page_size: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -128,7 +148,26 @@ pub struct BackendPaymentMethodListQuery {
     pub tenant_id: String,
     pub organization_id: Option<String>,
     pub status: Option<String>,
+    pub offset: i64,
+    pub limit: i64,
 }
+
+#[derive(Debug, Clone)]
+pub struct BackendTenantListQuery {
+    pub scope: BackendTenantScope,
+    pub offset: i64,
+    pub limit: i64,
+}
+
+/// Phase 1.3：标准分页结果，store 一次性返回当前页 items + 满足条件的总记录数。
+#[derive(Debug, Clone, Serialize)]
+pub struct BackendListPage<T> {
+    pub items: Vec<T>,
+    pub total_items: i64,
+}
+
+pub type BackendPaymentMethodListPage = BackendListPage<BackendPaymentMethodView>;
+pub type BackendJsonListPage = BackendListPage<serde_json::Value>;
 
 #[derive(Debug, Clone)]
 pub struct BackendPaymentMethodView {
@@ -296,15 +335,6 @@ pub struct BackendReconciliationRunPayload {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BackendPaymentAdminApiResult<T: Serialize> {
-    code: String,
-    msg: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<T>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct BackendPaymentMethodResponse {
     id: String,
     method_key: String,
@@ -340,16 +370,18 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
     fn list_payment_methods<'a>(
         &'a self,
         query: BackendPaymentMethodListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<BackendPaymentMethodView>> {
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendPaymentMethodListPage> {
         Box::pin(async move {
             let rows = sqlx::query(
                 r#"
                 SELECT id, tenant_id, organization_id, method_key, display_name, provider_code,
-                       status, sort_order, created_at, updated_at
+                       status, sort_order, created_at, updated_at,
+                       COUNT(*) OVER() AS total_count
                 FROM commerce_payment_method
                 WHERE tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
                   AND (? IS NULL OR LOWER(COALESCE(status, '')) = LOWER(CAST(? AS TEXT)))
                 ORDER BY sort_order ASC, created_at ASC
+                LIMIT ? OFFSET ?
                 "#,
             )
             .bind(&query.tenant_id)
@@ -357,13 +389,18 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
             .bind(query.organization_id.as_deref())
             .bind(query.status.as_deref())
             .bind(query.status.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| {
                 CommerceServiceError::storage(format!("failed to list payment methods: {error}"))
             })?;
 
-            Ok(rows.iter().map(map_method_row_sqlite).collect())
+            let total_items = sqlite_total_count(&rows);
+            let items = rows.iter().map(map_method_row_sqlite).collect();
+
+            Ok(BackendPaymentMethodListPage { items, total_items })
         })
     }
 
@@ -420,21 +457,31 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
 
     fn list_provider_accounts<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, account_no, provider_code, merchant_id, environment, country_code, settlement_currency, status FROM commerce_payment_provider_account WHERE tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) ORDER BY created_at DESC, id DESC",
+                r#"
+                SELECT id, account_no, provider_code, merchant_id, environment, country_code,
+                       settlement_currency, status, COUNT(*) OVER() AS total_count
+                FROM commerce_payment_provider_account
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
             .bind(scope.organization_id.as_deref())
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list provider accounts: {error}")))?;
-            Ok(rows
+            let total_items = sqlite_total_count(&rows);
+            let items = rows
                 .iter()
                 .map(|row| {
                     serde_json::json!({
@@ -448,7 +495,8 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                         "status": sqlite_string(row, "status"),
                     })
                 })
-                .collect())
+                .collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -514,21 +562,31 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
 
     fn list_channels<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, channel_no, provider_account_id, method_id, scene_code, currency_code, country_code, status, priority FROM commerce_payment_channel WHERE tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) ORDER BY priority ASC, created_at ASC",
+                r#"
+                SELECT id, channel_no, provider_account_id, method_id, scene_code, currency_code,
+                       country_code, status, priority, COUNT(*) OVER() AS total_count
+                FROM commerce_payment_channel
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                ORDER BY priority ASC, created_at ASC
+                LIMIT ? OFFSET ?
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
             .bind(scope.organization_id.as_deref())
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list channels: {error}")))?;
-            Ok(rows
+            let total_items = sqlite_total_count(&rows);
+            let items = rows
                 .iter()
                 .map(|row| {
                     serde_json::json!({
@@ -543,7 +601,8 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                         "priority": row.try_get::<i64,_>("priority").unwrap_or(0),
                     })
                 })
-                .collect())
+                .collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -605,21 +664,33 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
 
     fn list_route_rules<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, rule_no, priority, purchase_type, country_code, currency_code, client_platform, amount_min, amount_max, user_segment, risk_level, channel_id, status, starts_at, ends_at FROM commerce_payment_route_rule WHERE tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) ORDER BY priority ASC, created_at ASC",
+                r#"
+                SELECT id, rule_no, priority, purchase_type, country_code, currency_code, client_platform,
+                       amount_min, amount_max, user_segment, risk_level, channel_id, status, starts_at,
+                       ends_at, COUNT(*) OVER() AS total_count
+                FROM commerce_payment_route_rule
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                ORDER BY priority ASC, created_at ASC
+                LIMIT ? OFFSET ?
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
             .bind(scope.organization_id.as_deref())
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list route rules: {error}")))?;
-            Ok(rows.iter().map(map_route_rule_sqlite).collect())
+            let total_items = sqlite_total_count(&rows);
+            let items = rows.iter().map(map_route_rule_sqlite).collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -703,37 +774,63 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
 
     fn list_attempts<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, payment_id, attempt_no, provider_code, channel_id, amount, currency, status, provider_transaction_id, created_at FROM commerce_payment_attempt WHERE tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) ORDER BY created_at DESC, id DESC",
+                r#"
+                SELECT id, payment_intent_id, attempt_no, provider_code, channel_id, amount, currency_code,
+                       status, provider_transaction_id, created_at, COUNT(*) OVER() AS total_count
+                FROM commerce_payment_attempt
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
             .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list attempts: {error}")))?;
-            Ok(rows.iter().map(map_attempt_sqlite).collect())
+            let total_items = sqlite_total_count(&rows);
+            let items = rows.iter().map(map_attempt_sqlite).collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
     fn list_webhook_events<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, event_id, provider_code, event_type, status, received_at, processed_at, retries FROM commerce_payment_webhook_event WHERE tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) ORDER BY received_at DESC, id DESC",
+                r#"
+                SELECT id, event_id, provider_code, event_type, status, received_at, processed_at, retries,
+                       COUNT(*) OVER() AS total_count
+                FROM commerce_payment_webhook_event
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                ORDER BY received_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
             .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list webhook events: {error}")))?;
-            Ok(rows.iter().map(map_webhook_event_sqlite).collect())
+            let total_items = sqlite_total_count(&rows);
+            let items = rows.iter().map(map_webhook_event_sqlite).collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -785,21 +882,33 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
 
     fn list_reconciliation_runs<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, run_no, provider_code, provider_account_id, reconciliation_type, period_start, period_end, status, matched_count, mismatched_count, currency_code, created_at FROM commerce_payment_reconciliation_run WHERE tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) ORDER BY created_at DESC, id DESC",
+                r#"
+                SELECT id, run_no, provider_code, provider_account_id, reconciliation_type, period_start,
+                       period_end, status, matched_count, mismatched_count, currency_code, created_at,
+                       COUNT(*) OVER() AS total_count
+                FROM commerce_payment_reconciliation_run
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
             .bind(scope.organization_id.as_deref())
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list reconciliation runs: {error}")))?;
-            Ok(rows.iter().map(map_reconciliation_run_sqlite).collect())
+            let total_items = sqlite_total_count(&rows);
+            let items = rows.iter().map(map_reconciliation_run_sqlite).collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -846,28 +955,35 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
     fn list_payment_methods<'a>(
         &'a self,
         query: BackendPaymentMethodListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<BackendPaymentMethodView>> {
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendPaymentMethodListPage> {
         Box::pin(async move {
             let rows = sqlx::query(
                 r#"
                 SELECT id, tenant_id, organization_id, method_key, display_name, provider_code,
-                       status, sort_order, created_at, updated_at
+                       status, sort_order, created_at, updated_at,
+                       COUNT(*) OVER() AS total_count
                 FROM commerce_payment_method
                 WHERE tenant_id = CAST($1 AS TEXT) AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
                   AND ($3::text IS NULL OR LOWER(COALESCE(status, '')) = LOWER($3::text))
                 ORDER BY sort_order ASC, created_at ASC
+                LIMIT $4 OFFSET $5
                 "#,
             )
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(query.status.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| {
                 CommerceServiceError::storage(format!("failed to list payment methods: {error}"))
             })?;
 
-            Ok(rows.iter().map(map_method_row_pg).collect())
+            let total_items = pg_total_count(&rows);
+            let items = rows.iter().map(map_method_row_pg).collect();
+
+            Ok(BackendPaymentMethodListPage { items, total_items })
         })
     }
 
@@ -923,18 +1039,30 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
 
     fn list_provider_accounts<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, account_no, provider_code, merchant_id, environment, country_code, settlement_currency, status FROM commerce_payment_provider_account WHERE tenant_id = CAST($1 AS TEXT) AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT)) ORDER BY created_at DESC, id DESC",
+                r#"
+                SELECT id, account_no, provider_code, merchant_id, environment, country_code,
+                       settlement_currency, status, COUNT(*) OVER() AS total_count
+                FROM commerce_payment_provider_account
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
+                ORDER BY created_at DESC, id DESC
+                LIMIT $3 OFFSET $4
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list provider accounts: {error}")))?;
-            Ok(rows
+            let total_items = pg_total_count(&rows);
+            let items = rows
                 .iter()
                 .map(|row| {
                     serde_json::json!({
@@ -948,7 +1076,8 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                         "status": pg_string(row, "status"),
                     })
                 })
-                .collect())
+                .collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -1013,18 +1142,30 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
 
     fn list_channels<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, channel_no, provider_account_id, method_id, scene_code, currency_code, country_code, status, priority FROM commerce_payment_channel WHERE tenant_id = CAST($1 AS TEXT) AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT)) ORDER BY priority ASC, created_at ASC",
+                r#"
+                SELECT id, channel_no, provider_account_id, method_id, scene_code, currency_code,
+                       country_code, status, priority, COUNT(*) OVER() AS total_count
+                FROM commerce_payment_channel
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
+                ORDER BY priority ASC, created_at ASC
+                LIMIT $3 OFFSET $4
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list channels: {error}")))?;
-            Ok(rows
+            let total_items = pg_total_count(&rows);
+            let items = rows
                 .iter()
                 .map(|row| {
                     serde_json::json!({
@@ -1039,7 +1180,8 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                         "priority": row.try_get::<i64,_>("priority").unwrap_or(0),
                     })
                 })
-                .collect())
+                .collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -1100,18 +1242,32 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
 
     fn list_route_rules<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, rule_no, priority, purchase_type, country_code, currency_code, client_platform, amount_min, amount_max, user_segment, risk_level, channel_id, status, starts_at, ends_at FROM commerce_payment_route_rule WHERE tenant_id = CAST($1 AS TEXT) AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT)) ORDER BY priority ASC, created_at ASC",
+                r#"
+                SELECT id, rule_no, priority, purchase_type, country_code, currency_code, client_platform,
+                       amount_min, amount_max, user_segment, risk_level, channel_id, status, starts_at,
+                       ends_at, COUNT(*) OVER() AS total_count
+                FROM commerce_payment_route_rule
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
+                ORDER BY priority ASC, created_at ASC
+                LIMIT $3 OFFSET $4
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list route rules: {error}")))?;
-            Ok(rows.iter().map(map_route_rule_pg).collect())
+            let total_items = pg_total_count(&rows);
+            let items = rows.iter().map(map_route_rule_pg).collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -1195,35 +1351,61 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
 
     fn list_attempts<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, payment_id, attempt_no, provider_code, channel_id, amount, currency, status, provider_transaction_id, created_at FROM commerce_payment_attempt WHERE tenant_id = CAST($1 AS TEXT) AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT)) ORDER BY created_at DESC, id DESC",
+                r#"
+                SELECT id, payment_intent_id, attempt_no, provider_code, channel_id, amount, currency_code,
+                       status, provider_transaction_id, created_at, COUNT(*) OVER() AS total_count
+                FROM commerce_payment_attempt
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
+                ORDER BY created_at DESC, id DESC
+                LIMIT $3 OFFSET $4
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list attempts: {error}")))?;
-            Ok(rows.iter().map(map_attempt_pg).collect())
+            let total_items = pg_total_count(&rows);
+            let items = rows.iter().map(map_attempt_pg).collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
     fn list_webhook_events<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, event_id, provider_code, event_type, status, received_at, processed_at, retries FROM commerce_payment_webhook_event WHERE tenant_id = CAST($1 AS TEXT) AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT)) ORDER BY received_at DESC, id DESC",
+                r#"
+                SELECT id, event_id, provider_code, event_type, status, received_at, processed_at, retries,
+                       COUNT(*) OVER() AS total_count
+                FROM commerce_payment_webhook_event
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
+                ORDER BY received_at DESC, id DESC
+                LIMIT $3 OFFSET $4
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list webhook events: {error}")))?;
-            Ok(rows.iter().map(map_webhook_event_pg).collect())
+            let total_items = pg_total_count(&rows);
+            let items = rows.iter().map(map_webhook_event_pg).collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -1273,18 +1455,32 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
 
     fn list_reconciliation_runs<'a>(
         &'a self,
-        scope: BackendTenantScope,
-    ) -> CommerceBackendPaymentAdminFuture<'a, Vec<serde_json::Value>> {
+        query: BackendTenantListQuery,
+    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
         Box::pin(async move {
+            let scope = query.scope;
             let rows = sqlx::query(
-                "SELECT id, run_no, provider_code, provider_account_id, reconciliation_type, period_start, period_end, status, matched_count, mismatched_count, currency_code, created_at FROM commerce_payment_reconciliation_run WHERE tenant_id = CAST($1 AS TEXT) AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT)) ORDER BY created_at DESC, id DESC",
+                r#"
+                SELECT id, run_no, provider_code, provider_account_id, reconciliation_type, period_start,
+                       period_end, status, matched_count, mismatched_count, currency_code, created_at,
+                       COUNT(*) OVER() AS total_count
+                FROM commerce_payment_reconciliation_run
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
+                ORDER BY created_at DESC, id DESC
+                LIMIT $3 OFFSET $4
+                "#,
             )
             .bind(&scope.tenant_id)
             .bind(scope.organization_id.as_deref())
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .map_err(|error| CommerceServiceError::storage(format!("failed to list reconciliation runs: {error}")))?;
-            Ok(rows.iter().map(map_reconciliation_run_pg).collect())
+            let total_items = pg_total_count(&rows);
+            let items = rows.iter().map(map_reconciliation_run_pg).collect();
+            Ok(BackendJsonListPage { items, total_items })
         })
     }
 
@@ -1323,16 +1519,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             .map_err(|error| CommerceServiceError::storage(format!("failed to create reconciliation run: {error}")))?;
             Ok(map_reconciliation_run_pg(&row))
         })
-    }
-}
-
-impl<T: Serialize> BackendPaymentAdminApiResult<T> {
-    fn success(data: T) -> Self {
-        Self {
-            code: "0".to_owned(),
-            msg: "success".to_owned(),
-            data: Some(data),
-        }
     }
 }
 
@@ -1396,44 +1582,60 @@ async fn list_methods(
     State(state): State<BackendPaymentAdminState>,
     Query(params): Query<BackendPaymentMethodListParams>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
     let query = BackendPaymentMethodListQuery {
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
         status: params.status,
+        offset: page_params.offset,
+        limit: page_params.page_size,
     };
 
     match state.store.list_payment_methods(query).await {
-        Ok(items) => Json(BackendPaymentAdminApiResult::success(
-            items.into_iter().map(map_method).collect::<Vec<_>>(),
-        ))
-        .into_response(),
-        Err(error) => backend_payment_error_response("payment method list is unavailable", error),
+        Ok(page) => {
+            let items: Vec<_> = page.items.into_iter().map(map_method).collect();
+            success_list(ctx, items, page.total_items, page_params)
+        }
+        Err(error) => backend_payment_error_response(ctx, "payment method list is unavailable", error),
     }
 }
 
 async fn create_method(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Json(body): Json<UpsertPaymentMethodBody>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
     let write_headers =
-        match validate_backend_write_payload(&headers, "payment-method-upsert", &body, "pm") {
+        match validate_backend_write_payload(ctx, &headers, "payment-method-upsert", &body, "pm") {
             Ok(headers) => headers,
             Err(response) => return response,
         };
-    let method_key = body.method_key.unwrap_or_default();
-    let display_name = body.display_name.unwrap_or_else(|| method_key.clone());
-    let provider_code = body.provider_code.unwrap_or_else(|| method_key.clone());
+    let method_key = match require_trimmed_string(ctx, body.method_key, "methodKey") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let display_name = match require_trimmed_string(ctx, body.display_name, "displayName") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let provider_code = match require_trimmed_string(ctx, body.provider_code, "providerCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let status = body.status.unwrap_or_else(|| "active".to_owned());
     let sort_order = body.sort_order.unwrap_or(0);
 
@@ -1450,37 +1652,43 @@ async fn create_method(
     };
 
     match state.store.upsert_payment_method(command).await {
-        Ok(view) => Json(BackendPaymentAdminApiResult::success(map_method(view))).into_response(),
-        Err(error) => backend_payment_error_response("payment method upsert failed", error),
+        Ok(view) => success_item(ctx, map_method(view)),
+        Err(error) => backend_payment_error_response(ctx, "payment method upsert failed", error),
     }
 }
 
 async fn update_method(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Path(method_key): Path<String>,
     Json(body): Json<UpsertPaymentMethodBody>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
     let write_headers =
-        match validate_backend_write_payload(&headers, "payment-method-upsert", &body, "pm") {
+        match validate_backend_write_payload(ctx, &headers, "payment-method-upsert", &body, "pm") {
             Ok(headers) => headers,
             Err(response) => return response,
         };
+    let display_name = match require_trimmed_string(ctx, body.display_name, "displayName") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let provider_code = match require_trimmed_string(ctx, body.provider_code, "providerCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let command = UpsertBackendPaymentMethodCommand {
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
         method_key,
-        display_name: body
-            .display_name
-            .unwrap_or_else(|| "payment method".to_owned()),
-        provider_code: body
-            .provider_code
-            .unwrap_or_else(|| "wechat_pay".to_owned()),
+        display_name,
+        provider_code,
         status: body.status.unwrap_or_else(|| "active".to_owned()),
         sort_order: body.sort_order.unwrap_or(0),
         request_no: write_headers.request_no,
@@ -1488,27 +1696,35 @@ async fn update_method(
     };
 
     match state.store.upsert_payment_method(command).await {
-        Ok(view) => Json(BackendPaymentAdminApiResult::success(map_method(view))).into_response(),
-        Err(error) => backend_payment_error_response("payment method upsert failed", error),
+        Ok(view) => success_item(ctx, map_method(view)),
+        Err(error) => backend_payment_error_response(ctx, "payment method upsert failed", error),
     }
 }
 
 async fn list_provider_accounts(
     State(state): State<BackendPaymentAdminState>,
+    Query(params): Query<BackendListQueryParams>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
-    let scope = BackendTenantScope {
-        tenant_id: subject.tenant_id,
-        organization_id: subject.organization_id,
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
+    let query = BackendTenantListQuery {
+        scope: BackendTenantScope {
+            tenant_id: subject.tenant_id,
+            organization_id: subject.organization_id,
+        },
+        offset: page_params.offset,
+        limit: page_params.page_size,
     };
-    match state.store.list_provider_accounts(scope).await {
-        Ok(items) => Json(BackendPaymentAdminApiResult::success(items)).into_response(),
+    match state.store.list_provider_accounts(query).await {
+        Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
         Err(error) => {
-            backend_payment_error_response("payment provider account list is unavailable", error)
+            backend_payment_error_response(ctx, "payment provider account list is unavailable", error)
         }
     }
 }
@@ -1516,22 +1732,27 @@ async fn list_provider_accounts(
 async fn create_provider_account(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Json(body): Json<UpsertProviderAccountBody>,
 ) -> Response {
-    upsert_provider_account_inner(state, runtime_context, headers, None, body).await
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
+    upsert_provider_account_inner(state, runtime_context, ctx, headers, None, body).await
 }
 
 async fn update_provider_account(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Path(provider_account_id): Path<String>,
     Json(body): Json<UpsertProviderAccountBody>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     upsert_provider_account_inner(
         state,
         runtime_context,
+        ctx,
         headers,
         Some(provider_account_id),
         body,
@@ -1542,15 +1763,17 @@ async fn update_provider_account(
 async fn upsert_provider_account_inner(
     state: BackendPaymentAdminState,
     runtime_context: Option<Extension<IamAppContext>>,
+    ctx: Option<&WebRequestContext>,
     headers: HeaderMap,
     provider_account_id: Option<String>,
     body: UpsertProviderAccountBody,
 ) -> Response {
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
     let _write_headers = match validate_backend_write_payload(
+        ctx,
         &headers,
         "payment-provider-account-upsert",
         &body,
@@ -1559,67 +1782,104 @@ async fn upsert_provider_account_inner(
         Ok(headers) => headers,
         Err(response) => return response,
     };
-    let account_no = body.account_no.unwrap_or_else(|| {
-        provider_account_id
-            .clone()
-            .unwrap_or_else(|| "acct".to_owned())
-    });
+    let account_no = match body.account_no {
+        Some(value) => match require_trimmed_string(ctx, Some(value), "accountNo") {
+            Ok(value) => value,
+            Err(response) => return response,
+        },
+        None => match provider_account_id.as_ref() {
+            Some(value) => value.clone(),
+            None => return validation(ctx, "accountNo is required"),
+        },
+    };
+    let provider_code = match require_trimmed_string(ctx, body.provider_code, "providerCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let merchant_id = match require_trimmed_string(ctx, body.merchant_id, "merchantId") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let environment = match require_trimmed_string(ctx, body.environment, "environment") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let country_code = match require_trimmed_string(ctx, body.country_code, "countryCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let settlement_currency =
+        match require_trimmed_string(ctx, body.settlement_currency, "settlementCurrency") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let secret_ref = match require_trimmed_string(ctx, body.secret_ref, "secretRef") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let payload = BackendProviderAccountPayload {
         id: provider_account_id,
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
         account_no,
-        provider_code: body
-            .provider_code
-            .unwrap_or_else(|| "wechat_pay".to_owned()),
-        merchant_id: body.merchant_id.unwrap_or_else(|| "merchant".to_owned()),
-        environment: body.environment.unwrap_or_else(|| "production".to_owned()),
-        country_code: body.country_code.unwrap_or_else(|| "CN".to_owned()),
-        settlement_currency: body.settlement_currency.unwrap_or_else(|| "CNY".to_owned()),
-        secret_ref: body
-            .secret_ref
-            .unwrap_or_else(|| "vault://secret".to_owned()),
+        provider_code,
+        merchant_id,
+        environment,
+        country_code,
+        settlement_currency,
+        secret_ref,
         webhook_secret_ref: body.webhook_secret_ref,
         certificate_ref: body.certificate_ref,
         status: body.status.unwrap_or_else(|| "active".to_owned()),
     };
     match state.store.upsert_provider_account(payload).await {
-        Ok(item) => Json(BackendPaymentAdminApiResult::success(item)).into_response(),
+        Ok(item) => success_item(ctx, item),
         Err(error) => {
-            backend_payment_error_response("payment provider account upsert failed", error)
+            backend_payment_error_response(ctx, "payment provider account upsert failed", error)
         }
     }
 }
 
 async fn list_channels(
     State(state): State<BackendPaymentAdminState>,
+    Query(params): Query<BackendListQueryParams>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
-    let scope = BackendTenantScope {
-        tenant_id: subject.tenant_id,
-        organization_id: subject.organization_id,
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
+    let query = BackendTenantListQuery {
+        scope: BackendTenantScope {
+            tenant_id: subject.tenant_id,
+            organization_id: subject.organization_id,
+        },
+        offset: page_params.offset,
+        limit: page_params.page_size,
     };
-    match state.store.list_channels(scope).await {
-        Ok(items) => Json(BackendPaymentAdminApiResult::success(items)).into_response(),
-        Err(error) => backend_payment_error_response("payment channel list is unavailable", error),
+    match state.store.list_channels(query).await {
+        Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
+        Err(error) => backend_payment_error_response(ctx, "payment channel list is unavailable", error),
     }
 }
 
 async fn create_channel(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Json(body): Json<UpsertChannelBody>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
     let _write_headers = match validate_backend_write_payload(
+        ctx,
         &headers,
         "payment-channel-upsert",
         &body,
@@ -1628,46 +1888,74 @@ async fn create_channel(
         Ok(headers) => headers,
         Err(response) => return response,
     };
-    let channel_no = body.channel_no.unwrap_or_else(|| "channel".to_owned());
+    let channel_no = match require_trimmed_string(ctx, body.channel_no, "channelNo") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let provider_account_id =
+        match require_trimmed_string(ctx, body.provider_account_id, "providerAccountId") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let method_id = match require_trimmed_string(ctx, body.method_id, "methodId") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let scene_code = match require_trimmed_string(ctx, body.scene_code, "sceneCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let currency_code = match require_trimmed_string(ctx, body.currency_code, "currencyCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let country_code = match require_trimmed_string(ctx, body.country_code, "countryCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let payload = BackendPaymentChannelPayload {
         id: None,
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
-        channel_no: channel_no.clone(),
-        provider_account_id: body
-            .provider_account_id
-            .unwrap_or_else(|| stable_storage_id(&["provider-account", &channel_no])),
-        method_id: body
-            .method_id
-            .unwrap_or_else(|| stable_storage_id(&["payment-method", &channel_no])),
-        scene_code: body.scene_code.unwrap_or_else(|| "app".to_owned()),
-        currency_code: body.currency_code.unwrap_or_else(|| "CNY".to_owned()),
-        country_code: body.country_code.unwrap_or_else(|| "CN".to_owned()),
+        channel_no,
+        provider_account_id,
+        method_id,
+        scene_code,
+        currency_code,
+        country_code,
         status: body.status.unwrap_or_else(|| "active".to_owned()),
         priority: body.priority.unwrap_or(0),
     };
     match state.store.upsert_channel(payload).await {
-        Ok(item) => Json(BackendPaymentAdminApiResult::success(item)).into_response(),
-        Err(error) => backend_payment_error_response("payment channel upsert failed", error),
+        Ok(item) => success_item(ctx, item),
+        Err(error) => backend_payment_error_response(ctx, "payment channel upsert failed", error),
     }
 }
 
 async fn list_route_rules(
     State(state): State<BackendPaymentAdminState>,
+    Query(params): Query<BackendListQueryParams>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
-    let scope = BackendTenantScope {
-        tenant_id: subject.tenant_id,
-        organization_id: subject.organization_id,
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
+    let query = BackendTenantListQuery {
+        scope: BackendTenantScope {
+            tenant_id: subject.tenant_id,
+            organization_id: subject.organization_id,
+        },
+        offset: page_params.offset,
+        limit: page_params.page_size,
     };
-    match state.store.list_route_rules(scope).await {
-        Ok(items) => Json(BackendPaymentAdminApiResult::success(items)).into_response(),
+    match state.store.list_route_rules(query).await {
+        Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
         Err(error) => {
-            backend_payment_error_response("payment route rule list is unavailable", error)
+            backend_payment_error_response(ctx, "payment route rule list is unavailable", error)
         }
     }
 }
@@ -1675,34 +1963,40 @@ async fn list_route_rules(
 async fn create_route_rule(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Json(body): Json<UpsertRouteRuleBody>,
 ) -> Response {
-    upsert_route_rule_inner(state, runtime_context, headers, None, body).await
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
+    upsert_route_rule_inner(state, runtime_context, ctx, headers, None, body).await
 }
 
 async fn update_route_rule(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Path(route_rule_id): Path<String>,
     Json(body): Json<UpsertRouteRuleBody>,
 ) -> Response {
-    upsert_route_rule_inner(state, runtime_context, headers, Some(route_rule_id), body).await
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
+    upsert_route_rule_inner(state, runtime_context, ctx, headers, Some(route_rule_id), body).await
 }
 
 async fn upsert_route_rule_inner(
     state: BackendPaymentAdminState,
     runtime_context: Option<Extension<IamAppContext>>,
+    ctx: Option<&WebRequestContext>,
     headers: HeaderMap,
     route_rule_id: Option<String>,
     body: UpsertRouteRuleBody,
 ) -> Response {
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
     let _write_headers = match validate_backend_write_payload(
+        ctx,
         &headers,
         "payment-route-rule-upsert",
         &body,
@@ -1711,14 +2005,25 @@ async fn upsert_route_rule_inner(
         Ok(headers) => headers,
         Err(response) => return response,
     };
-    let rule_no = body
-        .rule_no
-        .unwrap_or_else(|| route_rule_id.clone().unwrap_or_else(|| "rule".to_owned()));
+    let rule_no = match body.rule_no {
+        Some(value) => match require_trimmed_string(ctx, Some(value), "ruleNo") {
+            Ok(value) => value,
+            Err(response) => return response,
+        },
+        None => match route_rule_id.clone() {
+            Some(value) => value,
+            None => return validation(ctx, "ruleNo is required"),
+        },
+    };
+    let channel_id = match require_trimmed_string(ctx, body.channel_id, "channelId") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let payload = BackendRouteRulePayload {
         id: route_rule_id,
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
-        rule_no: rule_no.clone(),
+        rule_no,
         priority: body.priority.unwrap_or(0),
         purchase_type: body.purchase_type,
         country_code: body.country_code,
@@ -1728,72 +2033,88 @@ async fn upsert_route_rule_inner(
         amount_max: body.amount_max,
         user_segment: body.user_segment,
         risk_level: body.risk_level,
-        channel_id: body
-            .channel_id
-            .unwrap_or_else(|| stable_storage_id(&["payment-channel", &rule_no])),
+        channel_id,
         status: body.status.unwrap_or_else(|| "active".to_owned()),
         starts_at: body.starts_at,
         ends_at: body.ends_at,
     };
     match state.store.upsert_route_rule(payload).await {
-        Ok(item) => Json(BackendPaymentAdminApiResult::success(item)).into_response(),
-        Err(error) => backend_payment_error_response("payment route rule upsert failed", error),
+        Ok(item) => success_item(ctx, item),
+        Err(error) => backend_payment_error_response(ctx, "payment route rule upsert failed", error),
     }
 }
 
 async fn delete_route_rule(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     Path(route_rule_id): Path<String>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
     let scope = BackendTenantScope {
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
     };
     match state.store.delete_route_rule(scope, route_rule_id).await {
-        Ok(()) => Json(BackendPaymentAdminApiResult::<()>::success(())).into_response(),
-        Err(error) => backend_payment_error_response("payment route rule delete failed", error),
+        Ok(()) => success_command_accepted(ctx, None),
+        Err(error) => backend_payment_error_response(ctx, "payment route rule delete failed", error),
     }
 }
 
 async fn list_attempts(
     State(state): State<BackendPaymentAdminState>,
+    Query(params): Query<BackendListQueryParams>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
-    let scope = BackendTenantScope {
-        tenant_id: subject.tenant_id,
-        organization_id: subject.organization_id,
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
+    let query = BackendTenantListQuery {
+        scope: BackendTenantScope {
+            tenant_id: subject.tenant_id,
+            organization_id: subject.organization_id,
+        },
+        offset: page_params.offset,
+        limit: page_params.page_size,
     };
-    match state.store.list_attempts(scope).await {
-        Ok(items) => Json(BackendPaymentAdminApiResult::success(items)).into_response(),
-        Err(error) => backend_payment_error_response("payment attempt list is unavailable", error),
+    match state.store.list_attempts(query).await {
+        Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
+        Err(error) => backend_payment_error_response(ctx, "payment attempt list is unavailable", error),
     }
 }
 
 async fn list_webhook_events(
     State(state): State<BackendPaymentAdminState>,
+    Query(params): Query<BackendListQueryParams>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
-    let scope = BackendTenantScope {
-        tenant_id: subject.tenant_id,
-        organization_id: subject.organization_id,
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
+    let query = BackendTenantListQuery {
+        scope: BackendTenantScope {
+            tenant_id: subject.tenant_id,
+            organization_id: subject.organization_id,
+        },
+        offset: page_params.offset,
+        limit: page_params.page_size,
     };
-    match state.store.list_webhook_events(scope).await {
-        Ok(items) => Json(BackendPaymentAdminApiResult::success(items)).into_response(),
+    match state.store.list_webhook_events(query).await {
+        Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
         Err(error) => {
-            backend_payment_error_response("payment webhook event list is unavailable", error)
+            backend_payment_error_response(ctx, "payment webhook event list is unavailable", error)
         }
     }
 }
@@ -1801,52 +2122,57 @@ async fn list_webhook_events(
 async fn replay_webhook_event(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     Path(event_id): Path<String>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
     let scope = BackendTenantScope {
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
     };
     match state.store.replay_webhook_event(scope, event_id).await {
-        Ok(WebhookReplayResult::Queued(item)) => {
-            Json(BackendPaymentAdminApiResult::success(item)).into_response()
+        Ok(WebhookReplayResult::Queued(item)) => success_item(ctx, item),
+        Ok(WebhookReplayResult::NotFound) => {
+            not_found(ctx, "payment webhook event was not found")
         }
-        Ok(WebhookReplayResult::NotFound) => problem_error_response(
-            StatusCode::NOT_FOUND,
-            "4040",
-            "payment webhook event was not found",
-        ),
-        Ok(WebhookReplayResult::LimitExceeded { current_retries }) => problem_error_response(
-            StatusCode::CONFLICT,
-            "4091",
+        Ok(WebhookReplayResult::LimitExceeded { current_retries }) => conflict(
+            ctx,
             format!(
                 "webhook event has reached the replay limit ({WEBHOOK_MAX_RETRIES}); current retries = {current_retries}"
             ),
         ),
-        Err(error) => backend_payment_error_response("payment webhook replay failed", error),
+        Err(error) => backend_payment_error_response(ctx, "payment webhook replay failed", error),
     }
 }
 
 async fn list_reconciliation_runs(
     State(state): State<BackendPaymentAdminState>,
+    Query(params): Query<BackendListQueryParams>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
-    let scope = BackendTenantScope {
-        tenant_id: subject.tenant_id,
-        organization_id: subject.organization_id,
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
+    let query = BackendTenantListQuery {
+        scope: BackendTenantScope {
+            tenant_id: subject.tenant_id,
+            organization_id: subject.organization_id,
+        },
+        offset: page_params.offset,
+        limit: page_params.page_size,
     };
-    match state.store.list_reconciliation_runs(scope).await {
-        Ok(items) => Json(BackendPaymentAdminApiResult::success(items)).into_response(),
+    match state.store.list_reconciliation_runs(query).await {
+        Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
         Err(error) => {
-            backend_payment_error_response("payment reconciliation run list is unavailable", error)
+            backend_payment_error_response(ctx, "payment reconciliation run list is unavailable", error)
         }
     }
 }
@@ -1854,14 +2180,17 @@ async fn list_reconciliation_runs(
 async fn create_reconciliation_run(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Json(body): Json<CreateReconciliationRunBody>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(ctx, message),
     };
     let write_headers = match validate_backend_write_payload(
+        ctx,
         &headers,
         "payment-reconciliation-run-create",
         &body,
@@ -1870,34 +2199,70 @@ async fn create_reconciliation_run(
         Ok(headers) => headers,
         Err(response) => return response,
     };
-    let period_start = body
+    let provider_code = match require_trimmed_string(ctx, body.provider_code, "providerCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let provider_account_id = match body
+        .provider_account_id
+        .or(body.account_id)
+        .and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_owned())
+            }
+        }) {
+        Some(value) => value,
+        None => return validation(ctx, "providerAccountId is required"),
+    };
+    let reconciliation_type =
+        match require_trimmed_string(ctx, body.reconciliation_type, "reconciliationType") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let period_start = match body
         .period_start
         .or(body.statement_date)
-        .unwrap_or_else(current_timestamp_string);
-    let period_end = body.period_end.unwrap_or_else(|| period_start.clone());
+        .and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_owned())
+            }
+        }) {
+        Some(value) => value,
+        None => return validation(ctx, "periodStart is required"),
+    };
+    let period_end = match body.period_end {
+        Some(value) => match require_trimmed_string(ctx, Some(value), "periodEnd") {
+            Ok(value) => value,
+            Err(response) => return response,
+        },
+        None => period_start.clone(),
+    };
+    let currency_code = match require_trimmed_string(ctx, body.currency_code, "currencyCode") {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let payload = BackendReconciliationRunPayload {
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
-        provider_code: body
-            .provider_code
-            .unwrap_or_else(|| "wechat_pay".to_owned()),
-        provider_account_id: body
-            .provider_account_id
-            .or(body.account_id)
-            .unwrap_or_else(|| "account".to_owned()),
-        reconciliation_type: body
-            .reconciliation_type
-            .unwrap_or_else(|| "daily".to_owned()),
+        provider_code,
+        provider_account_id,
+        reconciliation_type,
         period_start,
         period_end,
-        currency_code: body.currency_code.unwrap_or_else(|| "CNY".to_owned()),
+        currency_code,
         request_no: write_headers.request_no,
         idempotency_key: write_headers.idempotency_key,
     };
     match state.store.create_reconciliation_run(payload).await {
-        Ok(item) => Json(BackendPaymentAdminApiResult::success(item)).into_response(),
+        Ok(item) => success_item(ctx, item),
         Err(error) => {
-            backend_payment_error_response("payment reconciliation run create failed", error)
+            backend_payment_error_response(ctx, "payment reconciliation run create failed", error)
         }
     }
 }
@@ -1913,18 +2278,19 @@ fn map_method(value: BackendPaymentMethodView) -> BackendPaymentMethodResponse {
     }
 }
 
-fn backend_payment_error_response(context: &str, error: CommerceServiceError) -> Response {
-    // C16 修复：500 错误使用 Problem+json。
-    problem_error_response(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "5000",
-        format!("{context}: {}", error.message()),
-    )
+fn backend_payment_error_response(
+    ctx: Option<&WebRequestContext>,
+    _context: &str,
+    error: CommerceServiceError,
+) -> Response {
+    map_service_error(ctx, error)
 }
 
-fn unauthorized_response(message: impl Into<String>) -> Response {
-    // C16 修复：401 错误使用 Problem+json。
-    problem_error_response(StatusCode::UNAUTHORIZED, "4010", message)
+fn unauthorized_response(
+    ctx: Option<&WebRequestContext>,
+    message: impl Into<String>,
+) -> Response {
+    unauthorized(ctx, message)
 }
 
 fn map_method_row_sqlite(row: &SqliteRow) -> BackendPaymentMethodView {
@@ -2000,12 +2366,12 @@ fn map_route_rule_pg(row: &PgRow) -> serde_json::Value {
 fn map_attempt_sqlite(row: &SqliteRow) -> serde_json::Value {
     serde_json::json!({
         "id": sqlite_string(row, "id"),
-        "paymentId": sqlite_string(row, "payment_id"),
+        "paymentIntentId": sqlite_string(row, "payment_intent_id"),
         "attemptNo": sqlite_string(row, "attempt_no"),
         "providerCode": sqlite_string(row, "provider_code"),
         "channelId": sqlite_string(row, "channel_id"),
         "amount": sqlite_string(row, "amount"),
-        "currency": sqlite_string(row, "currency"),
+        "currencyCode": sqlite_string(row, "currency_code"),
         "status": sqlite_string(row, "status"),
         "providerTransactionId": sqlite_optional_string(row, "provider_transaction_id"),
         "createdAt": sqlite_string(row, "created_at"),
@@ -2015,12 +2381,12 @@ fn map_attempt_sqlite(row: &SqliteRow) -> serde_json::Value {
 fn map_attempt_pg(row: &PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": pg_string(row, "id"),
-        "paymentId": pg_string(row, "payment_id"),
+        "paymentIntentId": pg_string(row, "payment_intent_id"),
         "attemptNo": pg_string(row, "attempt_no"),
         "providerCode": pg_string(row, "provider_code"),
         "channelId": pg_string(row, "channel_id"),
         "amount": pg_string(row, "amount"),
-        "currency": pg_string(row, "currency"),
+        "currencyCode": pg_string(row, "currency_code"),
         "status": pg_string(row, "status"),
         "providerTransactionId": pg_optional_string(row, "provider_transaction_id"),
         "createdAt": pg_string(row, "created_at"),
@@ -2091,6 +2457,29 @@ fn sqlite_optional_string(row: &SqliteRow, column: &str) -> Option<String> {
     row.try_get::<Option<String>, _>(column).ok().flatten()
 }
 
+fn sqlite_total_count(rows: &[SqliteRow]) -> i64 {
+    rows.first()
+        .and_then(|row| row.try_get::<i64, _>("total_count").ok())
+        .unwrap_or(0)
+}
+
+fn pg_total_count(rows: &[PgRow]) -> i64 {
+    rows.first()
+        .and_then(|row| row.try_get::<i64, _>("total_count").ok())
+        .unwrap_or(0)
+}
+
+fn require_trimmed_string(
+    ctx: Option<&WebRequestContext>,
+    value: Option<String>,
+    field: &str,
+) -> Result<String, Response> {
+    match value {
+        Some(value) if !value.trim().is_empty() => Ok(value.trim().to_owned()),
+        _ => Err(validation(ctx, format!("{field} is required"))),
+    }
+}
+
 fn sqlite_string(row: &SqliteRow, column: &str) -> String {
     sqlite_optional_string(row, column).unwrap_or_default()
 }
@@ -2105,6 +2494,7 @@ fn pg_string(row: &PgRow, column: &str) -> String {
 
 #[allow(clippy::result_large_err)]
 fn validate_backend_write_payload(
+    ctx: Option<&WebRequestContext>,
     headers: &HeaderMap,
     scope: &str,
     body: &impl Serialize,
@@ -2113,16 +2503,18 @@ fn validate_backend_write_payload(
     validate_write_payload(headers, scope, body, |idempotency_key| {
         format!("{request_no_prefix}-{idempotency_key}")
     })
-    .map_err(backend_write_header_error)
+    .map_err(|error| backend_write_header_error(ctx, error))
 }
 
-fn backend_write_header_error(error: WriteCommandHeaderError) -> Response {
+fn backend_write_header_error(
+    ctx: Option<&WebRequestContext>,
+    error: WriteCommandHeaderError,
+) -> Response {
     let message = match error {
         WriteCommandHeaderError::MissingHeader(name) => format!("{name} header is required"),
         WriteCommandHeaderError::InvalidHeader(message) => message.to_owned(),
     };
-    // C16 修复：400 错误使用 Problem+json。
-    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
+    validation(ctx, message)
 }
 
 fn current_timestamp_string() -> String {

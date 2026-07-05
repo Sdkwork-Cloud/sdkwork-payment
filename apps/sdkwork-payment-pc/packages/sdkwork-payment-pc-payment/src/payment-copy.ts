@@ -1,4 +1,4 @@
-﻿export type SdkworkPaymentLocale = "en-US" | "zh-CN";
+export type SdkworkPaymentLocale = "en-US" | "zh-CN";
 
 export type SdkworkPaymentMessagesOverrides = DeepPartial<SdkworkPaymentMessages>;
 
@@ -98,6 +98,11 @@ export interface SdkworkPaymentMessages {
     methodsEmpty: string;
     methodsEyebrow: string;
     methodsTitle: string;
+    paginationLabel: string;
+    paginationNext: string;
+    paginationPrevious: string;
+    paginationRecords: string;
+    paginationSummary: string;
     recordsDescription: string;
     recordsEyebrow: string;
     recordsTitle: string;
@@ -283,6 +288,11 @@ const EN_US_MESSAGES: SdkworkPaymentMessages = {
     methodsEmpty: "No payment methods are currently available for this client type.",
     methodsEyebrow: "Payment methods",
     methodsTitle: "Provider rail",
+    paginationLabel: "Page size",
+    paginationNext: "Next",
+    paginationPrevious: "Previous",
+    paginationRecords: "records",
+    paginationSummary: "Page {page} of {totalPages} · {totalItems} {records}",
     recordsDescription: "Recent payment attempts and settlement outcomes.",
     recordsEyebrow: "Payment records",
     recordsTitle: "Payment records",
@@ -433,6 +443,11 @@ const ZH_CN_MESSAGES: SdkworkPaymentMessages = {
     methodsEmpty: "\u5f53\u524d\u5ba2\u6237\u7aef\u7c7b\u578b\u6682\u65e0\u53ef\u7528\u7684\u652f\u4ed8\u65b9\u5f0f\u3002",
     methodsEyebrow: "\u652f\u4ed8\u65b9\u5f0f",
     methodsTitle: "\u652f\u4ed8\u901a\u9053",
+    paginationLabel: "\u6bcf\u9875\u6761\u6570",
+    paginationNext: "\u4e0b\u4e00\u9875",
+    paginationPrevious: "\u4e0a\u4e00\u9875",
+    paginationRecords: "\u6761\u8bb0\u5f55",
+    paginationSummary: "\u7b2c {page} \u9875 / \u5171 {totalPages} \u9875 \u00b7 {totalItems} {records}",
     recordsDescription: "\u67e5\u770b\u6700\u8fd1\u7684\u652f\u4ed8\u5c1d\u8bd5\u4e0e\u7ed3\u7b97\u7ed3\u679c\u3002",
     recordsEyebrow: "\u652f\u4ed8\u8bb0\u5f55",
     recordsTitle: "\u652f\u4ed8\u8bb0\u5f55",

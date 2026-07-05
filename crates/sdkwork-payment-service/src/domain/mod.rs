@@ -252,6 +252,89 @@ impl PaymentIntentDraft {
     }
 }
 
+impl PaymentStatus {
+    pub fn from_wire(value: &str) -> Result<Self, CommerceServiceError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "created" => Ok(Self::Created),
+            "pending" | "processing" => Ok(Self::Pending),
+            "succeeded" | "success" | "paid" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "canceled" | "cancelled" | "closed" => Ok(Self::Closed),
+            "refunding" => Ok(Self::Refunding),
+            "refunded" => Ok(Self::Refunded),
+            other => Err(CommerceServiceError::validation(format!(
+                "unknown payment status: {other}"
+            ))),
+        }
+    }
+
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Pending => "pending",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Closed => "canceled",
+            Self::Refunding => "processing",
+            Self::Refunded => "refunded",
+        }
+    }
+}
+
+impl RefundStatus {
+    pub fn from_wire(value: &str) -> Result<Self, CommerceServiceError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "submitted" | "requested" => Ok(Self::Requested),
+            "processing" => Ok(Self::Processing),
+            "succeeded" | "success" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "closed" | "canceled" | "cancelled" => Ok(Self::Closed),
+            other => Err(CommerceServiceError::validation(format!(
+                "unknown refund status: {other}"
+            ))),
+        }
+    }
+
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::Requested => "submitted",
+            Self::Processing => "processing",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Closed => "closed",
+        }
+    }
+}
+
+/// Validate a payment status change using persistence wire values (`pending`, `canceled`, …).
+pub fn validate_payment_wire_transition(
+    from: &str,
+    to: &str,
+) -> Result<(), CommerceServiceError> {
+    let from_status = PaymentStatus::from_wire(from)?;
+    let to_status = PaymentStatus::from_wire(to)?;
+    if from_status == to_status {
+        return Ok(());
+    }
+    PaymentTransition::new(from_status, to_status).validate()
+}
+
+/// Validate a refund status change. Pass `from: None` when creating a new refund row.
+pub fn validate_refund_wire_transition(
+    from: Option<&str>,
+    to: &str,
+) -> Result<(), CommerceServiceError> {
+    let to_status = RefundStatus::from_wire(to)?;
+    let Some(from) = from.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    let from_status = RefundStatus::from_wire(from)?;
+    if from_status == to_status {
+        return Ok(());
+    }
+    RefundTransition::new(from_status, to_status).validate()
+}
+
 impl PaymentTransition {
     pub fn new(from: PaymentStatus, to: PaymentStatus) -> Self {
         Self { from, to }
@@ -264,7 +347,8 @@ impl PaymentTransition {
             | (PaymentStatus::Pending, PaymentStatus::Failed)
             | (PaymentStatus::Pending, PaymentStatus::Closed)
             | (PaymentStatus::Succeeded, PaymentStatus::Refunding)
-            | (PaymentStatus::Refunding, PaymentStatus::Refunded) => Ok(()),
+            | (PaymentStatus::Refunding, PaymentStatus::Refunded)
+            | (PaymentStatus::Refunding, PaymentStatus::Failed) => Ok(()),
             _ => Err(CommerceServiceError::invalid_state(
                 "invalid payment status transition",
             )),

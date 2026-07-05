@@ -194,6 +194,7 @@ impl PostgresCommercePaymentIntentStore {
 
         let now = current_timestamp_string();
         let canceled = CommercePaymentStatus::Canceled.as_str();
+        crate::shared::ensure_payment_status_transition(&intent.status, canceled)?;
         sqlx::query(
             r#"
             UPDATE commerce_payment_intent
@@ -417,6 +418,8 @@ async fn load_payment_method_for_intent(
         &command.owner_user_id,
         &command.order_id,
         &command.payment_method,
+        &command.request_no,
+        &command.idempotency_key,
     )?;
     let row = sqlx::query(
         r#"
@@ -427,7 +430,6 @@ async fn load_payment_method_for_intent(
           AND (
                 (tenant_id = CAST($2 AS TEXT) AND organization_id = CAST($3 AS TEXT))
              OR (tenant_id = CAST($4 AS TEXT) AND organization_id IS NULL)
-             OR (tenant_id = '100001' AND (organization_id = '0' OR organization_id IS NULL))
           )
         ORDER BY CASE WHEN tenant_id = CAST($5 AS TEXT) THEN 0 ELSE 1 END, sort_order ASC
         LIMIT 1

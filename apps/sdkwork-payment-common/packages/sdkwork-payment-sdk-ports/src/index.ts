@@ -26,9 +26,7 @@
 } as const;
 
 export type PaymentRequestParams = Record<string, unknown>;
-export type PaymentSdkResponse<T> = Promise<
-  T | { code?: number | string; data?: T; message?: string; msg?: string }
->;
+export type PaymentSdkResponse<T> = Promise<T>;
 export type PaymentSdkMethod = (...args: any[]) => PaymentSdkResponse<any>;
 
 type MethodTree = {

@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "kind": "sdkwork.component.spec",
   "component": {
-    "name": "sdkwork-commerce-payment-service",
-    "displayName": "SDKWork Commerce Payment",
+    "name": "sdkwork-payment-service",
+    "displayName": "SDKWork Payment Service",
     "version": "0.1.0",
     "type": "rust-crate",
-    "root": "crates/sdkwork-commerce-payment-service",
+    "root": "crates/sdkwork-payment-service",
     "domain": "commerce",
     "declaredDomain": null,
     "capability": "payment",
@@ -120,7 +120,7 @@
   },
   "verification": {
     "commands": [
-      "cargo test --manifest-path crates/sdkwork-commerce-payment-service/Cargo.toml"
+      "cargo test --manifest-path crates/sdkwork-payment-service/Cargo.toml"
     ]
   },
   "metadata": {

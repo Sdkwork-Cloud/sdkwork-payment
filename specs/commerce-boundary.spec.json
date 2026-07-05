@@ -25,8 +25,9 @@
     "app": [
       "/app/v3/api/recharges"
     ],
-    "reason": "Migrate to sdkwork-order; proxy then remove",
-    "targetRemovalPhase": "P3"
+    "reason": "Migrate to sdkwork-order; opt-in proxy only",
+    "enableEnv": "SDKWORK_PAYMENT_ENABLE_RECHARGE_PROXY",
+    "targetRemovalPhase": "P5"
   },
   "requiredForeignKeys": {
     "orderId": {
@@ -86,11 +87,34 @@
         "OrderPointsRechargeFulfillmentClient HTTP adapter",
         "confirm_owner_order_payment repository method"
       ]
+    },
+    {
+      "id": "P5",
+      "title": "Webhook ingestion + automatic owner-order settlement",
+      "status": "complete",
+      "blockedBy": ["P4"],
+      "deliverables": [
+        "ingest_provider_webhook_sqlite/postgres",
+        "webhook_router settle_owner_order_after_payment_success",
+        "OwnerOrderSettlementScope loaders"
+      ]
     }
   ],
   "backendOperationIds": {
     "payments": [
       "payments.ownerOrders.confirmations.create"
     ]
+  },
+  "fulfillmentCallbacks": [
+    {
+      "operationId": "orders.pointsRecharge.fulfillments.create",
+      "httpPath": "/backend/v3/api/orders/{orderId}/points_recharge/fulfillments",
+      "targetCapability": "order",
+      "triggeredBy": "payments.ownerOrders.confirmations.create"
+    }
+  ],
+  "cashierUrl": {
+    "builder": "sdkwork-utils-rust::build_commerce_cashier_url",
+    "baseUrlEnv": "SDKWORK_COMMERCE_CASHIER_BASE_URL"
   }
 }

@@ -1,4 +1,4 @@
-﻿import {
+import {
   getSdkworkPaymentService,
   hasSdkworkPaymentSession,
   requireSdkworkPaymentSession,
@@ -42,6 +42,15 @@ export interface SdkworkPaymentDashboardData {
   methods: SdkworkPaymentMethod[];
   records: SdkworkPaymentSummary[];
   statistics: SdkworkPaymentStatistics;
+  pageInfo?: SdkworkPaymentPageInfo;
+}
+
+export interface SdkworkPaymentPageInfo {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNextPage: boolean;
 }
 
 export interface SdkworkPaymentCreateInput {
@@ -75,6 +84,19 @@ export interface CreateSdkworkPaymentServiceOptions {
   pageSize?: number;
 }
 
+export interface SdkworkPaymentListRecordsInput {
+  page?: number;
+  pageSize?: number;
+  status?: SdkworkPaymentStatus | "all";
+  sortField?: string;
+  sortDirection?: "asc" | "desc";
+}
+
+export interface SdkworkPaymentListRecordsResult {
+  records: SdkworkPaymentSummary[];
+  pageInfo: SdkworkPaymentPageInfo;
+}
+
 export interface SdkworkPaymentService {
   closePayment(paymentId: string): Promise<SdkworkPaymentCloseResult>;
   createPayment(input: SdkworkPaymentCreateInput): Promise<SdkworkPaymentDetail>;
@@ -84,11 +106,23 @@ export interface SdkworkPaymentService {
   getPaymentStatus(paymentId: string): Promise<SdkworkPaymentSummary>;
   getPaymentStatusByOutTradeNo(outTradeNo: string): Promise<SdkworkPaymentSummary>;
   listOrderPayments(orderId: string): Promise<SdkworkPaymentSummary[]>;
+  listRecords(input?: SdkworkPaymentListRecordsInput): Promise<SdkworkPaymentListRecordsResult>;
   reconcilePayment(input: SdkworkPaymentReconcileInput): Promise<SdkworkPaymentSummary>;
 }
 
-interface RemotePageEnvelope<T> {
-  content?: T[];
+interface RemotePageInfo {
+  mode?: "offset" | "cursor";
+  page?: number;
+  pageSize?: number;
+  totalItems?: number;
+  totalPages?: number;
+  hasNextPage?: boolean;
+  cursor?: string | null;
+}
+
+interface RemoteListPage<T> {
+  items?: T[];
+  pageInfo?: RemotePageInfo;
 }
 
 interface RemotePaymentMethodProductType {
@@ -327,11 +361,33 @@ function sortMethods(methods: SdkworkPaymentMethod[]): SdkworkPaymentMethod[] {
   );
 }
 
+const ALLOWED_PAYMENT_URL_SCHEMES = new Set(["http:", "https:"]);
+
+function isSafePaymentUrl(value: string | undefined | null): value is string {
+  if (!value) {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  // 防御 javascript:/data:/vbscript: 等 XSS 向量，仅放行 http/https。
+  try {
+    const url = new URL(trimmed);
+    return ALLOWED_PAYMENT_URL_SCHEMES.has(url.protocol.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 function derivePaymentUrl(detail: RemotePaymentDetail | null | undefined): string | undefined {
   const paymentParams = detail?.paymentParams ?? {};
-  return toSdkworkPaymentOptionalString(detail?.paymentUrl)
-    || toSdkworkPaymentOptionalString(paymentParams.payUrl)
-    || toSdkworkPaymentOptionalString(paymentParams.mwebUrl);
+  const candidates = [
+    toSdkworkPaymentOptionalString(detail?.paymentUrl),
+    toSdkworkPaymentOptionalString(paymentParams.payUrl),
+    toSdkworkPaymentOptionalString(paymentParams.mwebUrl),
+  ];
+  return candidates.find((candidate) => isSafePaymentUrl(candidate));
 }
 
 function isQrImageLocator(value: string | undefined): boolean {
@@ -445,6 +501,25 @@ function createEmptyDashboard(clientType: SdkworkPaymentClientType): SdkworkPaym
   };
 }
 
+function derivePageInfo(
+  page: RemoteListPage<unknown> | null | undefined,
+  fallbackPage: number,
+  fallbackPageSize: number,
+): SdkworkPaymentPageInfo {
+  const remotePageInfo = page?.pageInfo;
+  const totalItems = toSdkworkPaymentNumber(remotePageInfo?.totalItems, 0);
+  const pageSize = toSdkworkPaymentNumber(remotePageInfo?.pageSize, fallbackPageSize);
+  const pageNumber = toSdkworkPaymentNumber(remotePageInfo?.page, fallbackPage);
+  const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(totalItems / pageSize)) : 1;
+  return {
+    page: pageNumber,
+    pageSize,
+    totalItems,
+    totalPages,
+    hasNextPage: pageNumber < totalPages,
+  };
+}
+
 function resolveReconcilePayload(
   input: SdkworkPaymentReconcileInput,
   copy: SdkworkPaymentServiceCopy,
@@ -547,14 +622,15 @@ export function createSdkworkPaymentService(
         statisticsPayload,
         copy.requestFailed,
       );
-      const page = unwrapSdkworkPaymentResponse<RemotePageEnvelope<RemotePaymentRecord>>(
+      const page = unwrapSdkworkPaymentResponse<RemoteListPage<RemotePaymentRecord>>(
         pagePayload,
         copy.requestFailed,
       );
 
-      const records = (page.content ?? [])
+      const records = (page?.items ?? [])
         .map((payment) => mapSummary(payment, messages))
         .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+      const pageInfo = derivePageInfo(page, 1, pageSize);
 
       return {
         clientType,
@@ -562,6 +638,7 @@ export function createSdkworkPaymentService(
         methods: sortMethods(methods.map((method) => mapMethod(method, messages))),
         records,
         statistics: mapStatistics(statistics),
+        pageInfo,
       };
     },
 
@@ -609,6 +686,35 @@ export function createSdkworkPaymentService(
       return (result ?? [])
         .map((payment) => mapSummary(payment, messages))
         .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    },
+
+    async listRecords(input) {
+      requireSdkworkPaymentSession(copy.signInRequired);
+      const pageNumber = Math.max(1, toSdkworkPaymentNumber(input?.page, 1));
+      const pageSizeNumber = Math.min(200, Math.max(1, toSdkworkPaymentNumber(input?.pageSize, pageSize)));
+      const statusFilter = input?.status && input.status !== "all" ? input.status : undefined;
+      const sortField = toSdkworkPaymentOptionalString(input?.sortField) ?? "createdAt";
+      const sortDirection = input?.sortDirection === "asc" ? "asc" : "desc";
+      const result = unwrapSdkworkPaymentResponse<RemoteListPage<RemotePaymentRecord>>(
+        await getPaymentAppService().payments.records.list({
+          page: pageNumber,
+          pageSize: pageSizeNumber,
+          sortField,
+          sortDirection,
+          ...(statusFilter ? { status: statusFilter } : {}),
+        }),
+        copy.requestFailed,
+      );
+
+      const records = (result?.items ?? [])
+        .map((payment) => mapSummary(payment, messages))
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+      const pageInfo = derivePageInfo(result, pageNumber, pageSizeNumber);
+
+      return {
+        records,
+        pageInfo,
+      };
     },
 
     async reconcilePayment(input) {

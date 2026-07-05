@@ -5,7 +5,7 @@ use sdkwork_order_service::OrderOwnerDetailQuery;
 use sdkwork_order_repository_sqlx::PostgresCommerceOrderStore;
 use std::sync::Arc;
 use sdkwork_payment_service::{
-    CreateOwnerRefundCommand, RefundDetailQuery, RefundListQuery, RefundView,
+    CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
@@ -44,6 +44,27 @@ impl PostgresCommerceRefundStore {
             return Ok(existing);
         }
 
+        let mut tx = self
+            .pool()
+            .begin()
+            .await
+            .map_err(|error| store_error("failed to begin refund transaction", error))?;
+
+        sqlx::query(
+            r#"
+            SELECT id
+            FROM commerce_order
+            WHERE tenant_id = CAST($1 AS TEXT)
+              AND id = CAST($2 AS TEXT)
+            FOR UPDATE
+            "#,
+        )
+        .bind(&command.tenant_id)
+        .bind(&command.order_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to lock order for refund", error))?;
+
         let detail_query = OrderOwnerDetailQuery::new(
             &command.tenant_id,
             command.organization_id.as_deref(),
@@ -53,8 +74,6 @@ impl PostgresCommerceRefundStore {
         let Some(detail) = self.order_store.retrieve_owner_order(detail_query).await? else {
             return Err(CommerceServiceError::not_found("order was not found"));
         };
-        // C3 修复：退款资格必须用 OR 语义——订单状态非 paid 或 无支付时间 任一不满足即拒绝。
-        // 原逻辑用 && 导致 status=refunded 但 pay_time 非空的订单仍可退款。
         if detail.summary.status != "paid" || detail.summary.pay_time.is_none() {
             return Err(CommerceServiceError::conflict(
                 "order is not eligible for refund",
@@ -73,21 +92,17 @@ impl PostgresCommerceRefundStore {
         let total_minor = money_to_minor_cents(detail.summary.total_amount.as_str())?;
         let refund_minor = money_to_minor_cents(&refund_amount)?;
         validate_refund_bounds(refund_minor, total_minor)?;
-        let already_refunded_minor = self.sum_refunded_amount(&command).await?;
+        let already_refunded_minor = sum_refunded_amount_in_tx(&mut tx, &command).await?;
         if refund_minor > total_minor.saturating_sub(already_refunded_minor) {
             return Err(CommerceServiceError::conflict(
                 "refund amount exceeds remaining refundable amount",
             ));
         }
 
-        let mut tx = self
-            .pool()
-            .begin()
-            .await
-            .map_err(|error| store_error("failed to begin refund transaction", error))?;
         let now = current_timestamp_string();
         let refund_id = refund_id(&command);
         let refund_no = format!("RF-{}", command.request_no);
+        crate::shared::ensure_refund_status_transition(None, "submitted")?;
 
         sqlx::query(
             r#"
@@ -97,7 +112,8 @@ impl PostgresCommerceRefundStore {
                  requested_by, request_no, idempotency_key, created_at, updated_at)
             VALUES
                 ($1, $2, $3, $4, $5, $6, $7, 'CNY', 'submitted', $8, 'buyer', $9, $10, $11, $12, $13)
-           "#,
+            ON CONFLICT (id) DO NOTHING
+            "#,
         )
         .bind(&refund_id)
         .bind(&command.tenant_id)
@@ -115,6 +131,13 @@ impl PostgresCommerceRefundStore {
         .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to insert refund", error))?;
+
+        if let Some(existing) = find_refund_by_idempotency_in_tx(&mut tx, &command).await? {
+            tx.commit()
+                .await
+                .map_err(|error| store_error("failed to commit refund idempotency replay", error))?;
+            return Ok(existing);
+        }
 
         insert_refund_event(
             &mut tx,
@@ -148,11 +171,12 @@ impl PostgresCommerceRefundStore {
     pub async fn list_owner_refunds(
         &self,
         query: RefundListQuery,
-    ) -> Result<Vec<RefundView>, CommerceServiceError> {
+    ) -> Result<RefundListPage, CommerceServiceError> {
         let mut sql = String::from(
             r#"
             SELECT r.id, r.refund_no, r.order_id, r.payment_attempt_id,
-                   CAST(r.amount AS TEXT) AS amount, r.currency_code, r.status, r.refund_reason_code
+                   CAST(r.amount AS TEXT) AS amount, r.currency_code, r.status, r.refund_reason_code,
+                   COUNT(*) OVER() AS total_count
             FROM commerce_refund r
             INNER JOIN commerce_order o
                 ON o.tenant_id = r.tenant_id
@@ -160,13 +184,15 @@ impl PostgresCommerceRefundStore {
             WHERE r.tenant_id = CAST($1 AS TEXT)
               AND ((r.organization_id = CAST($2 AS TEXT)) OR (r.organization_id IS NULL AND $3 IS NULL))
               AND o.owner_user_id = CAST($4 AS TEXT)
-           "#,
+              AND r.deleted_at IS NULL
+            "#,
         );
         if query.status.is_some() {
-            // C6 修复：PostgreSQL 占位符必须用 $N，原代码误用 SQLite 的 ? 会导致 sqlx 解析失败。
             sql.push_str(" AND r.status = CAST($5 AS TEXT)");
+            sql.push_str(" ORDER BY r.created_at DESC, r.id DESC LIMIT $6 OFFSET $7");
+        } else {
+            sql.push_str(" ORDER BY r.created_at DESC, r.id DESC LIMIT $5 OFFSET $6");
         }
-        sql.push_str(" ORDER BY r.created_at DESC, r.id DESC");
 
         let mut db_query = sqlx::query(&sql)
             .bind(&query.tenant_id)
@@ -176,13 +202,20 @@ impl PostgresCommerceRefundStore {
         if let Some(status) = query.status.as_deref() {
             db_query = db_query.bind(status);
         }
+        db_query = db_query.bind(query.limit).bind(query.offset);
 
         let rows = db_query
             .fetch_all(self.pool())
             .await
             .map_err(|error| store_error("failed to list owner refunds", error))?;
 
-        rows.into_iter().map(map_refund_row).collect()
+        let total_items = rows
+            .first()
+            .and_then(|row| row.try_get::<i64, _>("total_count").ok())
+            .unwrap_or(0);
+        let items = rows.into_iter().map(map_refund_row).collect::<Result<Vec<_>, _>>()?;
+
+        Ok(RefundListPage { items, total_items })
     }
 
     pub async fn retrieve_owner_refund(
@@ -266,31 +299,60 @@ impl PostgresCommerceRefundStore {
 
         Ok(row.map(|row| string_cell(&row, "id")))
     }
+}
 
-    /// C4 修复：累计该订单下已发起/处理中/成功的退款金额（minor cents），
-    /// 不含 failed/canceled 的退款，避免重复计数。
-    async fn sum_refunded_amount(
-        &self,
-        command: &CreateOwnerRefundCommand,
-    ) -> Result<i64, CommerceServiceError> {
-        let row = sqlx::query(
-            r#"
-            SELECT COALESCE(SUM(CAST(amount AS NUMERIC)), 0) AS refunded_total
-            FROM commerce_refund
-            WHERE tenant_id = CAST($1 AS TEXT)
-              AND order_id = CAST($2 AS TEXT)
-              AND LOWER(COALESCE(status, '')) IN ('submitted', 'processing', 'succeeded')
-           "#,
-        )
-        .bind(&command.tenant_id)
-        .bind(&command.order_id)
-        .fetch_one(self.pool())
-        .await
-        .map_err(|error| store_error("failed to sum refunded amount", error))?;
+async fn sum_refunded_amount_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    command: &CreateOwnerRefundCommand,
+) -> Result<i64, CommerceServiceError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT CAST(amount AS TEXT) AS amount
+        FROM commerce_refund
+        WHERE tenant_id = CAST($1 AS TEXT)
+          AND order_id = CAST($2 AS TEXT)
+          AND LOWER(COALESCE(status, '')) IN ('submitted', 'processing', 'succeeded')
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(&command.tenant_id)
+    .bind(&command.order_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| store_error("failed to sum refunded amount", error))?;
 
-        let total_str = string_cell(&row, "refunded_total");
-        money_to_minor_cents(&total_str)
-    }
+    rows.iter().try_fold(0_i64, |acc, row| {
+        let amount = string_cell(row, "amount");
+        let minor = money_to_minor_cents(&amount)?;
+        acc.checked_add(minor).ok_or_else(|| {
+            CommerceServiceError::validation("refunded amount sum overflows i64")
+        })
+    })
+}
+
+async fn find_refund_by_idempotency_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    command: &CreateOwnerRefundCommand,
+) -> Result<Option<RefundView>, CommerceServiceError> {
+    let row = sqlx::query(
+        r#"
+        SELECT id, refund_no, order_id, payment_attempt_id,
+               CAST(amount AS TEXT) AS amount, currency_code, status, refund_reason_code
+        FROM commerce_refund
+        WHERE tenant_id = CAST($1 AS TEXT)
+          AND order_id = CAST($2 AS TEXT)
+          AND idempotency_key = CAST($3 AS TEXT)
+        LIMIT 1
+        "#,
+    )
+    .bind(&command.tenant_id)
+    .bind(&command.order_id)
+    .bind(&command.idempotency_key)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| store_error("failed to load refund idempotency replay in tx", error))?;
+
+    row.map(map_refund_row).transpose()
 }
 
 async fn insert_refund_event(

@@ -1,4 +1,4 @@
-﻿import {
+import {
   createContext,
   useContext,
   useMemo,
@@ -19,6 +19,12 @@ import {
 export interface SdkworkPaymentIntlValue {
   copy: SdkworkPaymentMessages;
   formatCurrencyCny: (value: number | null | undefined) => string;
+  formatPaginationSummary: (pageInfo: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  }) => string;
   formatPaymentSummary: (paymentId: string | number) => string;
   formatPollingText: (seconds: number | null | undefined, needQuery?: boolean) => string;
   formatProductType: (value: string | null | undefined) => string;
@@ -96,6 +102,15 @@ function createSdkworkPaymentIntlValue(
     copy,
     formatCurrencyCny(value) {
       return formatSdkworkCurrencyCny(value, resolvedLocale);
+    },
+    formatPaginationSummary(pageInfo) {
+      return interpolateSdkworkPaymentTemplate(copy.page.paginationSummary, {
+        page: String(pageInfo.page),
+        pageSize: String(pageInfo.pageSize),
+        totalItems: String(pageInfo.totalItems),
+        totalPages: String(pageInfo.totalPages),
+        records: copy.page.paginationRecords,
+      });
     },
     formatPaymentSummary(paymentId) {
       return interpolateSdkworkPaymentTemplate(copy.format.paymentSummary, {

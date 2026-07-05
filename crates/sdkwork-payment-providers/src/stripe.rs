@@ -1,0 +1,518 @@
+use std::fmt;
+
+use hmac::{Hmac, Mac};
+use serde_json::Value;
+use sha2::Sha256;
+
+use crate::adapter::{
+    metadata_string, normalized_optional, require_non_empty, require_positive_amount,
+    PaymentAdapterFuture, PaymentAdapterOperation, PaymentCancelPaymentIntentRequest,
+    PaymentCreateIntentRequest, PaymentCreateRefundRequest, PaymentNormalizeWebhookRequest,
+    PaymentNormalizedWebhookEvent, PaymentProviderAdapter, PaymentProviderCapabilities,
+    PaymentProviderOperationOutcome, PaymentQueryPaymentIntentRequest, PaymentQueryRefundRequest,
+    PaymentVerifyWebhookRequest, PaymentWebhookVerificationOutcome,
+};
+use crate::error::{ProviderError, ProviderResult};
+use crate::http::ReqwestHttpClient;
+
+type HmacSha256 = Hmac<Sha256>;
+
+pub const STRIPE_PROVIDER_CODE: &str = "stripe";
+const STRIPE_API_BASE_URL: &str = "https://api.stripe.com";
+
+static STRIPE_CAPABILITIES: PaymentProviderCapabilities = PaymentProviderCapabilities {
+    provider_code: STRIPE_PROVIDER_CODE,
+    operations: &[
+        PaymentAdapterOperation::CreatePaymentIntent,
+        PaymentAdapterOperation::QueryPaymentIntent,
+        PaymentAdapterOperation::CancelPaymentIntent,
+        PaymentAdapterOperation::CreateRefund,
+        PaymentAdapterOperation::QueryRefund,
+        PaymentAdapterOperation::VerifyWebhook,
+        PaymentAdapterOperation::NormalizeWebhook,
+    ],
+};
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct StripePaymentProviderConfig {
+    pub secret_key: String,
+    pub webhook_secret: Option<String>,
+}
+
+impl fmt::Debug for StripePaymentProviderConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StripePaymentProviderConfig")
+            .field("secret_key", &"<redacted>")
+            .field(
+                "webhook_secret",
+                &self.webhook_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+pub struct StripePaymentProviderAdapter {
+    config: StripePaymentProviderConfig,
+    http: ReqwestHttpClient,
+}
+
+impl StripePaymentProviderAdapter {
+    pub fn with_default_http_client(config: StripePaymentProviderConfig) -> ProviderResult<Self> {
+        validate_secret_key(&config.secret_key)?;
+        if let Some(webhook_secret) = &config.webhook_secret {
+            if webhook_secret.trim().is_empty() {
+                return Err(ProviderError::invalid_request(
+                    PaymentAdapterOperation::VerifyWebhook,
+                    "Stripe webhook secret must not be empty when configured",
+                ));
+            }
+        }
+        let http = ReqwestHttpClient::new(STRIPE_API_BASE_URL)?
+            .with_bearer_auth(config.secret_key.clone());
+        Ok(Self { config, http })
+    }
+}
+
+impl PaymentProviderAdapter for StripePaymentProviderAdapter {
+    fn capabilities(&self) -> &'static PaymentProviderCapabilities {
+        &STRIPE_CAPABILITIES
+    }
+
+    fn create_payment_intent<'a>(
+        &'a self,
+        request: PaymentCreateIntentRequest,
+    ) -> PaymentAdapterFuture<'a, PaymentProviderOperationOutcome> {
+        Box::pin(async move {
+            let amount_minor = require_positive_amount(
+                request.amount_minor,
+                PaymentAdapterOperation::CreatePaymentIntent,
+                "amount_minor",
+            )?;
+            let currency = require_currency(
+                request.currency.as_deref(),
+                PaymentAdapterOperation::CreatePaymentIntent,
+            )?;
+            let idempotency_key =
+                metadata_string(&request.metadata, "idempotency_key").map(str::to_owned);
+            let mut form = vec![
+                ("amount".to_owned(), amount_minor.to_string()),
+                ("currency".to_owned(), currency.to_ascii_lowercase()),
+                (
+                    "automatic_payment_methods[enabled]".to_owned(),
+                    "true".to_owned(),
+                ),
+            ];
+            if let Some(tenant_id) = request.tenant_id {
+                form.push(("metadata[tenant_id]".to_owned(), tenant_id));
+            }
+            if let Some(merchant_order_no) = normalized_optional(request.merchant_order_no) {
+                form.push(("metadata[merchant_order_no]".to_owned(), merchant_order_no));
+            }
+            append_flat_metadata(&mut form, &request.metadata);
+
+            let response = self
+                .http
+                .post_form(
+                    STRIPE_PROVIDER_CODE,
+                    "/v1/payment_intents",
+                    form,
+                    idempotency_key.as_deref(),
+                )
+                .await?;
+            stripe_operation_outcome(PaymentAdapterOperation::CreatePaymentIntent, response)
+        })
+    }
+
+    fn query_payment_intent<'a>(
+        &'a self,
+        request: PaymentQueryPaymentIntentRequest,
+    ) -> PaymentAdapterFuture<'a, PaymentProviderOperationOutcome> {
+        Box::pin(async move {
+            let payment_intent_id = require_stripe_resource_id(
+                request.payment_intent_id.as_deref(),
+                PaymentAdapterOperation::QueryPaymentIntent,
+                "payment_intent_id",
+            )?;
+            let response = self
+                .http
+                .get(
+                    STRIPE_PROVIDER_CODE,
+                    &format!("/v1/payment_intents/{payment_intent_id}"),
+                )
+                .await?;
+            stripe_operation_outcome(PaymentAdapterOperation::QueryPaymentIntent, response)
+        })
+    }
+
+    fn cancel_payment_intent<'a>(
+        &'a self,
+        request: PaymentCancelPaymentIntentRequest,
+    ) -> PaymentAdapterFuture<'a, PaymentProviderOperationOutcome> {
+        Box::pin(async move {
+            let payment_intent_id = require_stripe_resource_id(
+                request.payment_intent_id.as_deref(),
+                PaymentAdapterOperation::CancelPaymentIntent,
+                "payment_intent_id",
+            )?;
+            let idempotency_key =
+                metadata_string(&request.metadata, "idempotency_key").map(str::to_owned);
+            let mut form = Vec::new();
+            if let Some(reason) = stripe_cancellation_reason(request.reason.as_deref()) {
+                form.push(("cancellation_reason".to_owned(), reason.to_owned()));
+            }
+            let response = self
+                .http
+                .post_form(
+                    STRIPE_PROVIDER_CODE,
+                    &format!("/v1/payment_intents/{payment_intent_id}/cancel"),
+                    form,
+                    idempotency_key.as_deref(),
+                )
+                .await?;
+            stripe_operation_outcome(PaymentAdapterOperation::CancelPaymentIntent, response)
+        })
+    }
+
+    fn create_refund<'a>(
+        &'a self,
+        request: PaymentCreateRefundRequest,
+    ) -> PaymentAdapterFuture<'a, PaymentProviderOperationOutcome> {
+        Box::pin(async move {
+            let payment_intent_id = require_non_empty(
+                request.payment_intent_id.as_deref(),
+                PaymentAdapterOperation::CreateRefund,
+                "payment_intent_id",
+            )?;
+            let amount_minor = require_positive_amount(
+                request.amount_minor,
+                PaymentAdapterOperation::CreateRefund,
+                "amount_minor",
+            )?;
+            let idempotency_key =
+                metadata_string(&request.metadata, "idempotency_key").map(str::to_owned);
+            let mut form = vec![
+                ("payment_intent".to_owned(), payment_intent_id),
+                ("amount".to_owned(), amount_minor.to_string()),
+            ];
+            if let Some(reason) = stripe_refund_reason(request.reason.as_deref()) {
+                form.push(("reason".to_owned(), reason.to_owned()));
+            }
+            if let Some(refund_no) = normalized_optional(request.refund_no) {
+                form.push(("metadata[refund_no]".to_owned(), refund_no));
+            }
+            append_flat_metadata(&mut form, &request.metadata);
+
+            let response = self
+                .http
+                .post_form(
+                    STRIPE_PROVIDER_CODE,
+                    "/v1/refunds",
+                    form,
+                    idempotency_key.as_deref(),
+                )
+                .await?;
+            stripe_operation_outcome(PaymentAdapterOperation::CreateRefund, response)
+        })
+    }
+
+    fn query_refund<'a>(
+        &'a self,
+        request: PaymentQueryRefundRequest,
+    ) -> PaymentAdapterFuture<'a, PaymentProviderOperationOutcome> {
+        Box::pin(async move {
+            let refund_id = require_stripe_resource_id(
+                request.refund_id.as_deref(),
+                PaymentAdapterOperation::QueryRefund,
+                "refund_id",
+            )?;
+            let response = self
+                .http
+                .get(STRIPE_PROVIDER_CODE, &format!("/v1/refunds/{refund_id}"))
+                .await?;
+            stripe_operation_outcome(PaymentAdapterOperation::QueryRefund, response)
+        })
+    }
+
+    fn verify_webhook<'a>(
+        &'a self,
+        request: PaymentVerifyWebhookRequest,
+    ) -> PaymentAdapterFuture<'a, PaymentWebhookVerificationOutcome> {
+        Box::pin(async move {
+            let Some(webhook_secret) = self.config.webhook_secret.as_deref() else {
+                return Err(ProviderError::invalid_request(
+                    PaymentAdapterOperation::VerifyWebhook,
+                    "Stripe webhook secret is required to verify webhook deliveries",
+                ));
+            };
+            let Some(signature_header) = find_header(&request.headers, "stripe-signature") else {
+                return Ok(PaymentWebhookVerificationOutcome {
+                    verified: false,
+                    provider_event_id: None,
+                });
+            };
+            let verified = verify_stripe_signature(webhook_secret, signature_header, &request.body);
+            let provider_event_id = if verified {
+                parse_webhook_event_id(&request.body)?
+            } else {
+                None
+            };
+            Ok(PaymentWebhookVerificationOutcome {
+                verified,
+                provider_event_id,
+            })
+        })
+    }
+
+    fn normalize_webhook<'a>(
+        &'a self,
+        request: PaymentNormalizeWebhookRequest,
+    ) -> PaymentAdapterFuture<'a, PaymentNormalizedWebhookEvent> {
+        Box::pin(async move {
+            let payload = serde_json::from_slice::<Value>(&request.body).map_err(|error| {
+                ProviderError::invalid_response(
+                    PaymentAdapterOperation::NormalizeWebhook,
+                    format!("Stripe webhook JSON is invalid: {error}"),
+                )
+            })?;
+            let object = payload
+                .get("data")
+                .and_then(|data| data.get("object"));
+            let out_trade_no = object
+                .and_then(|value| {
+                    value
+                        .get("metadata")
+                        .and_then(|metadata| metadata.get("merchant_order_no"))
+                        .and_then(Value::as_str)
+                })
+                .map(str::to_owned);
+            let payment_status = object
+                .and_then(|value| value.get("status").and_then(Value::as_str))
+                .map(str::to_owned);
+            Ok(PaymentNormalizedWebhookEvent {
+                provider_code: STRIPE_PROVIDER_CODE.to_owned(),
+                event_type: payload
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                provider_event_id: payload.get("id").and_then(Value::as_str).map(str::to_owned),
+                out_trade_no,
+                payment_status,
+                payload,
+            })
+        })
+    }
+}
+
+fn stripe_operation_outcome(
+    operation: PaymentAdapterOperation,
+    response: Value,
+) -> ProviderResult<PaymentProviderOperationOutcome> {
+    let native_id = response
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            ProviderError::invalid_response(operation, "Stripe response is missing id")
+        })?;
+    Ok(PaymentProviderOperationOutcome {
+        provider_code: STRIPE_PROVIDER_CODE.to_owned(),
+        native_id: Some(native_id),
+        raw_status: response
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        payload: response,
+    })
+}
+
+fn require_currency(currency: Option<&str>, operation: PaymentAdapterOperation) -> ProviderResult<String> {
+    let currency = require_non_empty(currency, operation, "currency")?;
+    if currency.len() != 3
+        || !currency
+            .chars()
+            .all(|character| character.is_ascii_alphabetic())
+    {
+        return Err(ProviderError::invalid_request(
+            operation,
+            "Stripe currency must be an ISO 4217 three-letter code",
+        ));
+    }
+    Ok(currency)
+}
+
+fn require_stripe_resource_id(
+    value: Option<&str>,
+    operation: PaymentAdapterOperation,
+    field: &str,
+) -> ProviderResult<String> {
+    let value = require_non_empty(value, operation, field)?;
+    if value.contains('/') || value.contains('?') || value.contains('#') {
+        return Err(ProviderError::invalid_request(
+            operation,
+            format!("Stripe {field} must be a resource id, not a path or URL"),
+        ));
+    }
+    Ok(value)
+}
+
+fn append_flat_metadata(form: &mut Vec<(String, String)>, metadata: &Value) {
+    let Some(object) = metadata.as_object() else {
+        return;
+    };
+    for (key, value) in object {
+        if key == "idempotency_key" || key.starts_with("stripe_") {
+            continue;
+        }
+        if let Some(value) = metadata_value_as_string(value) {
+            form.push((format!("metadata[{key}]"), value));
+        }
+    }
+}
+
+fn metadata_value_as_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => normalized_optional(Some(value.clone())),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn stripe_refund_reason(reason: Option<&str>) -> Option<&'static str> {
+    match reason.map(str::trim).filter(|value| !value.is_empty()) {
+        Some("duplicate") => Some("duplicate"),
+        Some("fraudulent") => Some("fraudulent"),
+        Some("requested_by_customer" | "customer_requested" | "user_requested") => {
+            Some("requested_by_customer")
+        }
+        Some(_) => Some("requested_by_customer"),
+        None => None,
+    }
+}
+
+fn stripe_cancellation_reason(reason: Option<&str>) -> Option<&'static str> {
+    match reason.map(str::trim).filter(|value| !value.is_empty()) {
+        Some("duplicate") => Some("duplicate"),
+        Some("fraudulent") => Some("fraudulent"),
+        Some("requested_by_customer" | "customer_requested" | "user_requested") => {
+            Some("requested_by_customer")
+        }
+        Some("abandoned") => Some("abandoned"),
+        Some(_) => Some("requested_by_customer"),
+        None => None,
+    }
+}
+
+fn find_header<'a>(headers: &'a [(String, String)], header_name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(header_name))
+        .map(|(_, value)| value.as_str())
+}
+
+pub(crate) fn verify_stripe_signature(
+    webhook_secret: &str,
+    signature_header: &str,
+    body: &[u8],
+) -> bool {
+    let Some(timestamp) = stripe_signature_value(signature_header, "t") else {
+        return false;
+    };
+    let signatures = stripe_signature_values(signature_header, "v1");
+    if signatures.is_empty() {
+        return false;
+    }
+    let signed_payload = format!("{timestamp}.");
+    let Ok(mut mac) = HmacSha256::new_from_slice(webhook_secret.as_bytes()) else {
+        return false;
+    };
+    mac.update(signed_payload.as_bytes());
+    mac.update(body);
+    let expected = hex_encode(mac.finalize().into_bytes());
+    signatures
+        .iter()
+        .any(|signature| constant_time_eq(expected.as_bytes(), signature.as_bytes()))
+}
+
+fn stripe_signature_value<'a>(signature_header: &'a str, key: &str) -> Option<&'a str> {
+    stripe_signature_values(signature_header, key)
+        .into_iter()
+        .next()
+}
+
+fn stripe_signature_values<'a>(signature_header: &'a str, key: &str) -> Vec<&'a str> {
+    signature_header
+        .split(',')
+        .filter_map(|part| {
+            let (name, value) = part.trim().split_once('=')?;
+            if name == key && !value.is_empty() {
+                Some(value)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right.iter())
+        .fold(0_u8, |acc, (left, right)| acc | (left ^ right))
+        == 0
+}
+
+fn parse_webhook_event_id(body: &[u8]) -> ProviderResult<Option<String>> {
+    let payload = serde_json::from_slice::<Value>(body).map_err(|error| {
+        ProviderError::invalid_response(
+            PaymentAdapterOperation::VerifyWebhook,
+            format!("Stripe webhook JSON is invalid: {error}"),
+        )
+    })?;
+    Ok(payload.get("id").and_then(Value::as_str).map(str::to_owned))
+}
+
+fn validate_secret_key(secret_key: &str) -> ProviderResult<()> {
+    if secret_key.trim().is_empty() {
+        return Err(ProviderError::invalid_request(
+            PaymentAdapterOperation::CreatePaymentIntent,
+            "Stripe secret key is required",
+        ));
+    }
+    Ok(())
+}
+
+fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_stripe_webhook_signature_accepts_valid_hmac() {
+        let secret = "whsec_test_secret";
+        let body = br#"{"id":"evt_123","type":"payment_intent.succeeded"}"#;
+        let timestamp = 1_700_000_000_i64;
+        let signature = stripe_test_signature(secret, timestamp, body);
+
+        assert!(verify_stripe_signature(secret, &signature, body));
+        assert!(!verify_stripe_signature(secret, "t=1,v1=deadbeef", body));
+    }
+
+    fn stripe_test_signature(secret: &str, timestamp: i64, body: &[u8]) -> String {
+        let signed_payload = format!("{timestamp}.");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(signed_payload.as_bytes());
+        mac.update(body);
+        format!("t={timestamp},v1={}", hex_encode(mac.finalize().into_bytes()))
+    }
+}

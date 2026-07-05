@@ -15,6 +15,12 @@ catalogs:
     '@vitejs/plugin-react':
       specifier: ^6.0.1
       version: 6.0.1
+    lucide-react:
+      specifier: ^1.7.0
+      version: 1.7.0
+    qrcode:
+      specifier: ^1.5.4
+      version: 1.5.4
     react:
       specifier: ^19.2.4
       version: 19.2.4
@@ -27,6 +33,9 @@ catalogs:
     vite:
       specifier: ^8.0.3
       version: 8.1.0
+    vite-plugin-dts:
+      specifier: ^4.5.4
+      version: 4.5.4
 
 importers:
 
@@ -136,6 +145,269 @@ importers:
       react-i18next:
         specifier: ^17.0.7
         version: 17.0.8(i18next@26.3.2(typescript@6.0.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.3)
+
+  ../sdkwork-core/sdkwork-core-pc-react:
+    dependencies:
+      '@sdkwork/sdk-common':
+        specifier: ^1.0.3
+        version: 1.0.3
+    devDependencies:
+      '@testing-library/react':
+        specifier: ^16.3.2
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.14)
+      jsdom:
+        specifier: ^29.0.1
+        version: 29.1.1
+      react:
+        specifier: 'catalog:'
+        version: 19.2.4
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.4(react@19.2.4)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vite:
+        specifier: 8.0.3
+        version: 8.0.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@25.9.4)(jiti@2.7.0)
+      vite-plugin-dts:
+        specifier: 'catalog:'
+        version: 4.5.4(@types/node@25.9.4)(rollup@4.62.2)(typescript@6.0.3)(vite@8.0.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@25.9.4)(jiti@2.7.0))
+      vitest:
+        specifier: ^4.1.2
+        version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.0.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@25.9.4)(jiti@2.7.0))
+
+  ../sdkwork-iam/apps/sdkwork-iam-common/packages/sdkwork-iam-application-bootstrap:
+    dependencies:
+      '@sdkwork/iam-backend-sdk':
+        specifier: workspace:*
+        version: link:../../../../sdks/sdkwork-iam-backend-sdk/sdkwork-iam-backend-sdk-typescript
+      '@sdkwork/iam-sdk-adapter':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-sdk-adapter
+      '@sdkwork/iam-sdk-ports':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-sdk-ports
+      '@sdkwork/iam-service':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-service
+      '@sdkwork/runtime-bootstrap':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/common/foundation/sdkwork-runtime-bootstrap
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-common/packages/sdkwork-iam-contracts:
+    dependencies:
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-common/packages/sdkwork-iam-credential-entry:
+    dependencies:
+      '@sdkwork/iam-app-sdk':
+        specifier: workspace:*
+        version: link:../../../../sdks/sdkwork-iam-app-sdk/sdkwork-iam-app-sdk-typescript
+      '@sdkwork/runtime-bootstrap':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/common/foundation/sdkwork-runtime-bootstrap
+      '@sdkwork/sdk-common':
+        specifier: ^1.0.2
+        version: 1.0.3
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-common/packages/sdkwork-iam-runtime:
+    dependencies:
+      '@sdkwork/iam-app-sdk':
+        specifier: workspace:*
+        version: link:../../../../sdks/sdkwork-iam-app-sdk/sdkwork-iam-app-sdk-typescript
+      '@sdkwork/iam-backend-sdk':
+        specifier: workspace:*
+        version: link:../../../../sdks/sdkwork-iam-backend-sdk/sdkwork-iam-backend-sdk-typescript
+      '@sdkwork/iam-contracts':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-contracts
+      '@sdkwork/iam-sdk-ports':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-sdk-ports
+      '@sdkwork/iam-service':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-service
+      '@sdkwork/runtime-bootstrap':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/common/foundation/sdkwork-runtime-bootstrap
+      '@sdkwork/sdk-common':
+        specifier: ^1.0.2
+        version: 1.0.3
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-common/packages/sdkwork-iam-sdk-adapter:
+    dependencies:
+      '@sdkwork/iam-sdk-ports':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-sdk-ports
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-common/packages/sdkwork-iam-sdk-ports:
+    dependencies:
+      '@sdkwork/iam-contracts':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-contracts
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-common/packages/sdkwork-iam-service:
+    dependencies:
+      '@sdkwork/iam-contracts':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-contracts
+      '@sdkwork/iam-sdk-ports':
+        specifier: workspace:*
+        version: link:../sdkwork-iam-sdk-ports
+      '@sdkwork/runtime-bootstrap':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/common/foundation/sdkwork-runtime-bootstrap
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-pc/packages/sdkwork-auth-pc-react:
+    dependencies:
+      '@sdkwork/appbase-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/pc-react/foundation/sdkwork-appbase-pc-react
+      '@sdkwork/i18n-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/pc-react/foundation/sdkwork-i18n-pc-react
+      '@sdkwork/iam-contracts':
+        specifier: workspace:*
+        version: link:../../../sdkwork-iam-common/packages/sdkwork-iam-contracts
+      '@sdkwork/iam-sdk-adapter':
+        specifier: workspace:*
+        version: link:../../../sdkwork-iam-common/packages/sdkwork-iam-sdk-adapter
+      '@sdkwork/runtime-bootstrap':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/common/foundation/sdkwork-runtime-bootstrap
+      '@sdkwork/ui-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-ui/sdkwork-ui-pc-react
+      '@sdkwork/utils':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.7.0(react@19.2.4)
+      qrcode:
+        specifier: 'catalog:'
+        version: 1.5.4
+      react:
+        specifier: '>=18.2.0 <20.0.0'
+        version: 19.2.4
+      react-dom:
+        specifier: '>=18.2.0 <20.0.0'
+        version: 19.2.4(react@19.2.4)
+      react-router-dom:
+        specifier: '>=7.0.0 <8.0.0'
+        version: 7.18.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+    devDependencies:
+      '@sdkwork/core-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-core/sdkwork-core-pc-react
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-pc/packages/sdkwork-auth-runtime-pc-react:
+    dependencies:
+      '@sdkwork/iam-app-sdk':
+        specifier: workspace:*
+        version: link:../../../../sdks/sdkwork-iam-app-sdk/sdkwork-iam-app-sdk-typescript
+      '@sdkwork/iam-contracts':
+        specifier: workspace:*
+        version: link:../../../sdkwork-iam-common/packages/sdkwork-iam-contracts
+      '@sdkwork/iam-credential-entry':
+        specifier: workspace:*
+        version: link:../../../sdkwork-iam-common/packages/sdkwork-iam-credential-entry
+      '@sdkwork/iam-runtime':
+        specifier: workspace:*
+        version: link:../../../sdkwork-iam-common/packages/sdkwork-iam-runtime
+      '@sdkwork/sdk-common':
+        specifier: ^1.0.2
+        version: 1.0.3
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/apps/sdkwork-iam-pc/packages/sdkwork-iam-react:
+    dependencies:
+      '@sdkwork/iam-runtime':
+        specifier: workspace:*
+        version: link:../../../sdkwork-iam-common/packages/sdkwork-iam-runtime
+      react:
+        specifier: '>=18.2.0 <20.0.0'
+        version: 19.2.4
+      react-dom:
+        specifier: '>=18.2.0 <20.0.0'
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  ../sdkwork-iam/sdks/sdkwork-iam-app-sdk/sdkwork-iam-app-sdk-typescript:
+    dependencies:
+      '@sdkwork/sdk-common':
+        specifier: workspace:*
+        version: link:../../../../sdkwork-sdk-commons/sdkwork-sdk-common-typescript
+
+  ../sdkwork-iam/sdks/sdkwork-iam-backend-sdk/sdkwork-iam-backend-sdk-typescript:
+    dependencies:
+      '@sdkwork/sdk-common':
+        specifier: workspace:*
+        version: link:../../../../sdkwork-sdk-commons/sdkwork-sdk-common-typescript
+
+  ../sdkwork-iam/sdks/sdkwork-iam-open-sdk/sdkwork-iam-open-sdk-typescript:
+    dependencies:
+      '@sdkwork/sdk-common':
+        specifier: workspace:*
+        version: link:../../../../sdkwork-sdk-commons/sdkwork-sdk-common-typescript
 
   ../sdkwork-sdk-commons/sdkwork-sdk-common-typescript:
     devDependencies:
@@ -397,6 +669,12 @@ importers:
       '@sdkwork/payment-pc-core':
         specifier: workspace:*
         version: link:../sdkwork-payment-pc-core
+      '@sdkwork/payment-pc-payment':
+        specifier: workspace:*
+        version: link:../sdkwork-payment-pc-payment
+      '@sdkwork/payment-service':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-service
       react:
         specifier: 'catalog:'
         version: 19.2.4
@@ -1743,6 +2021,10 @@ packages:
   '@rushstack/ts-command-line@5.3.10':
     resolution: {integrity: sha512-fwI076HYknC0IrMXdY6UmjDv+PH7NHhNJX3/pY2UblSE5XrXgndXZPiOe/6ZtuFpn6DvVDVNhtkIzQ+Qu/MhVQ==}
 
+  '@sdkwork/sdk-common@1.0.3':
+    resolution: {integrity: sha512-EGCm742ya1VL9hZ+9SVVArUxieFxIwQ3MMpt8Tv6Vc++U5ug4qG2TBUQ/hKAeJIwhL5Tvbhs6Tzy31P8fBO/cQ==}
+    engines: {node: '>=18.0.0'}
+
   '@shikijs/core@2.5.0':
     resolution: {integrity: sha512-uu/8RExTKtavlpH7XqnVYBrfBkUc20ngXiX9NSrBhOVZYv/7XQRKUyhtkeflY5QsxC0GbJThCerruZfsUaSldg==}
 
@@ -2326,6 +2608,10 @@ packages:
 
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
+
+  cookie@1.1.1:
+    resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
+    engines: {node: '>=18'}
 
   copy-anything@4.0.5:
     resolution: {integrity: sha512-7Vv6asjS4gMOuILabD3l739tsaxFQmC+a7pLZm02zyvs8p977bL3zEgq3yDk5rn9B0PbYgIv++jmHcuUab4RhA==}
@@ -3020,6 +3306,23 @@ packages:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
+  react-router-dom@7.18.1:
+    resolution: {integrity: sha512-KaZh+X/6UtEp28x51AUYZDMg9NGoz2ja3dNHa+ta/tk40vCzKhQ/RypCWBMLbmDr6//E24Vv5uPsrqXFozdkAg==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
+
+  react-router@7.18.1:
+    resolution: {integrity: sha512-GDLgg3i3uM0aeJO3Fm+TCS+sDQ7gu12T6x0qdTEzcwqEfleci7JwugVNIF3U//0FWKnJT7ptG+20B2jfDqnZAg==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
+    peerDependenciesMeta:
+      react-dom:
+        optional: true
+
   react-style-singleton@2.2.3:
     resolution: {integrity: sha512-b6jSvxvVnyptAiLjbkWLE/lOnR4lfTtDAl+eUC7RZy+QQWc6wRzIV2CE6xBuMmDxc2qIihtDCZD5NPOFl7fRBQ==}
     engines: {node: '>=10'}
@@ -3103,6 +3406,9 @@ packages:
 
   set-blocking@2.0.0:
     resolution: {integrity: sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw==}
+
+  set-cookie-parser@2.7.2:
+    resolution: {integrity: sha512-oeM1lpU/UvhTxw+g3cIfxXHyJRc/uidd3yK1P242gzHds0udQBYzs3y8j4gCCW+ZJ7ad0yctld8RYO+bdurlvw==}
 
   shebang-command@2.0.0:
     resolution: {integrity: sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==}
@@ -4777,6 +5083,8 @@ snapshots:
     transitivePeerDependencies:
       - '@types/node'
 
+  '@sdkwork/sdk-common@1.0.3': {}
+
   '@shikijs/core@2.5.0':
     dependencies:
       '@shikijs/engine-javascript': 2.5.0
@@ -5225,6 +5533,19 @@ snapshots:
     optionalDependencies:
       typescript: 6.0.2
 
+  '@vue/language-core@2.2.0(typescript@6.0.3)':
+    dependencies:
+      '@volar/language-core': 2.4.28
+      '@vue/compiler-dom': 3.5.38
+      '@vue/compiler-vue2': 2.7.16
+      '@vue/shared': 3.5.38
+      alien-signals: 0.4.14
+      minimatch: 9.0.9
+      muggle-string: 0.4.1
+      path-browserify: 1.0.1
+    optionalDependencies:
+      typescript: 6.0.3
+
   '@vue/reactivity@3.5.38':
     dependencies:
       '@vue/shared': 3.5.38
@@ -5415,6 +5736,8 @@ snapshots:
   confbox@0.2.4: {}
 
   convert-source-map@2.0.0: {}
+
+  cookie@1.1.1: {}
 
   copy-anything@4.0.5:
     dependencies:
@@ -6076,6 +6399,20 @@ snapshots:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
 
+  react-router-dom@7.18.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+      react-router: 7.18.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+
+  react-router@7.18.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+    dependencies:
+      cookie: 1.1.1
+      react: 19.2.4
+      set-cookie-parser: 2.7.2
+    optionalDependencies:
+      react-dom: 19.2.4(react@19.2.4)
+
   react-style-singleton@2.2.3(@types/react@19.2.14)(react@19.2.4):
     dependencies:
       get-nonce: 1.0.1
@@ -6205,6 +6542,8 @@ snapshots:
   semver@7.8.5: {}
 
   set-blocking@2.0.0: {}
+
+  set-cookie-parser@2.7.2: {}
 
   shebang-command@2.0.0:
     dependencies:
@@ -6406,6 +6745,25 @@ snapshots:
       local-pkg: 1.2.1
       magic-string: 0.30.21
       typescript: 6.0.2
+    optionalDependencies:
+      vite: 8.0.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@25.9.4)(jiti@2.7.0)
+    transitivePeerDependencies:
+      - '@types/node'
+      - rollup
+      - supports-color
+
+  vite-plugin-dts@4.5.4(@types/node@25.9.4)(rollup@4.62.2)(typescript@6.0.3)(vite@8.0.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@25.9.4)(jiti@2.7.0)):
+    dependencies:
+      '@microsoft/api-extractor': 7.58.9(@types/node@25.9.4)
+      '@rollup/pluginutils': 5.4.0(rollup@4.62.2)
+      '@volar/typescript': 2.4.28
+      '@vue/language-core': 2.2.0(typescript@6.0.3)
+      compare-versions: 6.1.1
+      debug: 4.4.3
+      kolorist: 1.8.0
+      local-pkg: 1.2.1
+      magic-string: 0.30.21
+      typescript: 6.0.3
     optionalDependencies:
       vite: 8.0.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@25.9.4)(jiti@2.7.0)
     transitivePeerDependencies:

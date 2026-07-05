@@ -9,6 +9,6 @@ publish.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
-sdkwork_database_sqlx.workspace = true
-sdkwork_database_spi.workspace = true
+sdkwork-database-sqlx.workspace = true
+sdkwork-database-spi.workspace = true
 sdkwork_payment_database_host.workspace = true

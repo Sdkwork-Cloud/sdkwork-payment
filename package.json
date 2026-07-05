@@ -12,7 +12,10 @@
     "test:node": "node --test --test-reporter=spec tests/static/placeholder.test.mjs",
     "test:vitest": "vitest run --config vitest.config.ts --configLoader native --pool vmThreads",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm typecheck && pnpm test:vitest && cargo test --workspace && pnpm run check:app-composition",
+    "verify": "pnpm typecheck && pnpm test:vitest && cargo test --workspace && pnpm run check:app-composition && pnpm run check:api-envelope && pnpm run check:pagination && pnpm run check:sdk-consumer",
+    "check:api-envelope": "node ../sdkwork-specs/tools/check-api-response-envelope.mjs --workspace .",
+    "check:pagination": "node ../sdkwork-specs/tools/check-pagination.mjs --workspace .",
+    "check:sdk-consumer": "node ../sdkwork-specs/tools/check-app-sdk-consumer-imports.mjs --workspace .",
     "fmt:rust:check": "cargo fmt --all -- --check",
     "check": "pnpm run check:app-composition && pnpm db:validate && pnpm gateway:assembly:validate && pnpm fmt:rust:check",
     "db:validate": "node ../sdkwork-specs/tools/check-database-framework-standard.mjs --root .",
@@ -48,5 +51,12 @@
     "lucide-react": "^1.7.0",
     "qrcode": "^1.5.4",
     "@types/qrcode": "^1.5.5"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
   }
 }

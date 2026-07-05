@@ -24,5 +24,12 @@
     "@vitejs/plugin-react": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
   }
 }

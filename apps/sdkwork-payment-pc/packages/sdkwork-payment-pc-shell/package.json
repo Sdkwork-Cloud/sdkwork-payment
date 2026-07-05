@@ -3,9 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "exports": { ".": "./src/index.tsx" },
+  "exports": {
+    ".": {
+      "types": "./src/index.tsx",
+      "import": "./src/index.tsx",
+      "default": "./src/index.tsx"
+    }
+  },
   "dependencies": {
     "@sdkwork/payment-pc-core": "workspace:*",
+    "@sdkwork/payment-pc-payment": "workspace:*",
+    "@sdkwork/payment-service": "workspace:*",
     "react": "catalog:"
   },
   "peerDependencies": {

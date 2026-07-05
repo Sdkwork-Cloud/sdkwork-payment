@@ -1,5 +1,6 @@
-﻿import {
+import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 import * as QRCode from "qrcode";
@@ -25,6 +26,9 @@ export interface SdkworkPaymentDetailDrawerProps {
   controller: SdkworkPaymentController;
 }
 
+const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
+const PAYMENT_STATUS_POLL_MAX_ROUNDS = 60;
+
 export function SdkworkPaymentDetailDrawer({
   controller,
 }: SdkworkPaymentDetailDrawerProps) {
@@ -40,6 +44,7 @@ export function SdkworkPaymentDetailDrawer({
   } = useSdkworkPaymentIntl();
   const detail = state.detail;
   const [qrImageSrc, setQrImageSrc] = useState<string>();
+  const pollRoundRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +82,64 @@ export function SdkworkPaymentDetailDrawer({
       cancelled = true;
     };
   }, [detail?.qrContent, detail?.qrImage]);
+
+  useEffect(() => {
+    pollRoundRef.current = 0;
+  }, [detail?.id]);
+
+  useEffect(() => {
+    if (!state.isDetailOpen || !detail) {
+      return;
+    }
+    // 仅在 needQuery=true 且状态可刷新（default/pending）时启动轮询；
+    // 状态为 success/failed/timeout/closed 时停止，避免无谓的请求与 OOM 风险。
+    if (!detail.needQuery || !detail.canRefreshStatus) {
+      return;
+    }
+
+    const intervalSeconds = detail.queryIntervalSeconds && detail.queryIntervalSeconds > 0
+      ? detail.queryIntervalSeconds
+      : PAYMENT_STATUS_POLL_INTERVAL_MS / 1000;
+    const intervalMs = Math.max(1000, Math.round(intervalSeconds * 1000));
+
+    let active = true;
+
+    const poll = async (): Promise<void> => {
+      if (!active) {
+        return;
+      }
+      if (pollRoundRef.current >= PAYMENT_STATUS_POLL_MAX_ROUNDS) {
+        active = false;
+        return;
+      }
+      pollRoundRef.current += 1;
+      try {
+        const status = await controller.refreshPaymentStatus(detail.id);
+        if (!active) {
+          return;
+        }
+        // 终止条件：状态离开 default/pending
+        if (status.status !== "default" && status.status !== "pending") {
+          active = false;
+        }
+      } catch {
+        // 单次轮询失败不中断整体轮询；下一轮仍然会按节流间隔触发。
+      }
+    };
+
+    const timer = window.setInterval(poll, intervalMs);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [
+    controller,
+    detail?.id,
+    detail?.needQuery,
+    detail?.canRefreshStatus,
+    detail?.queryIntervalSeconds,
+    state.isDetailOpen,
+  ]);
 
   return (
     <DetailDrawer

@@ -16,15 +16,18 @@ sqlx = { workspace = true }
 sdkwork_contract_service.workspace = true
 sdkwork_order_repository_sqlx.workspace = true
 sdkwork_order_service.workspace = true
+sdkwork_payment_providers.workspace = true
 sdkwork_payment_repository_sqlx.workspace = true
 sdkwork_payment_service.workspace = true
 sdkwork_iam_context_service.workspace = true
 sdkwork_payment_service_host.workspace = true
-sdkwork_database_sqlx.workspace = true
+sdkwork-database-sqlx.workspace = true
 sdkwork-web-core.workspace = true
 sdkwork-web-axum.workspace = true
 sdkwork-web-bootstrap.workspace = true
 sdkwork-iam-web-adapter.workspace = true
+sdkwork-utils-rust = { workspace = true }
+sdkwork_routes_payment_backend_api = { path = "../sdkwork-routes-payment-backend-api", package = "sdkwork-routes-payment-backend-api" }
 reqwest = { workspace = true }
 
 [dev-dependencies]

@@ -1,8 +1,10 @@
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use sdkwork_payment_service::{
-    PaymentIntentDraft, PaymentProviderCommand, PaymentProviderPortRequirement, PaymentStatus,
-    PaymentTransition, RefundStatus, RefundTransition,
+    validate_payment_wire_transition, validate_refund_wire_transition, wire_product_types_from_scene_codes,
+    PaymentIntentDraft, PaymentProviderCommand, PaymentProviderPort, PaymentProviderPortRequirement,
+    PaymentStatus, PaymentTransition, RefundStatus, RefundTransition, SandboxPaymentProvider,
 };
+use sdkwork_payment_service::CreatePaymentIntentCommand;
 
 #[test]
 fn creates_payment_intent_with_method_provider_and_order_reference() {
@@ -80,4 +82,43 @@ fn payment_provider_contract_exposes_required_commands() {
             PaymentProviderCommand::VerifyWebhook,
         ],
     );
+}
+
+#[test]
+fn validates_payment_wire_transitions() {
+    assert!(validate_payment_wire_transition("pending", "canceled").is_ok());
+    assert!(validate_payment_wire_transition("succeeded", "pending").is_err());
+}
+
+#[test]
+fn validates_refund_wire_transitions() {
+    assert!(validate_refund_wire_transition(None, "submitted").is_ok());
+    assert!(validate_refund_wire_transition(Some("succeeded"), "submitted").is_err());
+}
+
+#[test]
+fn maps_scene_codes_to_product_types() {
+    let types = wire_product_types_from_scene_codes(&[
+        "web".to_string(),
+        "app".to_string(),
+    ]);
+    let codes: Vec<_> = types.iter().map(|(code, _)| code.as_str()).collect();
+    assert!(codes.contains(&"pc"));
+    assert!(codes.contains(&"app"));
+}
+
+#[test]
+fn sandbox_provider_creates_payment_intent_draft() {
+    let provider = SandboxPaymentProvider;
+    let command = CreatePaymentIntentCommand {
+        tenant_id: "100001".to_string(),
+        order_id: "order-1".to_string(),
+        payment_method: "wechat_pay".to_string(),
+        provider_code: "wechat_pay".to_string(),
+        amount: CommerceMoney::new("9.90").unwrap(),
+        idempotency_key: "idem-1".to_string(),
+    };
+    let draft = PaymentProviderPort::create_payment_intent(&provider, &command).unwrap();
+    assert_eq!(draft.order_id, "order-1");
+    assert_eq!(draft.provider_code, "wechat_pay");
 }

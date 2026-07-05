@@ -2,10 +2,47 @@ use sdkwork_contract_service::{
     CommerceMoney, CommercePaymentStatus, CommerceRechargeStatus, CommerceServiceError,
 };
 use sdkwork_payment_service::{
-    ClosePaymentRecordCommand, PaymentRecordDetailQuery, PaymentRecordItem, PaymentRecordListQuery,
-    PaymentRecordOrderListQuery,
+    ClosePaymentRecordCommand, PaymentRecordDetailQuery, PaymentRecordItem, PaymentRecordListPage,
+    PaymentRecordListQuery, PaymentRecordOrderListPage, PaymentRecordOrderListQuery,
+    PaymentRecordOutTradeNoQuery, PaymentRecordStatistics, PaymentRecordStatisticsQuery,
 };
 use sqlx::{PgPool, Row};
+
+const PAYMENT_INTENT_JOIN: &str = r#"
+LEFT JOIN commerce_payment_intent pi
+    ON pi.id = (
+        SELECT pi2.id
+        FROM commerce_payment_intent pi2
+        WHERE pi2.tenant_id = o.tenant_id
+          AND pi2.order_id = o.id
+          AND pi2.owner_user_id = o.owner_user_id
+          AND pi2.deleted_at IS NULL
+          AND (
+                (pi2.organization_id = o.organization_id)
+             OR (pi2.organization_id IS NULL AND o.organization_id IS NULL)
+          )
+        ORDER BY pi2.created_at DESC, pi2.id DESC
+        LIMIT 1
+    )
+"#;
+
+const PAYMENT_ATTEMPT_JOIN: &str = r#"
+LEFT JOIN commerce_payment_attempt pa
+    ON pa.id = (
+        SELECT pa2.id
+        FROM commerce_payment_attempt pa2
+        WHERE pa2.tenant_id = o.tenant_id
+          AND pa2.order_id = o.id
+          AND pa2.owner_user_id = o.owner_user_id
+          AND pa2.deleted_at IS NULL
+          AND (
+                (pa2.organization_id = o.organization_id)
+             OR (pa2.organization_id IS NULL AND o.organization_id IS NULL)
+          )
+        ORDER BY pa2.created_at DESC, pa2.id DESC
+        LIMIT 1
+    )
+"#;
 
 const LIST_PAYMENT_RECORDS: &str = r#"
 SELECT
@@ -19,23 +56,9 @@ SELECT
     CAST(COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) AS TEXT) AS date,
     o.status AS order_status,
     pi.status AS payment_status,
-    pa.status AS payment_attempt_status
+    pa.status AS payment_attempt_status,
+    COUNT(*) OVER() AS total_count
 FROM commerce_order o
-LEFT JOIN commerce_payment_intent pi
-    ON pi.tenant_id = o.tenant_id
-   AND (pi.organization_id IS NULL OR o.organization_id IS NULL OR pi.organization_id = o.organization_id)
-   AND pi.owner_user_id = o.owner_user_id
-   AND pi.order_id = o.id
-LEFT JOIN commerce_payment_attempt pa
-    ON pa.tenant_id = o.tenant_id
-   AND (pa.organization_id IS NULL OR o.organization_id IS NULL OR pa.organization_id = o.organization_id)
-   AND pa.owner_user_id = o.owner_user_id
-   AND pa.order_id = o.id
-WHERE o.tenant_id = CAST($1 AS TEXT)
-  AND ((o.organization_id = CAST($2 AS TEXT)) OR (o.organization_id IS NULL AND $2 IS NULL))
-  AND o.owner_user_id = CAST($3 AS TEXT)
-ORDER BY COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) DESC NULLS LAST, o.id DESC
-LIMIT 100
 "#;
 
 const LIST_PAYMENT_RECORDS_BY_ORDER: &str = r#"
@@ -50,24 +73,9 @@ SELECT
     CAST(COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) AS TEXT) AS date,
     o.status AS order_status,
     pi.status AS payment_status,
-    pa.status AS payment_attempt_status
+    pa.status AS payment_attempt_status,
+    COUNT(*) OVER() AS total_count
 FROM commerce_order o
-LEFT JOIN commerce_payment_intent pi
-    ON pi.tenant_id = o.tenant_id
-   AND (pi.organization_id IS NULL OR o.organization_id IS NULL OR pi.organization_id = o.organization_id)
-   AND pi.owner_user_id = o.owner_user_id
-   AND pi.order_id = o.id
-LEFT JOIN commerce_payment_attempt pa
-    ON pa.tenant_id = o.tenant_id
-   AND (pa.organization_id IS NULL OR o.organization_id IS NULL OR pa.organization_id = o.organization_id)
-   AND pa.owner_user_id = o.owner_user_id
-   AND pa.order_id = o.id
-WHERE o.tenant_id = CAST($1 AS TEXT)
-  AND ((o.organization_id = CAST($2 AS TEXT)) OR (o.organization_id IS NULL AND $2 IS NULL))
-  AND o.owner_user_id = CAST($3 AS TEXT)
-  AND o.id = CAST($4 AS TEXT)
-ORDER BY COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) DESC NULLS LAST, o.id DESC
-LIMIT 100
 "#;
 
 const RETRIEVE_PAYMENT_RECORD: &str = r#"
@@ -84,21 +92,48 @@ SELECT
     pi.status AS payment_status,
     pa.status AS payment_attempt_status
 FROM commerce_order o
-LEFT JOIN commerce_payment_intent pi
-    ON pi.tenant_id = o.tenant_id
-   AND (pi.organization_id IS NULL OR o.organization_id IS NULL OR pi.organization_id = o.organization_id)
-   AND pi.owner_user_id = o.owner_user_id
-   AND pi.order_id = o.id
-LEFT JOIN commerce_payment_attempt pa
-    ON pa.tenant_id = o.tenant_id
-   AND (pa.organization_id IS NULL OR o.organization_id IS NULL OR pa.organization_id = o.organization_id)
-   AND pa.owner_user_id = o.owner_user_id
-   AND pa.order_id = o.id
-WHERE o.tenant_id = CAST($1 AS TEXT)
-  AND ((o.organization_id = CAST($2 AS TEXT)) OR (o.organization_id IS NULL AND $2 IS NULL))
-  AND o.owner_user_id = CAST($3 AS TEXT)
-  AND (pa.id = CAST($4 AS TEXT) OR pi.id = CAST($4 AS TEXT) OR o.id = CAST($4 AS TEXT))
-LIMIT 1
+"#;
+
+const RETRIEVE_PAYMENT_RECORD_BY_OUT_TRADE_NO: &str = r#"
+SELECT
+    CAST(o.id AS TEXT) AS order_id,
+    CAST(COALESCE(pa.id, pi.id, o.id) AS TEXT) AS id,
+    CAST(pi.id AS TEXT) AS payment_id,
+    CAST(pa.id AS TEXT) AS payment_attempt_id,
+    COALESCE(NULLIF(pa.out_trade_no, ''), NULLIF(o.order_no, ''), '-') AS order_no,
+    COALESCE(NULLIF(pa.payment_method, ''), NULLIF(pi.payment_method, ''), '-') AS method,
+    CAST(COALESCE(NULLIF(pa.amount, ''), NULLIF(pi.amount, ''), '0') AS TEXT) AS amount,
+    CAST(COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) AS TEXT) AS date,
+    o.status AS order_status,
+    pi.status AS payment_status,
+    pa.status AS payment_attempt_status
+FROM commerce_order o
+"#;
+
+const FETCH_PAYMENT_STATISTICS: &str = r#"
+SELECT
+    COUNT(*)::BIGINT AS total_payments,
+    COALESCE(SUM(CASE WHEN record_status = 'pending' THEN 1 ELSE 0 END), 0)::BIGINT AS pending_payments,
+    COALESCE(SUM(CASE WHEN record_status = 'success' THEN 1 ELSE 0 END), 0)::BIGINT AS success_payments,
+    COALESCE(SUM(CASE WHEN record_status = 'failed' THEN 1 ELSE 0 END), 0)::BIGINT AS failed_payments,
+    COALESCE(SUM(CASE WHEN record_status = 'timeout' THEN 1 ELSE 0 END), 0)::BIGINT AS timeout_payments,
+    COALESCE(SUM(CASE WHEN record_status = 'closed' THEN 1 ELSE 0 END), 0)::BIGINT AS closed_payments
+FROM (
+    SELECT
+        CASE
+            WHEN LOWER(COALESCE(pa.status, '')) = 'timeout'
+              OR LOWER(COALESCE(pi.status, '')) = 'timeout' THEN 'timeout'
+            WHEN LOWER(COALESCE(pa.status, '')) = 'closed'
+              OR LOWER(COALESCE(pi.status, '')) = 'closed' THEN 'closed'
+            WHEN LOWER(TRIM(COALESCE(o.status, ''))) IN ('closed', 'cancelled', 'canceled', 'failed')
+              OR (pi.id IS NOT NULL AND LOWER(TRIM(COALESCE(pi.status, ''))) IN ('failed', 'canceled', 'cancelled'))
+              OR (pa.id IS NOT NULL AND LOWER(TRIM(COALESCE(pa.status, ''))) IN ('failed', 'canceled', 'cancelled')) THEN 'failed'
+            WHEN (pa.id IS NOT NULL AND LOWER(TRIM(COALESCE(pa.status, ''))) IN ('succeeded', 'success', 'paid'))
+              OR (pi.id IS NOT NULL AND LOWER(TRIM(COALESCE(pi.status, ''))) IN ('succeeded', 'success', 'paid'))
+              OR LOWER(TRIM(COALESCE(o.status, ''))) IN ('paid', 'fulfilled', 'success', 'completed') THEN 'success'
+            ELSE 'pending'
+        END AS record_status
+    FROM commerce_order o
 "#;
 
 #[derive(Debug, Clone)]
@@ -114,41 +149,86 @@ impl PostgresCommercePaymentRecordStore {
     pub async fn list_payment_records(
         &self,
         query: PaymentRecordListQuery,
-    ) -> Result<Vec<PaymentRecordItem>, CommerceServiceError> {
-        let rows = sqlx::query(LIST_PAYMENT_RECORDS)
+    ) -> Result<PaymentRecordListPage, CommerceServiceError> {
+        let sql = format!(
+            "{LIST_PAYMENT_RECORDS}{PAYMENT_INTENT_JOIN}{PAYMENT_ATTEMPT_JOIN}
+WHERE o.tenant_id = CAST($1 AS TEXT)
+  AND ((o.organization_id = CAST($2 AS TEXT)) OR (o.organization_id IS NULL AND $2 IS NULL))
+  AND o.owner_user_id = CAST($3 AS TEXT)
+ORDER BY COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) DESC NULLS LAST, o.id DESC
+LIMIT $4 OFFSET $5"
+        );
+        let rows = sqlx::query(&sql)
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(&query.owner_user_id)
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .or_else(empty_rows_when_read_model_is_missing)
             .map_err(|error| store_error("failed to list payment records", error))?;
 
-        rows.iter().map(payment_record_from_row).collect()
+        let total_items = rows
+            .first()
+            .and_then(|row| row.try_get::<i64, _>("total_count").ok())
+            .unwrap_or(0);
+
+        let items = rows
+            .iter()
+            .map(payment_record_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(PaymentRecordListPage { items, total_items })
     }
 
     pub async fn list_payment_records_by_order(
         &self,
         query: PaymentRecordOrderListQuery,
-    ) -> Result<Vec<PaymentRecordItem>, CommerceServiceError> {
-        let rows = sqlx::query(LIST_PAYMENT_RECORDS_BY_ORDER)
+    ) -> Result<PaymentRecordOrderListPage, CommerceServiceError> {
+        let sql = format!(
+            "{LIST_PAYMENT_RECORDS_BY_ORDER}{PAYMENT_INTENT_JOIN}{PAYMENT_ATTEMPT_JOIN}
+WHERE o.tenant_id = CAST($1 AS TEXT)
+  AND ((o.organization_id = CAST($2 AS TEXT)) OR (o.organization_id IS NULL AND $2 IS NULL))
+  AND o.owner_user_id = CAST($3 AS TEXT)
+  AND o.id = CAST($4 AS TEXT)
+ORDER BY COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) DESC NULLS LAST, o.id DESC
+LIMIT $5 OFFSET $6"
+        );
+        let rows = sqlx::query(&sql)
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(&query.owner_user_id)
             .bind(&query.order_id)
+            .bind(query.limit)
+            .bind(query.offset)
             .fetch_all(&self.pool)
             .await
             .or_else(empty_rows_when_read_model_is_missing)
             .map_err(|error| store_error("failed to list payment records by order", error))?;
 
-        rows.iter().map(payment_record_from_row).collect()
+        let total_items = rows
+            .first()
+            .and_then(|row| row.try_get::<i64, _>("total_count").ok())
+            .unwrap_or(0);
+        let items = rows.iter().map(payment_record_from_row).collect::<Result<Vec<_>, _>>()?;
+
+        Ok(PaymentRecordOrderListPage { items, total_items })
     }
 
     pub async fn retrieve_payment_record(
         &self,
         query: PaymentRecordDetailQuery,
     ) -> Result<PaymentRecordItem, CommerceServiceError> {
-        let row = sqlx::query(RETRIEVE_PAYMENT_RECORD)
+        let sql = format!(
+            "{RETRIEVE_PAYMENT_RECORD}{PAYMENT_INTENT_JOIN}{PAYMENT_ATTEMPT_JOIN}
+WHERE o.tenant_id = CAST($1 AS TEXT)
+  AND ((o.organization_id = CAST($2 AS TEXT)) OR (o.organization_id IS NULL AND $2 IS NULL))
+  AND o.owner_user_id = CAST($3 AS TEXT)
+  AND (pa.id = CAST($4 AS TEXT) OR pi.id = CAST($4 AS TEXT) OR o.id = CAST($4 AS TEXT))
+LIMIT 1"
+        );
+        let row = sqlx::query(&sql)
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(&query.owner_user_id)
@@ -163,10 +243,84 @@ impl PostgresCommercePaymentRecordStore {
             .transpose()?
             .ok_or_else(|| CommerceServiceError::not_found("payment record was not found"))
     }
+
+    pub async fn retrieve_payment_record_by_out_trade_no(
+        &self,
+        query: PaymentRecordOutTradeNoQuery,
+    ) -> Result<PaymentRecordItem, CommerceServiceError> {
+        let sql = format!(
+            "{RETRIEVE_PAYMENT_RECORD_BY_OUT_TRADE_NO}{PAYMENT_INTENT_JOIN}{PAYMENT_ATTEMPT_JOIN}
+WHERE o.tenant_id = CAST($1 AS TEXT)
+  AND ((o.organization_id = CAST($2 AS TEXT)) OR (o.organization_id IS NULL AND $2 IS NULL))
+  AND o.owner_user_id = CAST($3 AS TEXT)
+  AND COALESCE(NULLIF(pa.out_trade_no, ''), NULLIF(o.order_no, '')) = CAST($4 AS TEXT)
+LIMIT 1"
+        );
+        let row = sqlx::query(&sql)
+            .bind(&query.tenant_id)
+            .bind(query.organization_id.as_deref())
+            .bind(&query.owner_user_id)
+            .bind(&query.out_trade_no)
+            .fetch_optional(&self.pool)
+            .await
+            .or_else(none_when_read_model_is_missing)
+            .map_err(|error| store_error("failed to retrieve payment record by out trade no", error))?;
+
+        row.as_ref()
+            .map(payment_record_from_row)
+            .transpose()?
+            .ok_or_else(|| CommerceServiceError::not_found("payment record was not found"))
+    }
+
+    pub async fn fetch_payment_statistics(
+        &self,
+        query: PaymentRecordStatisticsQuery,
+    ) -> Result<PaymentRecordStatistics, CommerceServiceError> {
+        let sql = format!(
+            "{FETCH_PAYMENT_STATISTICS}{PAYMENT_INTENT_JOIN}{PAYMENT_ATTEMPT_JOIN}
+WHERE o.tenant_id = CAST($1 AS TEXT)
+  AND ((o.organization_id = CAST($2 AS TEXT)) OR (o.organization_id IS NULL AND $2 IS NULL))
+  AND o.owner_user_id = CAST($3 AS TEXT)
+) stats"
+        );
+        let row = sqlx::query(&sql)
+            .bind(&query.tenant_id)
+            .bind(query.organization_id.as_deref())
+            .bind(&query.owner_user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .or_else(none_when_read_model_is_missing)
+            .map_err(|error| store_error("failed to fetch payment statistics", error))?;
+
+        let Some(row) = row else {
+            return Ok(PaymentRecordStatistics {
+                total_payments: 0,
+                pending_payments: 0,
+                success_payments: 0,
+                failed_payments: 0,
+                timeout_payments: 0,
+                closed_payments: 0,
+            });
+        };
+
+        Ok(PaymentRecordStatistics {
+            total_payments: row.try_get("total_payments").unwrap_or(0),
+            pending_payments: row.try_get("pending_payments").unwrap_or(0),
+            success_payments: row.try_get("success_payments").unwrap_or(0),
+            failed_payments: row.try_get("failed_payments").unwrap_or(0),
+            timeout_payments: row.try_get("timeout_payments").unwrap_or(0),
+            closed_payments: row.try_get("closed_payments").unwrap_or(0),
+        })
+    }
+
     pub async fn close_payment_record(
         &self,
         command: ClosePaymentRecordCommand,
     ) -> Result<(), CommerceServiceError> {
+        crate::shared::ensure_payment_status_transition(
+            "pending",
+            CommercePaymentStatus::Canceled.as_str(),
+        )?;
         let now = format!(
             "{}",
             std::time::SystemTime::now()
@@ -174,6 +328,12 @@ impl PostgresCommercePaymentRecordStore {
                 .map(|duration| duration.as_secs())
                 .unwrap_or(0)
         );
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error("failed to begin close payment record transaction", error))?;
+
         let attempt = sqlx::query(
             r#"
             UPDATE commerce_payment_attempt
@@ -189,11 +349,14 @@ impl PostgresCommercePaymentRecordStore {
         .bind(&command.tenant_id)
         .bind(&command.owner_user_id)
         .bind(&command.payment_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to close payment attempt", error))?;
 
         if attempt.rows_affected() > 0 {
+            tx.commit()
+                .await
+                .map_err(|error| store_error("failed to commit close payment record transaction", error))?;
             return Ok(());
         }
 
@@ -212,7 +375,7 @@ impl PostgresCommercePaymentRecordStore {
         .bind(&command.tenant_id)
         .bind(&command.owner_user_id)
         .bind(&command.payment_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to close payment intent", error))?;
 
@@ -221,6 +384,10 @@ impl PostgresCommercePaymentRecordStore {
                 "payment record is not closable or was not found",
             ));
         }
+
+        tx.commit()
+            .await
+            .map_err(|error| store_error("failed to commit close payment record transaction", error))?;
 
         Ok(())
     }

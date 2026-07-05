@@ -3,23 +3,33 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::extract::{Extension, Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::HeaderMap;
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
+use sdkwork_payment_providers::{
+    create_provider_refund, provider_registry_for_account, PaymentProviderRegistry,
+    ProviderAccountBinding, ProviderCredentialBundle,
+};
 use sdkwork_payment_service::{
-    CreateOwnerRefundCommand, RefundDetailQuery, RefundListQuery, RefundView,
+    CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,
 };
 use sdkwork_payment_repository_sqlx::{
+    load_active_provider_account_postgres, load_active_provider_account_sqlite,
+    load_payment_attempt_provider_context_by_id_postgres,
+    load_payment_attempt_provider_context_by_id_sqlite, PaymentProviderAccountRecord,
     PostgresCommerceRefundStore, SqliteCommerceRefundStore,
 };
 use sdkwork_iam_context_service::IamAppContext;
+use sdkwork_utils_rust::OffsetListPageParams;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
+use crate::api_response::{
+    map_service_error, not_found, success_item, success_list, unauthorized, validation,
+};
 use crate::command_headers::validate_app_write_payload;
-use crate::problem_details::problem_error_response;
 use crate::subject::app_runtime_subject_from_extension;
 
 pub type CommerceRefundFuture<'a, T> =
@@ -34,7 +44,7 @@ pub trait CommerceRefundStore: Send + Sync {
     fn list_owner_refunds<'a>(
         &'a self,
         query: RefundListQuery,
-    ) -> CommerceRefundFuture<'a, Vec<RefundView>>;
+    ) -> CommerceRefundFuture<'a, RefundListPage>;
 
     fn retrieve_owner_refund<'a>(
         &'a self,
@@ -61,15 +71,10 @@ struct CreateRefundBody {
 #[derive(Debug, Deserialize)]
 struct RefundListParams {
     status: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AppRefundApiResult<T: Serialize> {
-    code: String,
-    msg: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<T>,
+    #[serde(rename = "page")]
+    page: Option<i64>,
+    #[serde(rename = "pageSize", alias = "page_size")]
+    page_size: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +91,30 @@ struct RefundResponse {
     reason_code: Option<String>,
 }
 
+struct ProviderEnrichedSqliteRefundStore {
+    inner: Arc<SqliteCommerceRefundStore>,
+    pool: SqlitePool,
+    credentials: ProviderCredentialBundle,
+}
+
+struct ProviderEnrichedPostgresRefundStore {
+    inner: Arc<PostgresCommerceRefundStore>,
+    pool: PgPool,
+    credentials: ProviderCredentialBundle,
+}
+
+fn provider_account_binding(record: &PaymentProviderAccountRecord) -> ProviderAccountBinding {
+    ProviderAccountBinding {
+        provider_code: record.provider_code.clone(),
+        merchant_id: record.merchant_id.clone(),
+        environment: record.environment.clone(),
+        secret_ref: record.secret_ref.clone(),
+        webhook_secret_ref: record.webhook_secret_ref.clone(),
+        certificate_ref: record.certificate_ref.clone(),
+        metadata: record.metadata.clone(),
+    }
+}
+
 impl CommerceRefundStore for SqliteCommerceRefundStore {
     fn create_owner_refund<'a>(
         &'a self,
@@ -97,7 +126,7 @@ impl CommerceRefundStore for SqliteCommerceRefundStore {
     fn list_owner_refunds<'a>(
         &'a self,
         query: RefundListQuery,
-    ) -> CommerceRefundFuture<'a, Vec<RefundView>> {
+    ) -> CommerceRefundFuture<'a, RefundListPage> {
         Box::pin(async move { self.list_owner_refunds(query).await })
     }
 
@@ -120,7 +149,7 @@ impl CommerceRefundStore for PostgresCommerceRefundStore {
     fn list_owner_refunds<'a>(
         &'a self,
         query: RefundListQuery,
-    ) -> CommerceRefundFuture<'a, Vec<RefundView>> {
+    ) -> CommerceRefundFuture<'a, RefundListPage> {
         Box::pin(async move { self.list_owner_refunds(query).await })
     }
 
@@ -132,22 +161,197 @@ impl CommerceRefundStore for PostgresCommerceRefundStore {
     }
 }
 
-impl<T: Serialize> AppRefundApiResult<T> {
-    fn success(data: T) -> Self {
-        Self {
-            code: "0".to_owned(),
-            msg: "success".to_owned(),
-            data: Some(data),
-        }
+async fn submit_provider_refund(
+    credentials: &ProviderCredentialBundle,
+    pool: &SqlitePool,
+    tenant_id: &str,
+    organization_id: Option<&str>,
+    refund: &RefundView,
+    reason_code: Option<String>,
+) -> Result<(), CommerceServiceError> {
+    let Some(ctx) =
+        load_payment_attempt_provider_context_by_id_sqlite(pool, &refund.payment_attempt_id).await?
+    else {
+        return Ok(());
+    };
+    let account = load_active_provider_account_sqlite(
+        pool,
+        tenant_id,
+        organization_id,
+        &ctx.provider_code,
+    )
+    .await?;
+    let registry = provider_registry_for_account(
+        credentials,
+        account.map(|record| provider_account_binding(&record)),
+    );
+    let total_amount = sdkwork_contract_service::CommerceMoney::new(&ctx.amount)
+        .map_err(CommerceServiceError::storage)?;
+    create_provider_refund(
+        &registry,
+        &ctx.provider_code,
+        &ctx.out_trade_no,
+        &refund.refund_no,
+        &refund.amount,
+        &total_amount,
+        reason_code,
+    )
+    .await
+}
+
+async fn submit_provider_refund_postgres(
+    credentials: &ProviderCredentialBundle,
+    pool: &PgPool,
+    tenant_id: &str,
+    organization_id: Option<&str>,
+    refund: &RefundView,
+    reason_code: Option<String>,
+) -> Result<(), CommerceServiceError> {
+    let Some(ctx) = load_payment_attempt_provider_context_by_id_postgres(
+        pool,
+        &refund.payment_attempt_id,
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+    let account = load_active_provider_account_postgres(
+        pool,
+        tenant_id,
+        organization_id,
+        &ctx.provider_code,
+    )
+    .await?;
+    let registry = provider_registry_for_account(
+        credentials,
+        account.map(|record| provider_account_binding(&record)),
+    );
+    let total_amount = sdkwork_contract_service::CommerceMoney::new(&ctx.amount)
+        .map_err(CommerceServiceError::storage)?;
+    create_provider_refund(
+        &registry,
+        &ctx.provider_code,
+        &ctx.out_trade_no,
+        &refund.refund_no,
+        &refund.amount,
+        &total_amount,
+        reason_code,
+    )
+    .await
+}
+
+impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
+    fn create_owner_refund<'a>(
+        &'a self,
+        command: CreateOwnerRefundCommand,
+    ) -> CommerceRefundFuture<'a, RefundView> {
+        let inner = self.inner.clone();
+        let pool = self.pool.clone();
+        let credentials = self.credentials.clone();
+        let tenant_id = command.tenant_id.clone();
+        let organization_id = command.organization_id.clone();
+        let reason_code = command.reason_code.clone();
+        Box::pin(async move {
+            let refund = inner.create_owner_refund(command).await?;
+            if refund.status == "submitted" {
+                submit_provider_refund(
+                    &credentials,
+                    &pool,
+                    &tenant_id,
+                    organization_id.as_deref(),
+                    &refund,
+                    reason_code,
+                )
+                .await?;
+            }
+            Ok(refund)
+        })
+    }
+
+    fn list_owner_refunds<'a>(
+        &'a self,
+        query: RefundListQuery,
+    ) -> CommerceRefundFuture<'a, RefundListPage> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.list_owner_refunds(query).await })
+    }
+
+    fn retrieve_owner_refund<'a>(
+        &'a self,
+        query: RefundDetailQuery,
+    ) -> CommerceRefundFuture<'a, Option<RefundView>> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.retrieve_owner_refund(query).await })
     }
 }
 
-pub fn app_refund_router_with_sqlite_pool(pool: SqlitePool) -> Router {
-    build_app_refund_router(Arc::new(SqliteCommerceRefundStore::new(pool)))
+impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
+    fn create_owner_refund<'a>(
+        &'a self,
+        command: CreateOwnerRefundCommand,
+    ) -> CommerceRefundFuture<'a, RefundView> {
+        let inner = self.inner.clone();
+        let pool = self.pool.clone();
+        let credentials = self.credentials.clone();
+        let tenant_id = command.tenant_id.clone();
+        let organization_id = command.organization_id.clone();
+        let reason_code = command.reason_code.clone();
+        Box::pin(async move {
+            let refund = inner.create_owner_refund(command).await?;
+            if refund.status == "submitted" {
+                submit_provider_refund_postgres(
+                    &credentials,
+                    &pool,
+                    &tenant_id,
+                    organization_id.as_deref(),
+                    &refund,
+                    reason_code,
+                )
+                .await?;
+            }
+            Ok(refund)
+        })
+    }
+
+    fn list_owner_refunds<'a>(
+        &'a self,
+        query: RefundListQuery,
+    ) -> CommerceRefundFuture<'a, RefundListPage> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.list_owner_refunds(query).await })
+    }
+
+    fn retrieve_owner_refund<'a>(
+        &'a self,
+        query: RefundDetailQuery,
+    ) -> CommerceRefundFuture<'a, Option<RefundView>> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.retrieve_owner_refund(query).await })
+    }
 }
 
-pub fn app_refund_router_with_postgres_pool(pool: PgPool) -> Router {
-    build_app_refund_router(Arc::new(PostgresCommerceRefundStore::new(pool)))
+pub fn app_refund_router_with_sqlite_pool(
+    pool: SqlitePool,
+    _registry: Arc<PaymentProviderRegistry>,
+    credentials: ProviderCredentialBundle,
+) -> Router {
+    build_app_refund_router(Arc::new(ProviderEnrichedSqliteRefundStore {
+        inner: Arc::new(SqliteCommerceRefundStore::new(pool.clone())),
+        pool,
+        credentials,
+    }))
+}
+
+pub fn app_refund_router_with_postgres_pool(
+    pool: PgPool,
+    _registry: Arc<PaymentProviderRegistry>,
+    credentials: ProviderCredentialBundle,
+) -> Router {
+    build_app_refund_router(Arc::new(ProviderEnrichedPostgresRefundStore {
+        inner: Arc::new(PostgresCommerceRefundStore::new(pool.clone())),
+        pool,
+        credentials,
+    }))
 }
 
 pub fn build_app_refund_router(store: Arc<dyn CommerceRefundStore>) -> Router {
@@ -190,7 +394,7 @@ async fn create_refund(
     };
 
     match state.store.create_owner_refund(command).await {
-        Ok(refund) => Json(AppRefundApiResult::success(map_refund(refund))).into_response(),
+        Ok(refund) => success_item(None, map_refund(refund)),
         Err(error) => refund_system_response("refund create failed", error),
     }
 }
@@ -204,21 +408,22 @@ async fn list_refunds(
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
     };
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
     let query = match RefundListQuery::new(
         &subject.tenant_id,
         subject.organization_id.as_deref(),
         &subject.user_id,
         params.status.as_deref(),
     ) {
-        Ok(query) => query,
+        Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
         Err(error) => return validation_response(error.message()),
     };
 
     match state.store.list_owner_refunds(query).await {
-        Ok(refunds) => Json(AppRefundApiResult::success(
-            refunds.into_iter().map(map_refund).collect::<Vec<_>>(),
-        ))
-        .into_response(),
+        Ok(page) => {
+            let items: Vec<RefundResponse> = page.items.into_iter().map(map_refund).collect();
+            success_list(None, items, page.total_items, page_params)
+        }
         Err(error) => refund_system_response("refund list is unavailable", error),
     }
 }
@@ -243,8 +448,8 @@ async fn retrieve_refund(
     };
 
     match state.store.retrieve_owner_refund(query).await {
-        Ok(Some(refund)) => Json(AppRefundApiResult::success(map_refund(refund))).into_response(),
-        Ok(None) => not_found_response("refund was not found"),
+        Ok(Some(refund)) => success_item(None, map_refund(refund)),
+        Ok(None) => not_found(None, "refund was not found"),
         Err(error) => refund_system_response("refund read model is unavailable", error),
     }
 }
@@ -263,27 +468,13 @@ fn map_refund(value: RefundView) -> RefundResponse {
 }
 
 fn unauthorized_response(message: impl Into<String>) -> Response {
-    problem_error_response(StatusCode::UNAUTHORIZED, "4010", message)
+    unauthorized(None, message)
 }
 
 fn validation_response(message: impl Into<String>) -> Response {
-    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
+    validation(None, message)
 }
 
-fn not_found_response(message: impl Into<String>) -> Response {
-    problem_error_response(StatusCode::NOT_FOUND, "4040", message)
-}
-
-fn refund_system_response(context: &str, error: CommerceServiceError) -> Response {
-    match error.code() {
-        "validation" => validation_response(error.message()),
-        "not_found" => not_found_response(error.message()),
-        "conflict" => problem_error_response(StatusCode::CONFLICT, "4090", error.message()),
-        "unauthenticated" => unauthorized_response(error.message()),
-        _ => problem_error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "5000",
-            format!("{context}: {}", error.message()),
-        ),
-    }
+fn refund_system_response(_context: &str, error: CommerceServiceError) -> Response {
+    map_service_error(None, error)
 }

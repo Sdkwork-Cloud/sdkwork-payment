@@ -5,10 +5,10 @@ use sdkwork_order_service::{
     CancelOwnerOrderCommand, PayOwnerOrderCommand, PayOwnerOrderOutcome,
 };
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
-use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::shared::{payment_attempt_is_terminal_success, ConfirmOwnerOrderPaymentOutcome};
+use crate::owner_payment_params::owner_order_payment_params;
+use crate::shared::{payment_attempt_is_terminal_success, stable_storage_id, ConfirmOwnerOrderPaymentOutcome};
 
 #[derive(Debug, Clone)]
 pub struct SqliteCommerceOwnerOrderPaymentStore {
@@ -122,6 +122,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             SELECT
                 o.id AS order_id,
                 o.order_no AS order_sn,
+                o.subject AS order_subject,
                 o.status,
                 COALESCE(
                     (
@@ -155,6 +156,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         };
         let order_status = string_cell(&order_row, "status");
         let order_sn = string_cell(&order_row, "order_sn");
+        let order_subject = optional_string_cell(&order_row, "order_subject");
         let total_amount = CommerceMoney::new(&string_cell(&order_row, "total_amount"))
             .map_err(CommerceServiceError::storage)?;
         if !order_status_is_payable(&order_status) {
@@ -164,7 +166,16 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         }
 
         if let Some(existing) =
-            load_reusable_owner_payment_in_tx(&mut tx, &command, &order_sn).await?
+            load_owner_payment_outcome_by_idempotency_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
+        {
+            tx.commit()
+                .await
+                .map_err(|error| store_error("failed to commit idempotent owner payment replay", error))?;
+            return Ok(existing);
+        }
+
+        if let Some(existing) =
+            load_reusable_owner_payment_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
         {
             tx.commit()
                 .await
@@ -174,10 +185,19 @@ impl SqliteCommerceOwnerOrderPaymentStore {
 
         let method = load_owner_payment_method(&mut tx, &command).await?;
         let now = current_command_timestamp();
-        let token = format!("{}-{}", command.order_id, now.replace([' ', ':'], ""));
-        let payment_intent_id = format!("pi-{token}");
-        let payment_attempt_id = format!("pa-{token}");
-        let out_trade_no = format!("OT-{}-{token}", order_sn);
+        let payment_intent_id = stable_storage_id(&[
+            "pi",
+            &command.tenant_id,
+            &command.order_id,
+            &command.idempotency_key,
+        ]);
+        let payment_attempt_id = stable_storage_id(&[
+            "pa",
+            &command.tenant_id,
+            &command.order_id,
+            &command.idempotency_key,
+        ]);
+        let out_trade_no = format!("OT-{}-{}", order_sn, &command.idempotency_key[..command.idempotency_key.len().min(24)]);
 
         sqlx::query(
             r#"
@@ -187,6 +207,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
                  idempotency_key, created_at, updated_at)
             VALUES
                 (?, CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), ?, ?, ?, ?, ?, 'CNY', ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO NOTHING
             "#,
         )
         .bind(&payment_intent_id)
@@ -199,13 +220,22 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .bind(&method.provider_code)
         .bind(total_amount.as_str())
         .bind(CommercePaymentStatus::Pending.as_str())
-        .bind(&order_sn)
-        .bind(&token)
+        .bind(&command.request_no)
+        .bind(&command.idempotency_key)
         .bind(&now)
         .bind(&now)
         .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to insert owner order payment intent", error))?;
+
+        if let Some(existing) =
+            load_owner_payment_outcome_by_idempotency_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
+        {
+            tx.commit()
+                .await
+                .map_err(|error| store_error("failed to commit idempotent owner payment replay", error))?;
+            return Ok(existing);
+        }
 
         let callback_payload = command
             .payment_attempt_callback_payload
@@ -217,9 +247,9 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             INSERT INTO commerce_payment_attempt
                 (id, tenant_id, organization_id, owner_user_id, payment_intent_id, order_id,
                  payment_method, provider_code, out_trade_no, amount, currency_code, status,
-                 callback_payload, created_at, paid_at, updated_at)
+                 callback_payload, request_no, idempotency_key, created_at, paid_at, updated_at)
             VALUES
-                (?, CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), ?, ?, ?, ?, ?, ?, 'CNY', ?, ?, ?, NULL, ?)
+                (?, CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), ?, ?, ?, ?, ?, ?, 'CNY', ?, ?, ?, ?, ?, NULL, ?)
             "#,
         )
         .bind(&payment_attempt_id)
@@ -234,6 +264,8 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .bind(total_amount.as_str())
         .bind(CommercePaymentStatus::Pending.as_str())
         .bind(callback_payload)
+        .bind(&command.request_no)
+        .bind(&command.idempotency_key)
         .bind(&now)
         .bind(&now)
         .execute(&mut *tx)
@@ -244,10 +276,12 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             store_error("failed to commit owner order payment transaction", error)
         })?;
 
-        let mut payment_params = BTreeMap::new();
-        payment_params.insert("cashierUrl".to_owned(), out_trade_no.clone());
-        payment_params.insert("nextAction".to_owned(), "cashier".to_owned());
-        payment_params.insert("orderSn".to_owned(), order_sn);
+        let payment_params = owner_order_payment_params(
+            &method.provider_code,
+            &order_sn,
+            order_subject.as_deref(),
+            &out_trade_no,
+        );
 
         Ok(PayOwnerOrderOutcome {
             amount: total_amount,
@@ -303,6 +337,9 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         };
 
         let attempt_status = string_cell(&attempt_row, "status");
+        if !payment_attempt_is_terminal_success(&attempt_status) {
+            crate::shared::ensure_payment_status_transition(&attempt_status, CommercePaymentStatus::Succeeded.as_str())?;
+        }
         if payment_attempt_is_terminal_success(&attempt_status) {
             tx.commit().await.map_err(|error| {
                 store_error("failed to commit idempotent payment confirmation", error)
@@ -411,7 +448,6 @@ async fn load_owner_payment_method(
           AND (
                 (tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT))
              OR (tenant_id = CAST(? AS TEXT) AND organization_id IS NULL)
-             OR (tenant_id = '100001' AND (organization_id = '0' OR organization_id IS NULL))
           )
         ORDER BY CASE WHEN tenant_id = CAST(? AS TEXT) THEN 0 ELSE 1 END, sort_order ASC
         LIMIT 1
@@ -433,14 +469,75 @@ async fn load_owner_payment_method(
     .ok_or_else(|| CommerceServiceError::conflict("payment method is unavailable"))
 }
 
+async fn load_owner_payment_outcome_by_idempotency_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    command: &PayOwnerOrderCommand,
+    order_sn: &str,
+    order_subject: Option<&str>,
+) -> Result<Option<PayOwnerOrderOutcome>, CommerceServiceError> {
+    let row = sqlx::query(
+        r#"
+        SELECT pa.id AS payment_attempt_id,
+               pa.out_trade_no,
+               CAST(pa.amount AS TEXT) AS amount,
+               pa.payment_method,
+               pa.provider_code
+        FROM commerce_payment_intent pi
+        INNER JOIN commerce_payment_attempt pa
+            ON pa.payment_intent_id = pi.id
+           AND pa.tenant_id = pi.tenant_id
+           AND pa.owner_user_id = pi.owner_user_id
+           AND pa.order_id = pi.order_id
+        WHERE pi.tenant_id = CAST(? AS TEXT)
+          AND pi.order_id = CAST(? AS TEXT)
+          AND pi.idempotency_key = CAST(? AS TEXT)
+          AND pi.owner_user_id = CAST(? AS TEXT)
+          AND pi.deleted_at IS NULL
+        ORDER BY pa.created_at DESC, pa.id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&command.tenant_id)
+    .bind(&command.order_id)
+    .bind(&command.idempotency_key)
+    .bind(&command.owner_user_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| store_error("failed to load owner payment idempotency replay", error))?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let amount =
+        CommerceMoney::new(&string_cell(&row, "amount")).map_err(CommerceServiceError::storage)?;
+    let out_trade_no = string_cell(&row, "out_trade_no");
+    let payment_params = owner_order_payment_params(
+        &string_cell(&row, "provider_code"),
+        order_sn,
+        order_subject,
+        &out_trade_no,
+    );
+
+    Ok(Some(PayOwnerOrderOutcome {
+        amount,
+        order_id: command.order_id.clone(),
+        out_trade_no,
+        payment_id: string_cell(&row, "payment_attempt_id"),
+        payment_method: string_cell(&row, "payment_method"),
+        payment_params,
+    }))
+}
+
 async fn load_reusable_owner_payment_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     command: &PayOwnerOrderCommand,
     order_sn: &str,
+    order_subject: Option<&str>,
 ) -> Result<Option<PayOwnerOrderOutcome>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT pa.id, pa.out_trade_no, pa.amount, pa.payment_method
+        SELECT pa.id, pa.out_trade_no, pa.amount, pa.payment_method, pa.provider_code
         FROM commerce_payment_attempt pa
         INNER JOIN commerce_order o
             ON o.id = pa.order_id
@@ -468,10 +565,12 @@ async fn load_reusable_owner_payment_in_tx(
     let amount =
         CommerceMoney::new(&string_cell(&row, "amount")).map_err(CommerceServiceError::storage)?;
     let out_trade_no = string_cell(&row, "out_trade_no");
-    let mut payment_params = BTreeMap::new();
-    payment_params.insert("cashierUrl".to_owned(), out_trade_no.clone());
-    payment_params.insert("nextAction".to_owned(), "cashier".to_owned());
-    payment_params.insert("orderSn".to_owned(), order_sn.to_owned());
+    let payment_params = owner_order_payment_params(
+        &string_cell(&row, "provider_code"),
+        order_sn,
+        order_subject,
+        &out_trade_no,
+    );
 
     Ok(Some(PayOwnerOrderOutcome {
         amount,
@@ -492,4 +591,11 @@ fn string_cell(row: &sqlx::sqlite::SqliteRow, column: &str) -> String {
         .ok()
         .flatten()
         .unwrap_or_default()
+}
+
+fn optional_string_cell(row: &sqlx::sqlite::SqliteRow, column: &str) -> Option<String> {
+    row.try_get::<Option<String>, _>(column)
+        .ok()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
 }

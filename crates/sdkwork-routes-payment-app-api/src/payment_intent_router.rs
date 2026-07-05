@@ -3,8 +3,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::extract::{Extension, Path, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::HeaderMap;
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
@@ -20,8 +20,10 @@ use sdkwork_iam_context_service::IamAppContext;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
-use crate::command_headers::validate_app_write_payload;
-use crate::problem_details::problem_error_response;
+use crate::api_response::{
+    map_service_error, not_found, success_item, unauthorized, validation,
+};
+use crate::command_headers::{validate_app_write_payload, write_payload_with_route_param};
 use crate::subject::app_runtime_subject_from_extension;
 
 pub type CommercePaymentIntentFuture<'a, T> =
@@ -60,15 +62,6 @@ struct CreatePaymentIntentRequest {
     order_id: String,
     #[serde(rename = "paymentMethod", alias = "payment_method")]
     payment_method: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AppPaymentIntentApiResult<T: Serialize> {
-    code: String,
-    msg: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<T>,
 }
 
 #[derive(Debug, Serialize)]
@@ -156,16 +149,6 @@ impl CommercePaymentIntentStore for PostgresCommercePaymentIntentStore {
     }
 }
 
-impl<T: Serialize> AppPaymentIntentApiResult<T> {
-    fn success(data: T) -> Self {
-        Self {
-            code: "0".to_owned(),
-            msg: "success".to_owned(),
-            data: Some(data),
-        }
-    }
-}
-
 pub fn app_payment_intent_router_with_sqlite_pool(pool: SqlitePool) -> Router {
     build_app_payment_intent_router(Arc::new(SqliteCommercePaymentIntentStore::new(pool)))
 }
@@ -229,10 +212,7 @@ async fn create_payment_intent(
     };
 
     match state.store.create_owner_payment_intent(command).await {
-        Ok(intent) => Json(AppPaymentIntentApiResult::success(map_payment_intent(
-            intent,
-        )))
-        .into_response(),
+        Ok(intent) => success_item(None, map_payment_intent(intent)),
         Err(error) => payment_intent_system_response("payment intent create failed", error),
     }
 }
@@ -257,11 +237,8 @@ async fn retrieve_payment_intent(
     };
 
     match state.store.retrieve_owner_payment_intent(query).await {
-        Ok(Some(intent)) => Json(AppPaymentIntentApiResult::success(map_payment_intent(
-            intent,
-        )))
-        .into_response(),
-        Ok(None) => not_found_response("payment intent was not found"),
+        Ok(Some(intent)) => success_item(None, map_payment_intent(intent)),
+        Ok(None) => not_found(None, "payment intent was not found"),
         Err(error) => {
             payment_intent_system_response("payment intent read model is unavailable", error)
         }
@@ -271,11 +248,28 @@ async fn retrieve_payment_intent(
 async fn cancel_payment_intent(
     State(state): State<AppPaymentIntentState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    headers: HeaderMap,
     Path(payment_intent_id): Path<String>,
 ) -> Response {
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(message),
+    };
+    let payload =
+        write_payload_with_route_param("paymentIntentId", &payment_intent_id, &serde_json::json!({}));
+    let _write_headers = match validate_app_write_payload(
+        &headers,
+        "payments.intents.cancel",
+        &payload,
+        |idempotency_key| {
+            format!(
+                "payment-intent-cancel-{}-{}",
+                subject.user_id, idempotency_key
+            )
+        },
+    ) {
+        Ok(headers) => headers,
+        Err(response) => return response,
     };
     let command = match CancelOwnerPaymentIntentCommand::new(
         &subject.tenant_id,
@@ -288,10 +282,7 @@ async fn cancel_payment_intent(
     };
 
     match state.store.cancel_owner_payment_intent(command).await {
-        Ok(intent) => Json(AppPaymentIntentApiResult::success(map_payment_intent(
-            intent,
-        )))
-        .into_response(),
+        Ok(intent) => success_item(None, map_payment_intent(intent)),
         Err(error) => payment_intent_system_response("payment intent cancel failed", error),
     }
 }
@@ -329,10 +320,7 @@ async fn create_payment_attempt(
     };
 
     match state.store.create_owner_payment_attempt(command).await {
-        Ok(outcome) => Json(AppPaymentIntentApiResult::success(map_payment_attempt(
-            outcome,
-        )))
-        .into_response(),
+        Ok(outcome) => success_item(None, map_payment_attempt(outcome)),
         Err(error) => payment_intent_system_response("payment attempt create failed", error),
     }
 }
@@ -363,27 +351,13 @@ fn map_payment_attempt(value: CreateOwnerPaymentAttemptOutcome) -> PaymentAttemp
 }
 
 fn unauthorized_response(message: impl Into<String>) -> Response {
-    problem_error_response(StatusCode::UNAUTHORIZED, "4010", message)
+    unauthorized(None, message)
 }
 
 fn validation_response(message: impl Into<String>) -> Response {
-    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
+    validation(None, message)
 }
 
-fn not_found_response(message: impl Into<String>) -> Response {
-    problem_error_response(StatusCode::NOT_FOUND, "4040", message)
-}
-
-fn payment_intent_system_response(context: &str, error: CommerceServiceError) -> Response {
-    match error.code() {
-        "validation" => validation_response(error.message()),
-        "not_found" => not_found_response(error.message()),
-        "conflict" => problem_error_response(StatusCode::CONFLICT, "4090", error.message()),
-        "unauthenticated" => unauthorized_response(error.message()),
-        _ => problem_error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "5000",
-            format!("{context}: {}", error.message()),
-        ),
-    }
+fn payment_intent_system_response(_context: &str, error: CommerceServiceError) -> Response {
+    map_service_error(None, error)
 }

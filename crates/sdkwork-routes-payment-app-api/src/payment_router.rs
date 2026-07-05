@@ -3,27 +3,42 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::extract::{Extension, Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::HeaderMap;
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
 use sdkwork_order_service::{PayOwnerOrderCommand, PayOwnerOrderOutcome};
 use sdkwork_payment_service::{
     ClosePaymentRecordCommand, PaymentMethodItem, PaymentMethodListQuery, PaymentRecordDetailQuery,
-    PaymentRecordItem, PaymentRecordListQuery, PaymentRecordOrderListQuery,
+    PaymentRecordItem, PaymentRecordListPage, PaymentRecordListQuery, PaymentRecordOrderListPage,
+    PaymentRecordOrderListQuery, PaymentRecordOutTradeNoQuery, PaymentRecordStatistics,
+    PaymentRecordStatisticsQuery,
 };
 use sdkwork_order_repository_sqlx::{PostgresCommerceOrderStore, SqliteCommerceOrderStore};
+use sdkwork_payment_providers::{
+    cancel_provider_payment, enrich_pay_owner_order_outcome, normalize_provider_code,
+    provider_registry_for_account, CheckoutContext, PaymentProviderRegistry,
+    ProviderAccountBinding, ProviderCredentialBundle,
+};
 use sdkwork_payment_repository_sqlx::{
-    PostgresCommerceOwnerOrderPaymentStore, PostgresCommercePaymentRecordStore,
-    SqliteCommerceOwnerOrderPaymentStore, SqliteCommercePaymentRecordStore,
+    load_active_provider_account_postgres, load_active_provider_account_sqlite,
+    load_payment_attempt_provider_context_postgres, load_payment_attempt_provider_context_sqlite,
+    PaymentProviderAccountRecord, PostgresCommerceOwnerOrderPaymentStore,
+    PostgresCommercePaymentRecordStore, SqliteCommerceOwnerOrderPaymentStore,
+    SqliteCommercePaymentRecordStore,
 };
 use sdkwork_iam_context_service::IamAppContext;
+use sdkwork_utils_rust::OffsetListPageParams;
+use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
-use crate::command_headers::validate_app_write_payload;
-use crate::problem_details::problem_error_response;
+use crate::api_response::{
+    map_service_error, not_found, success_command_accepted, success_item, success_list,
+    unauthorized, validation,
+};
+use crate::command_headers::{validate_app_write_payload, write_payload_with_route_param};
 use crate::subject::app_runtime_subject_from_extension;
 
 pub type CommercePaymentFuture<'a, T> =
@@ -38,7 +53,7 @@ pub trait CommercePaymentStore: Send + Sync {
     fn list_payment_records<'a>(
         &'a self,
         query: PaymentRecordListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>>;
+    ) -> CommercePaymentFuture<'a, PaymentRecordListPage>;
 
     fn retrieve_payment_record<'a>(
         &'a self,
@@ -48,7 +63,17 @@ pub trait CommercePaymentStore: Send + Sync {
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>>;
+    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage>;
+
+    fn retrieve_payment_record_by_out_trade_no<'a>(
+        &'a self,
+        query: PaymentRecordOutTradeNoQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem>;
+
+    fn fetch_payment_statistics<'a>(
+        &'a self,
+        query: PaymentRecordStatisticsQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics>;
 
     fn close_payment_record<'a>(
         &'a self,
@@ -67,6 +92,13 @@ struct AppPaymentState {
 }
 
 #[derive(Debug, Deserialize)]
+struct OrderPaymentsQueryParams {
+    page: Option<i64>,
+    #[serde(rename = "pageSize", alias = "page_size")]
+    page_size: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 struct PaymentRecordsQueryParams {
     page: Option<i64>,
     #[serde(rename = "pageSize", alias = "page_size")]
@@ -77,21 +109,6 @@ struct PaymentRecordsQueryParams {
 struct PaymentMethodsQueryParams {
     #[serde(rename = "clientType", alias = "client_type")]
     client_type: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AppPaymentApiResult<T: Serialize> {
-    code: String,
-    msg: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<T>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PaymentRecordsPageResponse {
-    content: Vec<PaymentRecordResponse>,
 }
 
 #[derive(Debug, Serialize)]
@@ -139,15 +156,6 @@ struct AppCommercePaymentAttemptRecordResponse {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AppCommerceContractApiResult<T: Serialize> {
-    code: String,
-    msg: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<T>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct PaymentStatisticsResponse {
     total_payments: i64,
     pending_payments: i64,
@@ -157,7 +165,7 @@ struct PaymentStatisticsResponse {
     closed_payments: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReconcilePaymentRequest {
     order_id: Option<String>,
@@ -204,31 +212,47 @@ struct CreatePaymentResponse {
     payment_url: Option<String>,
 }
 
-impl<T: Serialize> AppPaymentApiResult<T> {
-    fn success(data: T) -> Self {
-        Self {
-            code: "0".to_owned(),
-            msg: "success".to_owned(),
-            data: Some(data),
-        }
-    }
-}
-
-pub fn app_payment_router_with_sqlite_pool(pool: SqlitePool) -> Router {
+pub fn app_payment_router_with_sqlite_pool(
+    pool: SqlitePool,
+    registry: Arc<PaymentProviderRegistry>,
+    credentials: ProviderCredentialBundle,
+) -> Router {
     let order_store = Arc::new(SqliteCommerceOrderStore::new(pool.clone()));
     build_app_payment_router(Arc::new(CompositeCommercePaymentStore {
         methods: order_store,
-        payments: Arc::new(SqliteCommerceOwnerOrderPaymentStore::new(pool.clone())),
-        records: Arc::new(SqliteCommercePaymentRecordStore::new(pool)),
+        payments: Arc::new(ProviderEnrichedSqlitePayments {
+            inner: Arc::new(SqliteCommerceOwnerOrderPaymentStore::new(pool.clone())),
+            pool: pool.clone(),
+            registry,
+            credentials: credentials.clone(),
+        }),
+        records: Arc::new(ProviderEnrichedSqlitePaymentRecords {
+            inner: Arc::new(SqliteCommercePaymentRecordStore::new(pool.clone())),
+            pool,
+            credentials,
+        }),
     }))
 }
 
-pub fn app_payment_router_with_postgres_pool(pool: PgPool) -> Router {
+pub fn app_payment_router_with_postgres_pool(
+    pool: PgPool,
+    registry: Arc<PaymentProviderRegistry>,
+    credentials: ProviderCredentialBundle,
+) -> Router {
     let order_store = Arc::new(PostgresCommerceOrderStore::new(pool.clone()));
     build_app_payment_router(Arc::new(CompositeCommercePaymentStore {
         methods: order_store,
-        payments: Arc::new(PostgresCommerceOwnerOrderPaymentStore::new(pool.clone())),
-        records: Arc::new(PostgresCommercePaymentRecordStore::new(pool)),
+        payments: Arc::new(ProviderEnrichedPostgresPayments {
+            inner: Arc::new(PostgresCommerceOwnerOrderPaymentStore::new(pool.clone())),
+            pool: pool.clone(),
+            registry,
+            credentials: credentials.clone(),
+        }),
+        records: Arc::new(ProviderEnrichedPostgresPaymentRecords {
+            inner: Arc::new(PostgresCommercePaymentRecordStore::new(pool.clone())),
+            pool,
+            credentials,
+        }),
     }))
 }
 
@@ -278,6 +302,188 @@ struct CompositeCommercePaymentStore {
     records: Arc<dyn PaymentRecordSource>,
 }
 
+struct ProviderEnrichedSqlitePayments {
+    inner: Arc<SqliteCommerceOwnerOrderPaymentStore>,
+    pool: SqlitePool,
+    registry: Arc<PaymentProviderRegistry>,
+    credentials: ProviderCredentialBundle,
+}
+
+struct ProviderEnrichedPostgresPayments {
+    inner: Arc<PostgresCommerceOwnerOrderPaymentStore>,
+    pool: PgPool,
+    registry: Arc<PaymentProviderRegistry>,
+    credentials: ProviderCredentialBundle,
+}
+
+struct ProviderEnrichedSqlitePaymentRecords {
+    inner: Arc<SqliteCommercePaymentRecordStore>,
+    pool: SqlitePool,
+    credentials: ProviderCredentialBundle,
+}
+
+struct ProviderEnrichedPostgresPaymentRecords {
+    inner: Arc<PostgresCommercePaymentRecordStore>,
+    pool: PgPool,
+    credentials: ProviderCredentialBundle,
+}
+
+fn provider_account_binding(record: &PaymentProviderAccountRecord) -> ProviderAccountBinding {
+    ProviderAccountBinding {
+        provider_code: record.provider_code.clone(),
+        merchant_id: record.merchant_id.clone(),
+        environment: record.environment.clone(),
+        secret_ref: record.secret_ref.clone(),
+        webhook_secret_ref: record.webhook_secret_ref.clone(),
+        certificate_ref: record.certificate_ref.clone(),
+        metadata: record.metadata.clone(),
+    }
+}
+
+async fn enrich_owner_order_payment(
+    pool: &SqlitePool,
+    registry: &PaymentProviderRegistry,
+    credentials: &ProviderCredentialBundle,
+    tenant_id: &str,
+    organization_id: Option<&str>,
+    order_id: &str,
+    idempotency_key: &str,
+    outcome: PayOwnerOrderOutcome,
+) -> Result<PayOwnerOrderOutcome, CommerceServiceError> {
+    let provider_code = outcome
+        .payment_params
+        .get("providerCode")
+        .cloned()
+        .unwrap_or_else(|| "sandbox".to_owned());
+    let account = load_active_provider_account_sqlite(
+        pool,
+        tenant_id,
+        organization_id,
+        &provider_code,
+    )
+    .await?;
+    let tenant_registry = tenant_provider_registry(registry, credentials, account);
+    let notify_url = credentials.provider_notify_url(&normalize_provider_code(&provider_code));
+    let context = CheckoutContext {
+        provider_code,
+        currency_code: "CNY".to_owned(),
+        tenant_id: tenant_id.to_owned(),
+        order_id: order_id.to_owned(),
+        idempotency_key: idempotency_key.to_owned(),
+        notify_url,
+        payment_scene: None,
+    };
+    enrich_pay_owner_order_outcome(&tenant_registry, &context, outcome).await
+}
+
+async fn enrich_owner_order_payment_postgres(
+    pool: &PgPool,
+    registry: &PaymentProviderRegistry,
+    credentials: &ProviderCredentialBundle,
+    tenant_id: &str,
+    organization_id: Option<&str>,
+    order_id: &str,
+    idempotency_key: &str,
+    outcome: PayOwnerOrderOutcome,
+) -> Result<PayOwnerOrderOutcome, CommerceServiceError> {
+    let provider_code = outcome
+        .payment_params
+        .get("providerCode")
+        .cloned()
+        .unwrap_or_else(|| "sandbox".to_owned());
+    let account = load_active_provider_account_postgres(
+        pool,
+        tenant_id,
+        organization_id,
+        &provider_code,
+    )
+    .await?;
+    let tenant_registry = tenant_provider_registry(registry, credentials, account);
+    let notify_url = credentials.provider_notify_url(&normalize_provider_code(&provider_code));
+    let context = CheckoutContext {
+        provider_code,
+        currency_code: "CNY".to_owned(),
+        tenant_id: tenant_id.to_owned(),
+        order_id: order_id.to_owned(),
+        idempotency_key: idempotency_key.to_owned(),
+        notify_url,
+        payment_scene: None,
+    };
+    enrich_pay_owner_order_outcome(&tenant_registry, &context, outcome).await
+}
+
+fn tenant_provider_registry(
+    fallback: &PaymentProviderRegistry,
+    credentials: &ProviderCredentialBundle,
+    account: Option<PaymentProviderAccountRecord>,
+) -> PaymentProviderRegistry {
+    match account {
+        Some(record) => provider_registry_for_account(
+            credentials,
+            Some(provider_account_binding(&record)),
+        ),
+        None => fallback.clone(),
+    }
+}
+
+impl OwnerOrderPaymentSource for ProviderEnrichedSqlitePayments {
+    fn pay_owner_order<'a>(
+        &'a self,
+        command: PayOwnerOrderCommand,
+    ) -> CommercePaymentFuture<'a, PayOwnerOrderOutcome> {
+        let registry = self.registry.clone();
+        let credentials = self.credentials.clone();
+        let pool = self.pool.clone();
+        Box::pin(async move {
+            let tenant_id = command.tenant_id.clone();
+            let organization_id = command.organization_id.clone();
+            let order_id = command.order_id.clone();
+            let idempotency_key = command.idempotency_key.clone();
+            let outcome = self.inner.pay_owner_order(command).await?;
+            enrich_owner_order_payment(
+                &pool,
+                &registry,
+                &credentials,
+                &tenant_id,
+                organization_id.as_deref(),
+                &order_id,
+                &idempotency_key,
+                outcome,
+            )
+            .await
+        })
+    }
+}
+
+impl OwnerOrderPaymentSource for ProviderEnrichedPostgresPayments {
+    fn pay_owner_order<'a>(
+        &'a self,
+        command: PayOwnerOrderCommand,
+    ) -> CommercePaymentFuture<'a, PayOwnerOrderOutcome> {
+        let registry = self.registry.clone();
+        let credentials = self.credentials.clone();
+        let pool = self.pool.clone();
+        Box::pin(async move {
+            let tenant_id = command.tenant_id.clone();
+            let organization_id = command.organization_id.clone();
+            let order_id = command.order_id.clone();
+            let idempotency_key = command.idempotency_key.clone();
+            let outcome = self.inner.pay_owner_order(command).await?;
+            enrich_owner_order_payment_postgres(
+                &pool,
+                &registry,
+                &credentials,
+                &tenant_id,
+                organization_id.as_deref(),
+                &order_id,
+                &idempotency_key,
+                outcome,
+            )
+            .await
+        })
+    }
+}
+
 trait PaymentMethodSource: Send + Sync {
     fn list_payment_methods<'a>(
         &'a self,
@@ -296,7 +502,7 @@ trait PaymentRecordSource: Send + Sync {
     fn list_payment_records<'a>(
         &'a self,
         query: PaymentRecordListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>>;
+    ) -> CommercePaymentFuture<'a, PaymentRecordListPage>;
 
     fn retrieve_payment_record<'a>(
         &'a self,
@@ -306,7 +512,17 @@ trait PaymentRecordSource: Send + Sync {
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>>;
+    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage>;
+
+    fn retrieve_payment_record_by_out_trade_no<'a>(
+        &'a self,
+        query: PaymentRecordOutTradeNoQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem>;
+
+    fn fetch_payment_statistics<'a>(
+        &'a self,
+        query: PaymentRecordStatisticsQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics>;
 
     fn close_payment_record<'a>(
         &'a self,
@@ -354,7 +570,7 @@ impl PaymentRecordSource for SqliteCommercePaymentRecordStore {
     fn list_payment_records<'a>(
         &'a self,
         query: PaymentRecordListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>> {
+    ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
         Box::pin(async move { self.list_payment_records(query).await })
     }
 
@@ -368,8 +584,22 @@ impl PaymentRecordSource for SqliteCommercePaymentRecordStore {
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>> {
+    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
         Box::pin(async move { self.list_payment_records_by_order(query).await })
+    }
+
+    fn retrieve_payment_record_by_out_trade_no<'a>(
+        &'a self,
+        query: PaymentRecordOutTradeNoQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
+        Box::pin(async move { self.retrieve_payment_record_by_out_trade_no(query).await })
+    }
+
+    fn fetch_payment_statistics<'a>(
+        &'a self,
+        query: PaymentRecordStatisticsQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
+        Box::pin(async move { self.fetch_payment_statistics(query).await })
     }
 
     fn close_payment_record<'a>(
@@ -384,7 +614,7 @@ impl PaymentRecordSource for PostgresCommercePaymentRecordStore {
     fn list_payment_records<'a>(
         &'a self,
         query: PaymentRecordListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>> {
+    ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
         Box::pin(async move { self.list_payment_records(query).await })
     }
 
@@ -398,8 +628,22 @@ impl PaymentRecordSource for PostgresCommercePaymentRecordStore {
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>> {
+    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
         Box::pin(async move { self.list_payment_records_by_order(query).await })
+    }
+
+    fn retrieve_payment_record_by_out_trade_no<'a>(
+        &'a self,
+        query: PaymentRecordOutTradeNoQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
+        Box::pin(async move { self.retrieve_payment_record_by_out_trade_no(query).await })
+    }
+
+    fn fetch_payment_statistics<'a>(
+        &'a self,
+        query: PaymentRecordStatisticsQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
+        Box::pin(async move { self.fetch_payment_statistics(query).await })
     }
 
     fn close_payment_record<'a>(
@@ -407,6 +651,156 @@ impl PaymentRecordSource for PostgresCommercePaymentRecordStore {
         command: ClosePaymentRecordCommand,
     ) -> CommercePaymentFuture<'a, ()> {
         Box::pin(async move { self.close_payment_record(command).await })
+    }
+}
+
+impl PaymentRecordSource for ProviderEnrichedSqlitePaymentRecords {
+    fn list_payment_records<'a>(
+        &'a self,
+        query: PaymentRecordListQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.list_payment_records(query).await })
+    }
+
+    fn retrieve_payment_record<'a>(
+        &'a self,
+        query: PaymentRecordDetailQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.retrieve_payment_record(query).await })
+    }
+
+    fn list_payment_records_by_order<'a>(
+        &'a self,
+        query: PaymentRecordOrderListQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.list_payment_records_by_order(query).await })
+    }
+
+    fn retrieve_payment_record_by_out_trade_no<'a>(
+        &'a self,
+        query: PaymentRecordOutTradeNoQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.retrieve_payment_record_by_out_trade_no(query).await })
+    }
+
+    fn fetch_payment_statistics<'a>(
+        &'a self,
+        query: PaymentRecordStatisticsQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.fetch_payment_statistics(query).await })
+    }
+
+    fn close_payment_record<'a>(
+        &'a self,
+        command: ClosePaymentRecordCommand,
+    ) -> CommercePaymentFuture<'a, ()> {
+        let pool = self.pool.clone();
+        let credentials = self.credentials.clone();
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            if let Some(ctx) = load_payment_attempt_provider_context_sqlite(
+                &pool,
+                &command.tenant_id,
+                &command.owner_user_id,
+                &command.payment_id,
+            )
+            .await?
+            {
+                let account = load_active_provider_account_sqlite(
+                    &pool,
+                    &command.tenant_id,
+                    command.organization_id.as_deref(),
+                    &ctx.provider_code,
+                )
+                .await?;
+                let registry = provider_registry_for_account(
+                    &credentials,
+                    account.map(|record| provider_account_binding(&record)),
+                );
+                cancel_provider_payment(&registry, &ctx.provider_code, &ctx.out_trade_no).await?;
+            }
+            inner.close_payment_record(command).await
+        })
+    }
+}
+
+impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
+    fn list_payment_records<'a>(
+        &'a self,
+        query: PaymentRecordListQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.list_payment_records(query).await })
+    }
+
+    fn retrieve_payment_record<'a>(
+        &'a self,
+        query: PaymentRecordDetailQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.retrieve_payment_record(query).await })
+    }
+
+    fn list_payment_records_by_order<'a>(
+        &'a self,
+        query: PaymentRecordOrderListQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.list_payment_records_by_order(query).await })
+    }
+
+    fn retrieve_payment_record_by_out_trade_no<'a>(
+        &'a self,
+        query: PaymentRecordOutTradeNoQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.retrieve_payment_record_by_out_trade_no(query).await })
+    }
+
+    fn fetch_payment_statistics<'a>(
+        &'a self,
+        query: PaymentRecordStatisticsQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.fetch_payment_statistics(query).await })
+    }
+
+    fn close_payment_record<'a>(
+        &'a self,
+        command: ClosePaymentRecordCommand,
+    ) -> CommercePaymentFuture<'a, ()> {
+        let pool = self.pool.clone();
+        let credentials = self.credentials.clone();
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            if let Some(ctx) = load_payment_attempt_provider_context_postgres(
+                &pool,
+                &command.tenant_id,
+                &command.owner_user_id,
+                &command.payment_id,
+            )
+            .await?
+            {
+                let account = load_active_provider_account_postgres(
+                    &pool,
+                    &command.tenant_id,
+                    command.organization_id.as_deref(),
+                    &ctx.provider_code,
+                )
+                .await?;
+                let registry = provider_registry_for_account(
+                    &credentials,
+                    account.map(|record| provider_account_binding(&record)),
+                );
+                cancel_provider_payment(&registry, &ctx.provider_code, &ctx.out_trade_no).await?;
+            }
+            inner.close_payment_record(command).await
+        })
     }
 }
 
@@ -421,7 +815,7 @@ impl CommercePaymentStore for CompositeCommercePaymentStore {
     fn list_payment_records<'a>(
         &'a self,
         query: PaymentRecordListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>> {
+    ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
         self.records.list_payment_records(query)
     }
 
@@ -435,8 +829,22 @@ impl CommercePaymentStore for CompositeCommercePaymentStore {
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
-    ) -> CommercePaymentFuture<'a, Vec<PaymentRecordItem>> {
+    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
         self.records.list_payment_records_by_order(query)
+    }
+
+    fn retrieve_payment_record_by_out_trade_no<'a>(
+        &'a self,
+        query: PaymentRecordOutTradeNoQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
+        self.records.retrieve_payment_record_by_out_trade_no(query)
+    }
+
+    fn fetch_payment_statistics<'a>(
+        &'a self,
+        query: PaymentRecordStatisticsQuery,
+    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
+        self.records.fetch_payment_statistics(query)
     }
 
     fn close_payment_record<'a>(
@@ -461,12 +869,12 @@ async fn list_payment_methods(
 ) -> Response {
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(None, message),
     };
     let query =
         match PaymentMethodListQuery::new(&subject.tenant_id, subject.organization_id.as_deref()) {
             Ok(query) => query,
-            Err(error) => return validation_response(error.message()),
+            Err(error) => return validation_response(None, error.message()),
         };
 
     match state.store.list_payment_methods(query).await {
@@ -476,9 +884,9 @@ async fn list_payment_methods(
                 .map(map_payment_method)
                 .filter(|method| matches_client_type(method, params.client_type.as_deref()))
                 .collect::<Vec<_>>();
-            Json(AppPaymentApiResult::success(methods)).into_response()
+            success_item(None, methods)
         }
-        Err(error) => payment_system_response("payment methods read model is unavailable", error),
+        Err(error) => payment_system_response(None, "payment methods read model is unavailable", error),
     }
 }
 
@@ -489,64 +897,68 @@ async fn list_payment_records(
 ) -> Response {
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(None, message),
     };
+    // Phase 1.3：在 handler 解析标准分页参数（page/page_size），下推为 offset/limit 到 SQL。
+    // 默认 page=1, page_size=20，page_size 上限 200（PAGINATION_SPEC §2）。
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
     let query = match PaymentRecordListQuery::new(
         &subject.tenant_id,
         subject.organization_id.as_deref(),
         &subject.user_id,
     ) {
-        Ok(query) => query,
-        Err(error) => return validation_response(error.message()),
+        Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
+        Err(error) => return validation_response(None, error.message()),
     };
 
     match state.store.list_payment_records(query).await {
-        Ok(items) => {
-            let content = paginate_items(
-                items
-                    .into_iter()
-                    .map(map_payment_record)
-                    .collect::<Vec<_>>(),
-                params.page,
-                params.page_size,
-            );
-            Json(AppPaymentApiResult::success(PaymentRecordsPageResponse {
-                content,
-            }))
-            .into_response()
+        Ok(page) => {
+            // Phase 1.3：store 已在 SQL 层完成 LIMIT/OFFSET 并返回真实 total_items，
+            // handler 不再做进程内 skip/take（PAGINATION_SPEC §2 合规）。
+            let items: Vec<_> = page
+                .items
+                .into_iter()
+                .map(map_payment_record)
+                .collect();
+            success_list(None, items, page.total_items, page_params)
         }
-        Err(error) => payment_system_response("payment records read model is unavailable", error),
+        Err(error) => payment_system_response(None, "payment records read model is unavailable", error),
     }
 }
 
 async fn list_order_payments(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     Path(order_id): Path<String>,
+    Query(params): Query<OrderPaymentsQueryParams>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized(ctx, message),
     };
+    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
     let query = match PaymentRecordOrderListQuery::new(
         &subject.tenant_id,
         subject.organization_id.as_deref(),
         &subject.user_id,
         &order_id,
     ) {
-        Ok(query) => query,
-        Err(error) => return validation_response(error.message()),
+        Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
+        Err(error) => return validation(ctx, error.message()),
     };
 
     match state.store.list_payment_records_by_order(query).await {
-        Ok(items) => Json(AppPaymentApiResult::success(
-            items
+        Ok(page) => {
+            let items = page
+                .items
                 .into_iter()
                 .map(map_payment_record)
-                .collect::<Vec<_>>(),
-        ))
-        .into_response(),
-        Err(error) => payment_system_response("order payment read model is unavailable", error),
+                .collect::<Vec<_>>();
+            success_list(ctx, items, page.total_items, page_params)
+        }
+        Err(error) => payment_system_response(ctx, "order payment read model is unavailable", error),
     }
 }
 
@@ -557,7 +969,7 @@ async fn retrieve_payment_record(
 ) -> Response {
     match load_payment_record(state, runtime_context, payment_id).await {
         Ok(record) => {
-            Json(AppPaymentApiResult::success(map_payment_record(record))).into_response()
+            success_item(None, map_payment_record(record))
         }
         Err(response) => response,
     }
@@ -569,10 +981,7 @@ async fn retrieve_payment_attempt(
     Path(payment_attempt_id): Path<String>,
 ) -> Response {
     match load_payment_record(state, runtime_context, payment_attempt_id).await {
-        Ok(record) => Json(AppCommerceContractApiResult::success(
-            map_payment_attempt_record(record),
-        ))
-        .into_response(),
+        Ok(record) => success_item(None, map_payment_attempt_record(record)),
         Err(response) => response,
     }
 }
@@ -584,7 +993,7 @@ async fn retrieve_payment_status(
 ) -> Response {
     match load_payment_record(state, runtime_context, payment_id).await {
         Ok(record) => {
-            Json(AppPaymentApiResult::success(map_payment_record(record))).into_response()
+            success_item(None, map_payment_record(record))
         }
         Err(response) => response,
     }
@@ -593,55 +1002,53 @@ async fn retrieve_payment_status(
 async fn retrieve_payment_status_by_out_trade_no(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     Path(out_trade_no): Path<String>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized(ctx, message),
     };
-    let query = match PaymentRecordListQuery::new(
+    let query = match PaymentRecordOutTradeNoQuery::new(
         &subject.tenant_id,
         subject.organization_id.as_deref(),
         &subject.user_id,
+        &out_trade_no,
     ) {
         Ok(query) => query,
-        Err(error) => return validation_response(error.message()),
+        Err(error) => return validation(ctx, error.message()),
     };
 
-    match state.store.list_payment_records(query).await {
-        Ok(items) => {
-            let Some(record) = items.into_iter().find(|item| item.order_no == out_trade_no) else {
-                return not_found_response("payment record was not found");
-            };
-            Json(AppPaymentApiResult::success(map_payment_record(record))).into_response()
-        }
-        Err(error) => payment_system_response("payment records read model is unavailable", error),
+    match state.store.retrieve_payment_record_by_out_trade_no(query).await {
+        Ok(record) => success_item(ctx, map_payment_record(record)),
+        Err(error) => payment_system_response(ctx, "payment record read model is unavailable", error),
     }
 }
 
 async fn fetch_payment_statistics(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized(ctx, message),
     };
-    let query = match PaymentRecordListQuery::new(
+    let query = match PaymentRecordStatisticsQuery::new(
         &subject.tenant_id,
         subject.organization_id.as_deref(),
         &subject.user_id,
     ) {
         Ok(query) => query,
-        Err(error) => return validation_response(error.message()),
+        Err(error) => return validation(ctx, error.message()),
     };
 
-    match state.store.list_payment_records(query).await {
-        Ok(items) => {
-            Json(AppPaymentApiResult::success(map_payment_statistics(items))).into_response()
-        }
+    match state.store.fetch_payment_statistics(query).await {
+        Ok(statistics) => success_item(ctx, map_payment_statistics(statistics)),
         Err(error) => {
-            payment_system_response("payment statistics read model is unavailable", error)
+            payment_system_response(ctx, "payment statistics read model is unavailable", error)
         }
     }
 }
@@ -653,7 +1060,7 @@ async fn load_payment_record(
 ) -> Result<PaymentRecordItem, Response> {
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return Err(unauthorized_response(message)),
+        Err(message) => return Err(unauthorized_response(None, message)),
     };
     let query = match PaymentRecordDetailQuery::new(
         &subject.tenant_id,
@@ -662,24 +1069,36 @@ async fn load_payment_record(
         &payment_id,
     ) {
         Ok(query) => query,
-        Err(error) => return Err(validation_response(error.message())),
+        Err(error) => return Err(validation_response(None, error.message())),
     };
 
     state
         .store
         .retrieve_payment_record(query)
         .await
-        .map_err(|error| payment_system_response("payment record read model is unavailable", error))
+        .map_err(|error| payment_system_response(None, "payment record read model is unavailable", error))
 }
 
 async fn reconcile_payment(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
+    headers: HeaderMap,
     body: Json<ReconcilePaymentRequest>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized(ctx, message),
+    };
+    let _write_headers = match validate_app_write_payload(
+        &headers,
+        "payments.reconcile",
+        &body.0,
+        |idempotency_key| format!("payment-reconcile-{idempotency_key}"),
+    ) {
+        Ok(headers) => headers,
+        Err(response) => return response,
     };
     let order_id = body
         .order_id
@@ -704,57 +1123,48 @@ async fn reconcile_payment(
             }
         });
 
-    let record = if reconcile_type.eq_ignore_ascii_case("ORDER_ID") {
+    let record_result = if reconcile_type.eq_ignore_ascii_case("ORDER_ID") {
         let Some(order_id) = order_id else {
-            return validation_response("orderId is required for ORDER_ID reconciliation");
+            return validation(ctx, "orderId is required for ORDER_ID reconciliation");
         };
-        let query = match PaymentRecordListQuery::new(
+        let query = match PaymentRecordDetailQuery::new(
             &subject.tenant_id,
             subject.organization_id.as_deref(),
             &subject.user_id,
+            order_id,
         ) {
             Ok(query) => query,
-            Err(error) => return validation_response(error.message()),
+            Err(error) => return validation(ctx, error.message()),
         };
-        match state.store.list_payment_records(query).await {
-            Ok(items) => items.into_iter().find(|item| item.order_id == order_id),
-            Err(error) => {
-                return payment_system_response(
-                    "payment reconcile read model is unavailable",
-                    error,
-                )
-            }
-        }
+        state.store.retrieve_payment_record(query).await
     } else if out_trade_no.is_some() || reconcile_type.eq_ignore_ascii_case("OUT_TRADE_NO") {
         let Some(out_trade_no) = out_trade_no else {
-            return validation_response("outTradeNo is required for OUT_TRADE_NO reconciliation");
+            return validation(ctx, "outTradeNo is required for OUT_TRADE_NO reconciliation");
         };
-        let query = match PaymentRecordListQuery::new(
+        let query = match PaymentRecordOutTradeNoQuery::new(
             &subject.tenant_id,
             subject.organization_id.as_deref(),
             &subject.user_id,
+            out_trade_no,
         ) {
             Ok(query) => query,
-            Err(error) => return validation_response(error.message()),
+            Err(error) => return validation(ctx, error.message()),
         };
-        match state.store.list_payment_records(query).await {
-            Ok(items) => items.into_iter().find(|item| item.order_no == out_trade_no),
-            Err(error) => {
-                return payment_system_response(
-                    "payment reconcile read model is unavailable",
-                    error,
-                )
-            }
-        }
+        state
+            .store
+            .retrieve_payment_record_by_out_trade_no(query)
+            .await
     } else {
-        return validation_response("reconcileType must be ORDER_ID or OUT_TRADE_NO");
+        return validation(ctx, "reconcileType must be ORDER_ID or OUT_TRADE_NO");
     };
 
-    let Some(record) = record else {
-        return not_found_response("payment record was not found");
-    };
-
-    Json(AppPaymentApiResult::success(map_payment_record(record))).into_response()
+    match record_result {
+        Ok(record) => success_item(ctx, map_payment_record(record)),
+        Err(error) if error.code() == "not-found" => {
+            not_found(ctx, "payment record was not found")
+        }
+        Err(error) => payment_system_response(ctx, "payment reconcile read model is unavailable", error),
+    }
 }
 
 async fn create_payment(
@@ -765,11 +1175,11 @@ async fn create_payment(
 ) -> Response {
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized_response(None, message),
     };
     // C9 修复：所有写操作必须校验 Idempotency-Key 与 Sdkwork-Request-Hash 命令头，
     // 保证客户端重试不会触发非幂等副作用。原代码完全跳过此校验。
-    let _write_headers = match validate_app_write_payload(
+    let write_headers = match validate_app_write_payload(
         &headers,
         "payment-create",
         &body.0,
@@ -797,27 +1207,42 @@ async fn create_payment(
         &subject.user_id,
         &body.order_id,
         &payment_method,
+        &write_headers.request_no,
+        &write_headers.idempotency_key,
     ) {
         Ok(command) => command,
-        Err(error) => return validation_response(error.message()),
+        Err(error) => return validation_response(None, error.message()),
     };
 
     match state.store.pay_owner_order(command).await {
         Ok(outcome) => {
-            Json(AppPaymentApiResult::success(map_create_payment(outcome))).into_response()
+            success_item(None, map_create_payment(outcome))
         }
-        Err(error) => payment_system_response("payment create command failed", error),
+        Err(error) => payment_system_response(None, "payment create command failed", error),
     }
 }
 
 async fn close_payment_record(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
+    headers: HeaderMap,
     Path(payment_id): Path<String>,
 ) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized(ctx, message),
+    };
+    let payload = write_payload_with_route_param("paymentId", &payment_id, &serde_json::json!({}));
+    let _write_headers = match validate_app_write_payload(
+        &headers,
+        "payments.close",
+        &payload,
+        |idempotency_key| format!("payment-close-{payment_id}-{idempotency_key}"),
+    ) {
+        Ok(headers) => headers,
+        Err(response) => return response,
     };
     let command = match ClosePaymentRecordCommand::new(
         &subject.tenant_id,
@@ -826,32 +1251,13 @@ async fn close_payment_record(
         &payment_id,
     ) {
         Ok(command) => command,
-        Err(error) => return validation_response(error.message()),
+        Err(error) => return validation(ctx, error.message()),
     };
 
     match state.store.close_payment_record(command).await {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(AppPaymentApiResult::<()> {
-                code: "0".to_owned(),
-                msg: "success".to_owned(),
-                data: None,
-            }),
-        )
-            .into_response(),
-        Err(error) => payment_system_response("payment close command failed", error),
+        Ok(()) => success_command_accepted(ctx, Some(payment_id)),
+        Err(error) => payment_system_response(ctx, "payment close command failed", error),
     }
-}
-
-fn paginate_items<T>(items: Vec<T>, page: Option<i64>, page_size: Option<i64>) -> Vec<T> {
-    let page = page.unwrap_or(1).max(1);
-    let page_size = page_size.unwrap_or(20).clamp(1, 100);
-    let start = ((page - 1) * page_size) as usize;
-    items
-        .into_iter()
-        .skip(start)
-        .take(page_size as usize)
-        .collect()
 }
 
 fn matches_client_type(method: &PaymentMethodResponse, client_type: Option<&str>) -> bool {
@@ -888,17 +1294,21 @@ fn map_create_payment(value: PayOwnerOrderOutcome) -> CreatePaymentResponse {
 }
 
 fn map_payment_method(value: PaymentMethodItem) -> PaymentMethodResponse {
+    let product_types = sdkwork_payment_service::wire_product_types_from_scene_codes(&value.scene_codes)
+        .into_iter()
+        .map(|(code, name)| PaymentMethodProductTypeResponse {
+            code,
+            name,
+            available: true,
+        })
+        .collect();
     PaymentMethodResponse {
         method_id: value.id,
         code: value.method_key,
         method_name: value.display_name,
         available: true,
         sort: value.sort_order,
-        product_types: vec![PaymentMethodProductTypeResponse {
-            code: "pc".to_owned(),
-            name: "PC".to_owned(),
-            available: true,
-        }],
+        product_types,
     }
 }
 
@@ -916,16 +1326,6 @@ fn map_payment_record(value: PaymentRecordItem) -> PaymentRecordResponse {
     }
 }
 
-impl<T: Serialize> AppCommerceContractApiResult<T> {
-    fn success(data: T) -> Self {
-        Self {
-            code: "2000".to_owned(),
-            msg: "SUCCESS".to_owned(),
-            data: Some(data),
-        }
-    }
-}
-
 fn map_payment_attempt_record(value: PaymentRecordItem) -> AppCommercePaymentAttemptRecordResponse {
     AppCommercePaymentAttemptRecordResponse {
         id: value.id,
@@ -937,28 +1337,15 @@ fn map_payment_attempt_record(value: PaymentRecordItem) -> AppCommercePaymentAtt
     }
 }
 
-fn map_payment_statistics(items: Vec<PaymentRecordItem>) -> PaymentStatisticsResponse {
-    let mut statistics = PaymentStatisticsResponse {
-        total_payments: items.len() as i64,
-        pending_payments: 0,
-        success_payments: 0,
-        failed_payments: 0,
-        timeout_payments: 0,
-        closed_payments: 0,
-    };
-
-    for item in items {
-        match map_payment_status_code(&item.status) {
-            "PENDING" => statistics.pending_payments += 1,
-            "SUCCESS" => statistics.success_payments += 1,
-            "FAILED" => statistics.failed_payments += 1,
-            "TIMEOUT" => statistics.timeout_payments += 1,
-            "CLOSED" => statistics.closed_payments += 1,
-            _ => statistics.pending_payments += 1,
-        }
+fn map_payment_statistics(value: PaymentRecordStatistics) -> PaymentStatisticsResponse {
+    PaymentStatisticsResponse {
+        total_payments: value.total_payments,
+        pending_payments: value.pending_payments,
+        success_payments: value.success_payments,
+        failed_payments: value.failed_payments,
+        timeout_payments: value.timeout_payments,
+        closed_payments: value.closed_payments,
     }
-
-    statistics
 }
 
 fn map_payment_status_code(status: &str) -> &'static str {
@@ -981,25 +1368,18 @@ fn format_payment_status_name(status: &str) -> String {
     }
 }
 
-fn payment_system_response(context: &str, error: CommerceServiceError) -> Response {
-    let _ = context;
-    match error.code() {
-        "validation" => validation_response(error.message()),
-        "unauthenticated" | "unauthorized" => unauthorized_response(error.message().to_owned()),
-        "not-found" => not_found_response(error.message()),
-        "conflict" => problem_error_response(StatusCode::CONFLICT, "4090", error.message()),
-        _ => problem_error_response(StatusCode::INTERNAL_SERVER_ERROR, "5000", error.message()),
-    }
+fn payment_system_response(
+    context: Option<&WebRequestContext>,
+    _label: &str,
+    error: CommerceServiceError,
+) -> Response {
+    map_service_error(context, error)
 }
 
-fn unauthorized_response(message: String) -> Response {
-    problem_error_response(StatusCode::UNAUTHORIZED, "4010", message)
+fn unauthorized_response(context: Option<&WebRequestContext>, message: String) -> Response {
+    unauthorized(context, message)
 }
 
-fn validation_response(message: impl Into<String>) -> Response {
-    problem_error_response(StatusCode::BAD_REQUEST, "4001", message)
-}
-
-fn not_found_response(message: impl Into<String>) -> Response {
-    problem_error_response(StatusCode::NOT_FOUND, "4040", message)
+fn validation_response(context: Option<&WebRequestContext>, message: impl Into<String>) -> Response {
+    validation(context, message)
 }

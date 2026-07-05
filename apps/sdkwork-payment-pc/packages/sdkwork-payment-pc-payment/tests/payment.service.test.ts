@@ -1,4 +1,4 @@
-﻿import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   configurePaymentServiceMockSession,
   createPaymentAppServiceMock,
@@ -35,7 +35,7 @@ describe("sdkwork-payment-pc-payment service", () => {
 
   it("maps payment methods, records, statistics, and digests into a reusable payment center snapshot", async () => {
     const listPaymentMethods = vi.fn().mockResolvedValue({
-      code: "2000",
+      code: 0,
       data: [
         {
           available: true,
@@ -81,7 +81,7 @@ describe("sdkwork-payment-pc-payment service", () => {
       payments: {
         statistics: {
           retrieve: vi.fn().mockResolvedValue({
-          code: "2000",
+          code: 0,
           data: {
             closedPayments: 1,
             failedPayments: 1,
@@ -95,9 +95,9 @@ describe("sdkwork-payment-pc-payment service", () => {
         methods: { list: listPaymentMethods },
         records: {
           list: vi.fn().mockResolvedValue({
-            code: "2000",
+            code: 0,
             data: {
-              content: [
+              items: [
                 {
                   amount: "699",
                   createdAt: "2026-04-03T10:05:00.000Z",
@@ -127,6 +127,14 @@ describe("sdkwork-payment-pc-payment service", () => {
                   transactionId: "TXN-1000",
                 },
               ],
+              pageInfo: {
+                mode: "offset",
+                page: 1,
+                pageSize: 20,
+                totalItems: 2,
+                totalPages: 1,
+                hasNextPage: false,
+              },
             },
           }),
         },
@@ -176,10 +184,10 @@ describe("sdkwork-payment-pc-payment service", () => {
 
   it("maps payment creation, detail, status, reconcile, close, and order-payment history through the generated payment SDK boundary", async () => {
     const close = vi.fn().mockResolvedValue({
-      code: "2000",
+      code: 0,
     });
     const createPayment = vi.fn().mockResolvedValue({
-      code: "2000",
+      code: 0,
       data: {
         amount: "699",
         createdAt: "2026-04-03T10:05:00.000Z",
@@ -208,7 +216,7 @@ describe("sdkwork-payment-pc-payment service", () => {
       },
     });
     const reconcile = vi.fn().mockResolvedValue({
-      code: "2000",
+      code: 0,
       data: {
         amount: "699",
         orderId: "ORDER-9",
@@ -229,7 +237,7 @@ describe("sdkwork-payment-pc-payment service", () => {
         create: createPayment,
         records: {
           retrieve: vi.fn().mockResolvedValue({
-            code: "2000",
+            code: 0,
             data: {
               amount: "699",
               createdAt: "2026-04-03T10:05:00.000Z",
@@ -246,7 +254,7 @@ describe("sdkwork-payment-pc-payment service", () => {
         },
         status: {
           retrieve: vi.fn().mockResolvedValue({
-            code: "2000",
+            code: 0,
             data: {
               amount: "699",
               orderId: "ORDER-9",
@@ -262,7 +270,7 @@ describe("sdkwork-payment-pc-payment service", () => {
             },
           }),
           retrieveByOutTradeNo: vi.fn().mockResolvedValue({
-            code: "2000",
+            code: 0,
             data: {
               amount: "699",
               orderId: "ORDER-9",
@@ -278,7 +286,7 @@ describe("sdkwork-payment-pc-payment service", () => {
         },
         orderPayments: {
           list: vi.fn().mockResolvedValue({
-            code: "2000",
+            code: 0,
             data: [
               {
                 amount: "699",
@@ -404,7 +412,7 @@ describe("sdkwork-payment-pc-payment service", () => {
       payments: {
         statistics: {
           retrieve: vi.fn().mockResolvedValue({
-            code: "2000",
+            code: 0,
             data: {
               closedPayments: 1,
               failedPayments: 0,
@@ -417,7 +425,7 @@ describe("sdkwork-payment-pc-payment service", () => {
         },
         methods: {
           list: vi.fn().mockResolvedValue({
-            code: "2000",
+            code: 0,
             data: [
               {
                 available: true,
@@ -435,9 +443,9 @@ describe("sdkwork-payment-pc-payment service", () => {
         },
         records: {
           list: vi.fn().mockResolvedValue({
-            code: "2000",
+            code: 0,
             data: {
-              content: [
+              items: [
                 {
                   amount: "0",
                   createdAt: "2026-04-03T10:05:00.000Z",
@@ -445,6 +453,14 @@ describe("sdkwork-payment-pc-payment service", () => {
                   status: "CLOSED",
                 },
               ],
+              pageInfo: {
+                mode: "offset",
+                page: 1,
+                pageSize: 20,
+                totalItems: 1,
+                totalPages: 1,
+                hasNextPage: false,
+              },
             },
           }),
         },
@@ -498,7 +514,7 @@ describe("sdkwork-payment-pc-payment service", () => {
       paymentAppService: createPaymentAppServiceMock({
         payments: {
           close: vi.fn().mockResolvedValue({
-            code: "5000",
+            code: 5000,
           }),
         },
       }),

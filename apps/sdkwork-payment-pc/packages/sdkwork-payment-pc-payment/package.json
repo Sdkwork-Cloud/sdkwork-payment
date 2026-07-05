@@ -33,7 +33,7 @@
     "@types/qrcode": "^1.5.5"
   },
   "peerDependencies": {
-    "@sdkwork/ui-pc-react": "*",
+    "@sdkwork/ui-pc-react": "workspace:*",
     "react": ">=18.2.0 <20.0.0",
     "react-dom": ">=18.2.0 <20.0.0"
   },

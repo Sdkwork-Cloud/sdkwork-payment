@@ -5,7 +5,12 @@
 //! and ensures consistent behavior.
 
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
-use sdkwork_payment_service::CreateOwnerRefundCommand;
+use sdkwork_payment_service::{
+    validate_payment_wire_transition, validate_refund_wire_transition, CreateOwnerRefundCommand,
+};
+use sqlx::Row;
+use sqlx::postgres::PgRow;
+use sqlx::sqlite::SqliteRow;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfirmOwnerOrderPaymentOutcome {
@@ -22,6 +27,20 @@ pub(crate) fn payment_attempt_is_terminal_success(status: &str) -> bool {
         status.trim().to_ascii_lowercase().as_str(),
         "succeeded" | "success" | "paid"
     )
+}
+
+pub(crate) fn ensure_payment_status_transition(
+    from: &str,
+    to: &str,
+) -> Result<(), CommerceServiceError> {
+    validate_payment_wire_transition(from, to)
+}
+
+pub(crate) fn ensure_refund_status_transition(
+    from: Option<&str>,
+    to: &str,
+) -> Result<(), CommerceServiceError> {
+    validate_refund_wire_transition(from, to)
 }
 
 /// Wrap a storage-layer error with a descriptive context message.
@@ -163,4 +182,29 @@ pub(crate) fn validate_refund_bounds(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn string_cell<R: StringCellRow>(row: &R, column: &str) -> String {
+    row.string_cell(column)
+}
+
+pub(crate) trait StringCellRow {
+    fn string_cell(&self, column: &str) -> String;
+}
+
+impl StringCellRow for SqliteRow {
+    fn string_cell(&self, column: &str) -> String {
+        self.try_get::<String, _>(column)
+            .or_else(|_| self.try_get::<&str, _>(column).map(str::to_owned))
+            .unwrap_or_default()
+    }
+}
+
+impl StringCellRow for PgRow {
+    fn string_cell(&self, column: &str) -> String {
+        self.try_get::<Option<String>, _>(column)
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
 }

@@ -6,6 +6,9 @@ import {
 } from "@sdkwork/payment-sdk-ports";
 import { formatCurrency as formatSdkworkCurrency } from "@sdkwork/utils";
 
+// 重新导出 SDK 客户端类型，避免消费方需要直接依赖 @sdkwork/payment-sdk-ports。
+export type { PaymentAppSdkClient } from "@sdkwork/payment-sdk-ports";
+
 type ServiceTemplate = { readonly [key: string]: true | ServiceTemplate };
 
 export type SdkworkPaymentPaymentsService = ClientFromMethodTree<
@@ -39,6 +42,7 @@ export interface SdkworkPaymentResponseEnvelope<T> {
   data?: T;
   message?: string;
   msg?: string;
+  traceId?: string;
 }
 
 export type SdkworkMediaKind =
@@ -310,12 +314,15 @@ function normalizeSessionToken(value: unknown): string | undefined {
 }
 
 function isSuccessCode(code: number | string | undefined): boolean {
+  // API_SPEC.md §15: 成功响应 `code` 必须为数值 `0`。
+  // 缺失 `code` 字段（undefined/null/""）仅允许出现在裸 `{ data }` 兼容场景，
+  // 此时已在调用方通过 `!("data" in value) && !("code" in value)` 早返回处理。
+  // 一旦出现 `code` 字段，MUST 严格等于 `0`；禁止 200/2000/SUCCESS 等历史值。
   if (code === undefined || code === null || code === "") {
     return true;
   }
   if (typeof code === "number") {
-    return code === 0 || code === 200 || code === 2000;
+    return code === 0;
   }
-  const normalized = String(code).trim();
-  return normalized === "0" || normalized === "200" || normalized === "2000" || normalized === "SUCCESS";
+  return String(code).trim() === "0";
 }

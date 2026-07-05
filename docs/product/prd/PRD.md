@@ -63,14 +63,16 @@ Migration status: **complete**.
 - Phase 1 (complete): payment/recharge SQL + app/backend routers migrated.
 - Phase 2 (complete): payment_intent/refund SQL owned by payment repository.
 - Phase 3 (complete): SDK contract route `/payments/attempts/{paymentAttemptId}` owned by payment app router.
-- Phase 4 (complete): owner-order pay/cancel payment side-effects owned by `sqlite_owner_order_payment` / `postgres_owner_order_payment`.
+- Phase 4 (complete): owner-order pay/cancel payment side-effects owned by owner-order payment stores.
+- Phase 5 (in progress): production hardening — SQL pagination, idempotent writes, store-level statistics/lookup queries, admin list paging, envelope/trace alignment per `API_SPEC.md` / `PAGINATION_SPEC.md`.
 
 ## 8. Linked Requirements
 
 - Commerce repository dissolution: `../sdkwork-specs/MIGRATION_SPEC.md` §8
-- Component contract: `specs/component.spec.json` (when present)
-- Machine contracts: local `specs/`, future `apis/`, and generated `sdks/`
+- Component contract: `specs/component.spec.json`
+- Machine contracts: local `specs/`, `database/ddl/`, route manifests
 
 ## 9. Open Questions
 
-- Provider credential storage encryption policy before production launch.
+- Provider credential storage encryption policy and `PaymentProviderPort` implementation before external channel go-live.
+- Async webhook/reconciliation worker deployment topology (queue consumer) for multi-instance gateways.

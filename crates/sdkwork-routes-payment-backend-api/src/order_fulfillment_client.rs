@@ -37,7 +37,7 @@ impl OrderPointsRechargeFulfillmentClient {
         request: &OrderPointsRechargeFulfillmentRequest,
     ) -> Result<OrderPointsRechargeFulfillmentOutcome, CommerceServiceError> {
         let url = format!(
-            "{}/backend/v3/api/orders/{order_id}/points-recharge/fulfillments",
+            "{}/backend/v3/api/orders/{order_id}/points_recharge/fulfillments",
             self.origin
         );
         let mut builder = http_client()

@@ -1,4 +1,4 @@
-﻿import {
+import {
   useMemo,
   useSyncExternalStore,
 } from "react";
@@ -17,6 +17,8 @@ import {
   type SdkworkPaymentCloseResult,
   type SdkworkPaymentCreateInput,
   type SdkworkPaymentDashboardData,
+  type SdkworkPaymentListRecordsResult,
+  type SdkworkPaymentPageInfo,
   type SdkworkPaymentService,
 } from "./payment-service";
 
@@ -30,7 +32,11 @@ export interface SdkworkPaymentControllerState {
   isDetailOpen: boolean;
   isLoading: boolean;
   isMutating: boolean;
+  isRecordsLoading: boolean;
   lastError?: string;
+  page: number;
+  pageSize: number;
+  pageInfo?: SdkworkPaymentPageInfo;
   relatedPayments: SdkworkPaymentSummary[];
   selectedMethodCode: string | null;
   selectedPaymentId?: string;
@@ -49,6 +55,7 @@ export interface SdkworkPaymentController {
     },
   ): Promise<SdkworkPaymentDetail>;
   getState(): SdkworkPaymentControllerState;
+  loadPage(page: number): Promise<SdkworkPaymentListRecordsResult>;
   openCreateDialog(): void;
   openDetail(paymentId: string): Promise<SdkworkPaymentControllerState>;
   refresh(): Promise<SdkworkPaymentControllerState>;
@@ -57,6 +64,7 @@ export interface SdkworkPaymentController {
   selectMethod(methodCode: string): void;
   service: SdkworkPaymentService;
   setFilter(filter: SdkworkPaymentFilter): void;
+  setPageSize(pageSize: number): Promise<SdkworkPaymentListRecordsResult>;
   subscribe(listener: () => void): () => void;
 }
 
@@ -229,6 +237,9 @@ export function createSdkworkPaymentController(
     isDetailOpen: false,
     isLoading: false,
     isMutating: false,
+    isRecordsLoading: false,
+    page: 1,
+    pageSize: options.initialState?.pageSize ?? 20,
     relatedPayments: [],
     selectedMethodCode: fallbackDashboard.methods[0]?.code ?? null,
     visibleRecords: fallbackDashboard.records,
@@ -264,6 +275,7 @@ export function createSdkworkPaymentController(
       isBootstrapped: true,
       isLoading: false,
       isMutating: false,
+      pageInfo: dashboard.pageInfo ?? currentState.pageInfo,
       selectedMethodCode: options.preserveMethod ? currentState.selectedMethodCode : dashboard.methods[0]?.code ?? null,
     }));
     return dashboard;
@@ -441,6 +453,83 @@ export function createSdkworkPaymentController(
         preserveMethod: true,
       });
       return state;
+    },
+
+    async loadPage(page) {
+      const pageNumber = Math.max(1, Math.min(page, state.pageInfo?.totalPages ?? 1));
+      setState({
+        isRecordsLoading: true,
+        lastError: undefined,
+        page: pageNumber,
+      });
+
+      try {
+        const result = await service.listRecords({
+          page: pageNumber,
+          pageSize: state.pageSize,
+        });
+        setState((currentState) => ({
+          dashboard: {
+            ...currentState.dashboard,
+            records: result.records,
+          },
+          isRecordsLoading: false,
+          pageInfo: result.pageInfo,
+          visibleRecords: deriveVisibleRecords(
+            {
+              ...currentState.dashboard,
+              records: result.records,
+            },
+            currentState.activeFilter,
+          ),
+        }));
+        return result;
+      } catch (error) {
+        setState({
+          isRecordsLoading: false,
+          lastError: error instanceof Error ? error.message : copy.bootstrapFailed,
+        });
+        throw error;
+      }
+    },
+
+    async setPageSize(pageSize) {
+      const clampedPageSize = Math.min(200, Math.max(1, pageSize));
+      setState({
+        isRecordsLoading: true,
+        lastError: undefined,
+        page: 1,
+        pageSize: clampedPageSize,
+      });
+
+      try {
+        const result = await service.listRecords({
+          page: 1,
+          pageSize: clampedPageSize,
+        });
+        setState((currentState) => ({
+          dashboard: {
+            ...currentState.dashboard,
+            records: result.records,
+          },
+          isRecordsLoading: false,
+          pageInfo: result.pageInfo,
+          visibleRecords: deriveVisibleRecords(
+            {
+              ...currentState.dashboard,
+              records: result.records,
+            },
+            currentState.activeFilter,
+          ),
+        }));
+        return result;
+      } catch (error) {
+        setState({
+          isRecordsLoading: false,
+          lastError: error instanceof Error ? error.message : copy.bootstrapFailed,
+        });
+        throw error;
+      }
     },
 
     async refreshPaymentStatus(paymentId) {

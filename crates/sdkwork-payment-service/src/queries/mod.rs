@@ -6,7 +6,22 @@ pub use intent::{
     CreateOwnerPaymentAttemptOutcome, CreateOwnerPaymentIntentCommand, PaymentIntentDetailQuery,
     PaymentIntentView,
 };
-pub use refund::{CreateOwnerRefundCommand, RefundDetailQuery, RefundListQuery, RefundView};
+pub use refund::{
+    CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,
+};
+
+use crate::domain::PaymentRecordItem;
+
+/// Phase 1.3：标准分页结果，store 一次性返回当前页 items + 满足条件的总记录数。
+///
+/// `total_items` 来自 SQL `COUNT(*) OVER()` 窗口函数（单次往返），
+/// handler 据此填充 `data.pageInfo`，禁止在进程内对全量数据做 skip/take
+/// （PAGINATION_SPEC §2）。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentRecordListPage {
+    pub items: Vec<PaymentRecordItem>,
+    pub total_items: i64,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RechargePackageListQuery {
@@ -40,6 +55,7 @@ pub struct PaymentMethodItem {
     pub id: String,
     pub method_key: String,
     pub provider_code: String,
+    pub scene_codes: Vec<String>,
     pub sort_order: i64,
 }
 
@@ -57,11 +73,69 @@ impl PaymentMethodListQuery {
     }
 }
 
+/// Map persistence `scene_code` values to API `productTypes` wire codes.
+pub fn wire_product_types_from_scene_codes(scenes: &[String]) -> Vec<(String, String)> {
+    use std::collections::BTreeSet;
+
+    let mut codes = BTreeSet::new();
+    for scene in scenes {
+        match scene.trim().to_ascii_lowercase().as_str() {
+            "" => {}
+            "web" => {
+                codes.insert("pc".to_string());
+            }
+            "app" => {
+                codes.insert("app".to_string());
+            }
+            "mini_program" => {
+                codes.insert("mini_program".to_string());
+            }
+            "api" => {
+                codes.insert("api".to_string());
+            }
+            other => {
+                codes.insert(other.to_string());
+            }
+        }
+    }
+    if codes.is_empty() {
+        codes.insert("pc".to_string());
+    }
+
+    codes
+        .into_iter()
+        .map(|code| (code.clone(), wire_product_type_display_name(&code)))
+        .collect()
+}
+
+fn wire_product_type_display_name(code: &str) -> String {
+    match code {
+        "pc" => "PC".to_string(),
+        "app" => "App".to_string(),
+        "mini_program" => "Mini Program".to_string(),
+        "api" => "API".to_string(),
+        other => other.to_string(),
+    }
+}
+
+pub fn parse_scene_codes_csv(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|scene| !scene.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaymentRecordListQuery {
     pub organization_id: Option<String>,
     pub owner_user_id: String,
     pub tenant_id: String,
+    /// Phase 1.3：分页 offset，由 handler 通过 `OffsetListPageParams::parse` 解析后下推到 SQL。
+    pub offset: i64,
+    /// Phase 1.3：分页 limit，由 handler 通过 `OffsetListPageParams::parse` 解析后下推到 SQL。
+    pub limit: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -78,6 +152,39 @@ pub struct PaymentRecordOrderListQuery {
     pub organization_id: Option<String>,
     pub owner_user_id: String,
     pub tenant_id: String,
+    pub offset: i64,
+    pub limit: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentRecordOrderListPage {
+    pub items: Vec<PaymentRecordItem>,
+    pub total_items: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentRecordOutTradeNoQuery {
+    pub organization_id: Option<String>,
+    pub out_trade_no: String,
+    pub owner_user_id: String,
+    pub tenant_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentRecordStatisticsQuery {
+    pub organization_id: Option<String>,
+    pub owner_user_id: String,
+    pub tenant_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentRecordStatistics {
+    pub total_payments: i64,
+    pub pending_payments: i64,
+    pub success_payments: i64,
+    pub failed_payments: i64,
+    pub timeout_payments: i64,
+    pub closed_payments: i64,
 }
 
 impl RechargePackageListQuery {
@@ -155,7 +262,16 @@ impl PaymentRecordListQuery {
             organization_id: optional_text(organization_id),
             owner_user_id: owner_user_id.trim().to_string(),
             tenant_id: tenant_id.trim().to_string(),
+            offset: 0,
+            limit: 20,
         })
+    }
+
+    /// Phase 1.3：注入标准分页参数（offset/limit），由 handler 在解析 URL 参数后调用。
+    pub fn with_paging(mut self, offset: i64, limit: i64) -> Self {
+        self.offset = offset.max(0);
+        self.limit = limit.clamp(1, 200);
+        self
     }
 }
 
@@ -220,6 +336,51 @@ impl PaymentRecordOrderListQuery {
 
         Ok(Self {
             order_id: order_id.trim().to_string(),
+            organization_id: optional_text(organization_id),
+            owner_user_id: owner_user_id.trim().to_string(),
+            tenant_id: tenant_id.trim().to_string(),
+            offset: 0,
+            limit: 20,
+        })
+    }
+
+    pub fn with_paging(mut self, offset: i64, limit: i64) -> Self {
+        self.offset = offset.max(0);
+        self.limit = limit.clamp(1, 200);
+        self
+    }
+}
+
+impl PaymentRecordOutTradeNoQuery {
+    pub fn new(
+        tenant_id: &str,
+        organization_id: Option<&str>,
+        owner_user_id: &str,
+        out_trade_no: &str,
+    ) -> Result<Self, sdkwork_contract_service::CommerceServiceError> {
+        crate::validation::require_non_empty("tenant_id", tenant_id)?;
+        crate::validation::require_non_empty("owner_user_id", owner_user_id)?;
+        crate::validation::require_non_empty("out_trade_no", out_trade_no)?;
+
+        Ok(Self {
+            organization_id: optional_text(organization_id),
+            out_trade_no: out_trade_no.trim().to_string(),
+            owner_user_id: owner_user_id.trim().to_string(),
+            tenant_id: tenant_id.trim().to_string(),
+        })
+    }
+}
+
+impl PaymentRecordStatisticsQuery {
+    pub fn new(
+        tenant_id: &str,
+        organization_id: Option<&str>,
+        owner_user_id: &str,
+    ) -> Result<Self, sdkwork_contract_service::CommerceServiceError> {
+        crate::validation::require_non_empty("tenant_id", tenant_id)?;
+        crate::validation::require_non_empty("owner_user_id", owner_user_id)?;
+
+        Ok(Self {
             organization_id: optional_text(organization_id),
             owner_user_id: owner_user_id.trim().to_string(),
             tenant_id: tenant_id.trim().to_string(),

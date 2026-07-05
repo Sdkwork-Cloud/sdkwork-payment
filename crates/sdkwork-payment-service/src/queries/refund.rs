@@ -14,6 +14,14 @@ pub struct RefundListQuery {
     pub owner_user_id: String,
     pub status: Option<String>,
     pub tenant_id: String,
+    pub offset: i64,
+    pub limit: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefundListPage {
+    pub items: Vec<RefundView>,
+    pub total_items: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,7 +84,15 @@ impl RefundListQuery {
             owner_user_id: owner_user_id.trim().to_string(),
             status: optional_text(status),
             tenant_id: tenant_id.trim().to_string(),
+            offset: 0,
+            limit: 20,
         })
+    }
+
+    pub fn with_paging(mut self, offset: i64, limit: i64) -> Self {
+        self.offset = offset.max(0);
+        self.limit = limit.clamp(1, 200);
+        self
     }
 }
 

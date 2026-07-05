@@ -6,18 +6,19 @@ use axum::routing::post;
 use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
 use sdkwork_iam_context_service::IamAppContext;
-use sdkwork_order_service::points_recharge_payment_success_idempotency_key;
 use sdkwork_payment_repository_sqlx::{
-    ConfirmOwnerOrderPaymentOutcome, PostgresCommerceOwnerOrderPaymentStore,
-    SqliteCommerceOwnerOrderPaymentStore,
+    load_owner_order_settlement_scope_by_order_id_postgres,
+    load_owner_order_settlement_scope_by_order_id_sqlite,
+    PostgresCommerceOwnerOrderPaymentStore, SqliteCommerceOwnerOrderPaymentStore,
 };
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
-use crate::api_response::{forbidden, map_service_error, success_item, unauthorized, validation};
-use crate::order_fulfillment_client::{
-    OrderPointsRechargeFulfillmentClient, OrderPointsRechargeFulfillmentRequest,
+use crate::api_response::{forbidden, map_service_error, not_found, success_item, unauthorized, validation};
+use crate::order_fulfillment_client::OrderPointsRechargeFulfillmentClient;
+use crate::owner_order_settlement::{
+    settle_owner_order_after_payment_success, OwnerOrderPaymentStoreKind,
 };
 use crate::subject::backend_runtime_subject_from_extension;
 
@@ -26,14 +27,15 @@ mod permissions {
 }
 
 #[derive(Clone)]
-enum OwnerOrderPaymentStoreKind {
-    Sqlite(Arc<SqliteCommerceOwnerOrderPaymentStore>),
-    Postgres(Arc<PostgresCommerceOwnerOrderPaymentStore>),
+enum ConfirmationDatabase {
+    Sqlite(SqlitePool),
+    Postgres(PgPool),
 }
 
 #[derive(Clone)]
 struct OwnerOrderConfirmationState {
     store: OwnerOrderPaymentStoreKind,
+    database: ConfirmationDatabase,
     order_fulfillment: Arc<OrderPointsRechargeFulfillmentClient>,
 }
 
@@ -60,8 +62,9 @@ struct ConfirmOwnerOrderPaymentResponse {
 pub fn owner_order_confirmation_router_with_sqlite_pool(pool: SqlitePool) -> Router {
     build_owner_order_confirmation_router(OwnerOrderConfirmationState {
         store: OwnerOrderPaymentStoreKind::Sqlite(Arc::new(
-            SqliteCommerceOwnerOrderPaymentStore::new(pool),
+            SqliteCommerceOwnerOrderPaymentStore::new(pool.clone()),
         )),
+        database: ConfirmationDatabase::Sqlite(pool),
         order_fulfillment: Arc::new(OrderPointsRechargeFulfillmentClient::from_env()),
     })
 }
@@ -69,8 +72,9 @@ pub fn owner_order_confirmation_router_with_sqlite_pool(pool: SqlitePool) -> Rou
 pub fn owner_order_confirmation_router_with_postgres_pool(pool: PgPool) -> Router {
     build_owner_order_confirmation_router(OwnerOrderConfirmationState {
         store: OwnerOrderPaymentStoreKind::Postgres(Arc::new(
-            PostgresCommerceOwnerOrderPaymentStore::new(pool),
+            PostgresCommerceOwnerOrderPaymentStore::new(pool.clone()),
         )),
+        database: ConfirmationDatabase::Postgres(pool),
         order_fulfillment: Arc::new(OrderPointsRechargeFulfillmentClient::from_env()),
     })
 }
@@ -117,8 +121,8 @@ async fn confirm_owner_order_payment(
         .map(str::to_owned)
         .unwrap_or_else(|| subject.user_id.clone());
 
-    let payment_outcome = match confirm_payment(
-        &state.store,
+    let scope = match resolve_settlement_scope(
+        &state.database,
         &subject.tenant_id,
         subject.organization_id.as_deref(),
         &owner_user_id,
@@ -126,21 +130,18 @@ async fn confirm_owner_order_payment(
     )
     .await
     {
-        Ok(outcome) => outcome,
+        Ok(Some(scope)) => scope,
+        Ok(None) => return not_found(ctx, "owner order payment scope was not found"),
         Err(error) => return map_service_error(ctx, error),
     };
 
-    let fulfillment_request = OrderPointsRechargeFulfillmentRequest {
-        request_no: body.request_no.clone(),
-        idempotency_key: points_recharge_payment_success_idempotency_key(&order_id),
-        paid_at: payment_outcome.paid_at.clone(),
-        owner_user_id: owner_user_id.clone(),
-    };
-
-    let fulfillment_outcome = match state
-        .order_fulfillment
-        .create_points_recharge_fulfillment(&order_id, &fulfillment_request)
-        .await
+    let settlement_outcome = match settle_owner_order_after_payment_success(
+        &state.store,
+        &state.order_fulfillment,
+        &scope,
+        &body.request_no,
+    )
+    .await
     {
         Ok(outcome) => outcome,
         Err(error) => return map_service_error(ctx, error),
@@ -149,34 +150,45 @@ async fn confirm_owner_order_payment(
     success_item(
         ctx,
         ConfirmOwnerOrderPaymentResponse {
-            payment_confirmed: true,
-            payment_replayed: payment_outcome.replayed,
-            fulfillment_accepted: fulfillment_outcome.accepted,
-            fulfillment_replayed: fulfillment_outcome.replayed,
-            order_id: fulfillment_outcome.order_id,
-            points_credited: fulfillment_outcome.points_credited,
-            fulfillment_status: fulfillment_outcome.fulfillment_status,
+            payment_confirmed: settlement_outcome.payment_confirmed,
+            payment_replayed: settlement_outcome.payment_replayed,
+            fulfillment_accepted: settlement_outcome.fulfillment_accepted,
+            fulfillment_replayed: settlement_outcome.fulfillment_replayed,
+            order_id: settlement_outcome.order_id,
+            points_credited: settlement_outcome.points_credited,
+            fulfillment_status: settlement_outcome.fulfillment_status,
         },
     )
 }
 
-async fn confirm_payment(
-    store: &OwnerOrderPaymentStoreKind,
+async fn resolve_settlement_scope(
+    database: &ConfirmationDatabase,
     tenant_id: &str,
     organization_id: Option<&str>,
     owner_user_id: &str,
     order_id: &str,
-) -> Result<ConfirmOwnerOrderPaymentOutcome, CommerceServiceError> {
-    match store {
-        OwnerOrderPaymentStoreKind::Sqlite(store) => {
-            store
-                .confirm_owner_order_payment(tenant_id, organization_id, owner_user_id, order_id)
-                .await
+) -> Result<Option<sdkwork_payment_repository_sqlx::OwnerOrderSettlementScope>, CommerceServiceError>
+{
+    match database {
+        ConfirmationDatabase::Sqlite(pool) => {
+            load_owner_order_settlement_scope_by_order_id_sqlite(
+                pool,
+                tenant_id,
+                organization_id,
+                owner_user_id,
+                order_id,
+            )
+            .await
         }
-        OwnerOrderPaymentStoreKind::Postgres(store) => {
-            store
-                .confirm_owner_order_payment(tenant_id, organization_id, owner_user_id, order_id)
-                .await
+        ConfirmationDatabase::Postgres(pool) => {
+            load_owner_order_settlement_scope_by_order_id_postgres(
+                pool,
+                tenant_id,
+                organization_id,
+                owner_user_id,
+                order_id,
+            )
+            .await
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import {
   CreditCard,
   QrCode,
@@ -9,6 +9,12 @@ import {
   Button,
   EmptyState,
   LoadingBlock,
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
   StatusBadge,
   StatusNotice,
 } from "@sdkwork/ui-pc-react";
@@ -35,6 +41,34 @@ import { SdkworkPaymentCreateDialog } from "../components/payment-create-dialog"
 import { SdkworkPaymentDetailDrawer } from "../components/payment-detail-drawer";
 import { SdkworkPaymentStatGrid } from "../components/payment-stat-grid";
 
+const PAYMENT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+
+const PAGINATION_ELLIPSIS = -1;
+const PAGINATION_MAX_VISIBLE = 5;
+
+function buildPageNumbers(currentPage: number, totalPages: number): number[] {
+  if (totalPages <= 1) {
+    return [1];
+  }
+  if (totalPages <= PAGINATION_MAX_VISIBLE) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+  const pages: number[] = [1];
+  const startPage = Math.max(2, currentPage - 1);
+  const endPage = Math.min(totalPages - 1, currentPage + 1);
+  if (startPage > 2) {
+    pages.push(PAGINATION_ELLIPSIS);
+  }
+  for (let page = startPage; page <= endPage; page++) {
+    pages.push(page);
+  }
+  if (endPage < totalPages - 1) {
+    pages.push(PAGINATION_ELLIPSIS);
+  }
+  pages.push(totalPages);
+  return pages;
+}
+
 export interface SdkworkPaymentPageProps {
   controller?: SdkworkPaymentController;
   locale?: string | null;
@@ -60,6 +94,7 @@ function SdkworkPaymentPageContent({
   const {
     copy,
     formatCurrencyCny,
+    formatPaginationSummary,
     formatRecommendedProductType,
     formatStatus,
     formatTimestamp,
@@ -291,7 +326,11 @@ function SdkworkPaymentPageContent({
             </div>
 
             <div className="divide-y divide-[var(--sdk-color-border-subtle)]">
-              {state.visibleRecords.length === 0 ? (
+              {state.isRecordsLoading && state.visibleRecords.length === 0 ? (
+                <div className="px-6 py-10">
+                  <LoadingBlock label={copy.page.loading} />
+                </div>
+              ) : state.visibleRecords.length === 0 ? (
                 <div className="px-6 py-10">
                   <EmptyState
                     description={copy.empty.paymentDescription}
@@ -333,6 +372,86 @@ function SdkworkPaymentPageContent({
                 </article>
               ))}
             </div>
+
+            {state.pageInfo && state.pageInfo.totalItems > 0 ? (
+              (() => {
+                const pageInfo = state.pageInfo;
+                return (
+              <div className="flex flex-col gap-4 border-t border-[var(--sdk-color-border-subtle)] px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--sdk-color-text-secondary)]">
+                  <span>{formatPaginationSummary(pageInfo)}</span>
+                  <span className="text-[var(--sdk-color-border-default)]">|</span>
+                  <label className="inline-flex items-center gap-2">
+                    <span className="text-xs uppercase tracking-[0.14em] text-[var(--sdk-color-text-muted)]">
+                      {copy.page.paginationLabel}
+                    </span>
+                    <select
+                      className="rounded-[var(--sdk-radius-field)] border border-[var(--sdk-color-border-default)] bg-[var(--sdk-color-surface-panel)] px-3 py-1.5 text-sm text-[var(--sdk-color-text-primary)] outline-none focus:border-[var(--sdk-color-brand-primary)]"
+                      onChange={(event) => void controller.setPageSize(Number(event.target.value))}
+                      value={state.pageSize}
+                    >
+                      {PAYMENT_PAGE_SIZE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <Pagination className="mx-0 w-auto">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        aria-disabled={state.page <= 1 || state.isRecordsLoading}
+                        className={state.page <= 1 || state.isRecordsLoading ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (state.page > 1 && !state.isRecordsLoading) {
+                            void controller.loadPage(state.page - 1);
+                          }
+                        }}
+                      >
+                        {copy.page.paginationPrevious}
+                      </PaginationPrevious>
+                    </PaginationItem>
+                    {buildPageNumbers(state.page, pageInfo.totalPages).map((pageNumber, index) => (
+                      <PaginationItem key={pageNumber === -1 ? `ellipsis-${index}` : pageNumber}>
+                        {pageNumber === -1 ? (
+                          <span className="px-2 text-[var(--sdk-color-text-muted)]">…</span>
+                        ) : (
+                          <PaginationLink
+                            isActive={pageNumber === state.page}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              if (pageNumber !== state.page && !state.isRecordsLoading) {
+                                void controller.loadPage(pageNumber);
+                              }
+                            }}
+                          >
+                            {pageNumber}
+                          </PaginationLink>
+                        )}
+                      </PaginationItem>
+                    ))}
+                    <PaginationItem>
+                      <PaginationNext
+                        aria-disabled={!pageInfo.hasNextPage || state.isRecordsLoading}
+                        className={!pageInfo.hasNextPage || state.isRecordsLoading ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (pageInfo.hasNextPage && !state.isRecordsLoading) {
+                            void controller.loadPage(state.page + 1);
+                          }
+                        }}
+                      >
+                        {copy.page.paginationNext}
+                      </PaginationNext>
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+                );
+              })()
+            ) : null}
           </section>
         </div>
       </div>

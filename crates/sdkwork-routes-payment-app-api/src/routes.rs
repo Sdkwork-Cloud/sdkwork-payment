@@ -1,5 +1,6 @@
 use axum::Router;
 use sdkwork_database_sqlx::DatabasePool;
+use sdkwork_payment_providers::{PaymentProviderRegistry, ProviderCredentialBundle};
 use sdkwork_payment_service_host::PaymentServiceHost;
 use std::sync::Arc;
 
@@ -8,23 +9,39 @@ use crate::{
     app_payment_router_with_postgres_pool, app_payment_router_with_sqlite_pool,
     app_recharge_proxy_router,
     app_refund_router_with_postgres_pool, app_refund_router_with_sqlite_pool,
+    payment_webhook_router, webhook_router::WebhookDatabase,
 };
 use crate::web_bootstrap::wrap_router_with_web_framework_from_env;
 
 fn recharge_proxy_is_enabled() -> bool {
-    !std::env::var("SDKWORK_PAYMENT_DISABLE_RECHARGE_PROXY")
+    std::env::var("SDKWORK_PAYMENT_ENABLE_RECHARGE_PROXY")
         .ok()
         .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
 pub fn build_payment_app_router(host: Arc<PaymentServiceHost>) -> Router {
+    let credentials = ProviderCredentialBundle::from_env();
+    let registry = Arc::new(PaymentProviderRegistry::from_credentials(credentials.clone()));
     match host.database_pool() {
         DatabasePool::Postgres(pool, _) => {
             let pool = pool.clone();
             let mut router = Router::new()
-                .merge(app_payment_router_with_postgres_pool(pool.clone()))
+                .merge(app_payment_router_with_postgres_pool(
+                    pool.clone(),
+                    registry.clone(),
+                    credentials.clone(),
+                ))
                 .merge(app_payment_intent_router_with_postgres_pool(pool.clone()))
-                .merge(app_refund_router_with_postgres_pool(pool.clone()));
+                .merge(app_refund_router_with_postgres_pool(
+                    pool.clone(),
+                    registry.clone(),
+                    credentials.clone(),
+                ))
+                .merge(payment_webhook_router(
+                    registry,
+                    credentials.clone(),
+                    WebhookDatabase::Postgres(pool),
+                ));
             if recharge_proxy_is_enabled() {
                 router = router.merge(app_recharge_proxy_router());
             }
@@ -33,9 +50,22 @@ pub fn build_payment_app_router(host: Arc<PaymentServiceHost>) -> Router {
         DatabasePool::Sqlite(pool, _) => {
             let pool = pool.clone();
             let mut router = Router::new()
-                .merge(app_payment_router_with_sqlite_pool(pool.clone()))
+                .merge(app_payment_router_with_sqlite_pool(
+                    pool.clone(),
+                    registry.clone(),
+                    credentials.clone(),
+                ))
                 .merge(app_payment_intent_router_with_sqlite_pool(pool.clone()))
-                .merge(app_refund_router_with_sqlite_pool(pool.clone()));
+                .merge(app_refund_router_with_sqlite_pool(
+                    pool.clone(),
+                    registry.clone(),
+                    credentials.clone(),
+                ))
+                .merge(payment_webhook_router(
+                    registry,
+                    credentials.clone(),
+                    WebhookDatabase::Sqlite(pool),
+                ));
             if recharge_proxy_is_enabled() {
                 router = router.merge(app_recharge_proxy_router());
             }

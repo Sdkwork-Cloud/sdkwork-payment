@@ -123,6 +123,12 @@ const HTTP_ROUTES: &[HttpRoute] = &[
         "payments.close",
     )
     .with_idempotent(true),
+    HttpRoute::public(
+        HttpMethod::Post,
+        "/app/v3/api/payments/webhooks/{providerCode}",
+        "payments",
+        "payments.webhooks.receive",
+    ),
     // === Recharge ===
     HttpRoute::dual_token(
         HttpMethod::Get,
@@ -137,6 +143,12 @@ const HTTP_ROUTES: &[HttpRoute] = &[
         "recharges.settings.fetch",
     ),
     HttpRoute::dual_token(
+        HttpMethod::Get,
+        "/app/v3/api/recharges/orders",
+        "recharges",
+        "recharges.orders.list",
+    ),
+    HttpRoute::dual_token(
         HttpMethod::Post,
         "/app/v3/api/recharges/orders",
         "recharges",
@@ -149,6 +161,13 @@ const HTTP_ROUTES: &[HttpRoute] = &[
         "recharges",
         "recharges.orders.retrieve",
     ),
+    HttpRoute::dual_token(
+        HttpMethod::Post,
+        "/app/v3/api/recharges/orders/{orderId}/cancel",
+        "recharges",
+        "recharges.orders.cancel",
+    )
+    .with_idempotent(true),
     // === Refund ===
     HttpRoute::dual_token(
         HttpMethod::Post,
@@ -185,6 +204,14 @@ mod tests {
         let manifest = app_route_manifest();
         assert!(!manifest.routes().is_empty());
         for route in manifest.routes() {
+            if route.path.contains("/payments/webhooks/") {
+                assert_eq!(
+                    route.auth,
+                    RouteAuth::Public,
+                    "provider webhook routes must be public"
+                );
+                continue;
+            }
             assert_eq!(
                 route.auth,
                 RouteAuth::DualToken,
@@ -239,6 +266,39 @@ mod tests {
         assert!(idempotent_post_routes.contains(&"payments.intents.create"));
         assert!(idempotent_post_routes.contains(&"refunds.create"));
         assert!(idempotent_post_routes.contains(&"recharges.orders.submit"));
+    }
+
+    #[test]
+    fn manifest_declares_full_recharge_proxy_surface() {
+        // 防止 recharge_proxy_router 实际暴露的路径与 manifest 声明漂移：
+        // - GET  /app/v3/api/recharges/packages
+        // - GET  /app/v3/api/recharges/settings
+        // - GET  /app/v3/api/recharges/orders
+        // - POST /app/v3/api/recharges/orders
+        // - GET  /app/v3/api/recharges/orders/{orderId}
+        // - POST /app/v3/api/recharges/orders/{orderId}/cancel
+        let manifest = app_route_manifest();
+        let declared: std::collections::HashSet<(String, &str)> = manifest
+            .routes()
+            .iter()
+            .map(|route| (format!("{:?}", route.method), route.path))
+            .collect();
+        for (method, path) in [
+            ("Get", "/app/v3/api/recharges/packages"),
+            ("Get", "/app/v3/api/recharges/settings"),
+            ("Get", "/app/v3/api/recharges/orders"),
+            ("Post", "/app/v3/api/recharges/orders"),
+            ("Get", "/app/v3/api/recharges/orders/{orderId}"),
+            ("Post", "/app/v3/api/recharges/orders/{orderId}/cancel"),
+        ] {
+            let owned = (method.to_string(), path);
+            assert!(
+                declared.contains(&owned),
+                "recharge proxy route {:?} {} must be declared in app-api manifest",
+                method,
+                path,
+            );
+        }
     }
 
     #[test]
