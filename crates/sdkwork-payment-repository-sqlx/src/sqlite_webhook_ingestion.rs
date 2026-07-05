@@ -3,8 +3,8 @@ use serde_json::Value;
 use sqlx::{Pool, Row, Sqlite};
 
 use crate::payment_attempt_context::{
-    load_attempt_by_out_trade_no_sqlite, load_owner_order_settlement_scope_by_out_trade_no_sqlite,
-    OwnerOrderSettlementScope,
+    load_attempt_by_out_trade_no_sqlite, load_payment_webhook_attempt_context_by_out_trade_no_sqlite,
+    PaymentWebhookAttemptContext,
 };
 use crate::shared::{current_timestamp_string, stable_storage_id, store_error};
 use crate::webhook_status::map_provider_payment_status;
@@ -25,7 +25,7 @@ pub struct IngestProviderWebhookOutcome {
     pub replayed: bool,
     pub payment_attempt_id: Option<String>,
     pub applied_status: Option<String>,
-    pub settlement_scope: Option<OwnerOrderSettlementScope>,
+    pub payment_attempt_context: Option<PaymentWebhookAttemptContext>,
 }
 
 pub fn empty_ingest_outcome(
@@ -37,7 +37,7 @@ pub fn empty_ingest_outcome(
         replayed,
         payment_attempt_id: None,
         applied_status: None,
-        settlement_scope: None,
+        payment_attempt_context: None,
     }
 }
 
@@ -118,8 +118,8 @@ pub async fn ingest_provider_webhook_sqlite(
     )
     .await?;
 
-    let settlement_scope = if applied_status.as_deref() == Some("succeeded") {
-        load_owner_order_settlement_scope_by_out_trade_no_sqlite(&mut tx, out_trade_no).await?
+    let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
+        load_payment_webhook_attempt_context_by_out_trade_no_sqlite(&mut tx, out_trade_no).await?
     } else {
         None
     };
@@ -147,7 +147,7 @@ pub async fn ingest_provider_webhook_sqlite(
         replayed: false,
         payment_attempt_id,
         applied_status,
-        settlement_scope,
+        payment_attempt_context,
     })
 }
 
@@ -304,7 +304,7 @@ mod sqlite_webhook_ingestion_tests {
     }
 
     #[tokio::test]
-    async fn webhook_ingest_marks_attempt_succeeded_and_returns_settlement_scope() {
+    async fn webhook_ingest_marks_attempt_succeeded_and_returns_payment_attempt_context() {
         let pool = payment_store_e2e_sqlite_memory_pool().await;
         let out_trade_no = seed_pending_recharge_order(&pool).await;
 
@@ -324,11 +324,11 @@ mod sqlite_webhook_ingestion_tests {
 
         assert!(!outcome.replayed);
         assert_eq!(outcome.applied_status.as_deref(), Some("succeeded"));
-        let scope = outcome
-            .settlement_scope
-            .expect("settlement scope for succeeded recharge");
-        assert_eq!(scope.order_id, "order-rch-1");
-        assert_eq!(scope.order_subject.as_deref(), Some("points_recharge"));
+        let context = outcome
+            .payment_attempt_context
+            .expect("payment attempt context for succeeded recharge");
+        assert_eq!(context.order_id, "order-rch-1");
+        assert_eq!(context.owner_user_id, "user-rch-1");
 
         let status: String = sqlx::query_scalar(
             "SELECT status FROM commerce_payment_attempt WHERE order_id = 'order-rch-1'",

@@ -4,11 +4,11 @@ Specs: ARCHITECTURE_DECISION_SPEC.md, DOCUMENTATION_SPEC.md, API_SPEC.md, WEB_FR
 
 Status: active
 Owner: SDKWork maintainers
-Updated: 2026-07-05
+Updated: 2026-07-06
 
 ## 1. Architecture Overview
 
-`sdkwork-payment` owns the **payment** capability for the SDKWork commerce domain: payment intents, attempts, owner-order pay flows, provider webhooks with settlement, refunds, backend admin (methods, providers, channels, webhooks, reconciliation). Deprecated recharge HTTP proxy is opt-in only.
+`sdkwork-payment` owns the **payment executor** for the SDKWork commerce domain: payment intents, attempts, owner-order pay side-effects (via order orchestration), refunds, backend admin (methods, providers, channels, webhook event storage, reconciliation). PSP webhooks are **HTTP-owned by sdkwork-order**; payment exposes ingest ports only. Deprecated recharge HTTP proxy is opt-in only.
 
 ## Capability stack
 
@@ -53,13 +53,13 @@ Errors use HTTP 4xx/5xx `application/problem+json` (`SdkWorkProblemDetail`) with
 - Pay flow: after repository persists intent/attempt, `enrich_pay_owner_order_outcome` calls the configured PSP and returns real cashier params.
 - Close: `POST /payments/{paymentId}/close` cancels the PSP intent (when configured) before marking attempt/intent `canceled` in the database.
 - Refund: `POST /refunds` persists the refund row, then submits `create_refund` to the PSP using the linked payment attempt `out_trade_no`.
-- Webhook: `POST /app/v3/api/payments/webhooks/{providerCode}` (public route) peeks `out_trade_no` / Alipay `app_id` to resolve tenant `secret_ref`, verifies signature, ingests event, updates attempt/intent status, and on `succeeded` triggers owner-order settlement.
+- Webhook: order gateway `POST /app/v3/api/orders/payments/webhooks/{providerCode}` calls payment ingest ports; legacy payment path returns 410 Gone.
 - Sandbox: when `provider_code` is `sandbox` or PSP credentials are absent, local cashier URLs from `sdkwork-utils-rust` are used without external HTTP.
 
 ### Provider and async processing
 
 - `SandboxPaymentProvider` remains for contract tests and offline draft generation.
-- `process_queued_webhook_events` (`sqlite_webhook_worker.rs`) drains `queued` rows for admin replay; returns `settlement_scopes` for the gateway host to call `settle_owner_order_after_payment_success`. Live PSP callbacks ingest synchronously.
+- `process_queued_webhook_events` (`sqlite_webhook_worker.rs`) drains `queued` rows for admin replay; returns `payment_attempt_contexts` for the **order** gateway to settle in-process.
 
 ### Webhook replay (admin)
 

@@ -9,7 +9,7 @@ use crate::{
     app_payment_router_with_postgres_pool, app_payment_router_with_sqlite_pool,
     app_recharge_proxy_router,
     app_refund_router_with_postgres_pool, app_refund_router_with_sqlite_pool,
-    payment_webhook_router, webhook_router::WebhookDatabase,
+    payment_webhook_router_deprecated,
 };
 use crate::web_bootstrap::wrap_router_with_web_framework_from_env;
 
@@ -37,11 +37,7 @@ pub fn build_payment_app_router(host: Arc<PaymentServiceHost>) -> Router {
                     registry.clone(),
                     credentials.clone(),
                 ))
-                .merge(payment_webhook_router(
-                    registry,
-                    credentials.clone(),
-                    WebhookDatabase::Postgres(pool),
-                ));
+                .merge(payment_webhook_router_deprecated());
             if recharge_proxy_is_enabled() {
                 router = router.merge(app_recharge_proxy_router());
             }
@@ -61,11 +57,7 @@ pub fn build_payment_app_router(host: Arc<PaymentServiceHost>) -> Router {
                     registry.clone(),
                     credentials.clone(),
                 ))
-                .merge(payment_webhook_router(
-                    registry,
-                    credentials.clone(),
-                    WebhookDatabase::Sqlite(pool),
-                ));
+                .merge(payment_webhook_router_deprecated());
             if recharge_proxy_is_enabled() {
                 router = router.merge(app_recharge_proxy_router());
             }

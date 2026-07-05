@@ -3,7 +3,7 @@
 Status: active  
 Owner: SDKWork maintainers  
 Capability: `commerce.payment`  
-Updated: 2026-07-05
+Updated: 2026-07-06
 
 Authority: Payment PRD Non-Goals, `sdkwork-specs/API_SPEC.md`
 
@@ -17,9 +17,10 @@ Authority: Payment PRD Non-Goals, `sdkwork-specs/API_SPEC.md`
 | --- | --- |
 | `commerce_payment_intent` | `commerce_order` insert/update lifecycle |
 | `commerce_payment_attempt` | `commerce_recharge_package` |
-| Provider accounts, channels, webhooks | Recharge order creation |
+| Provider accounts, channels | Recharge order creation |
 | Refund records & provider refund calls | Account ledger |
 | Reconciliation runs | Unified order list UI |
+| Webhook event persistence (via port) | PSP webhook HTTP routes (owned by order) |
 
 ## 3. Required inputs
 
@@ -29,17 +30,21 @@ All write operations **must** reference Order:
 - `refunds.create` → `orderId` required
 - Owner-order pay side-effects → via Order `orders.pay` orchestration
 
-## 4. Webhook & saga
+## 4. Webhook port (order-owned HTTP)
+
+PSP notify URLs target **sdkwork-order** (`POST /app/v3/api/orders/payments/webhooks/{providerCode}`). Payment exposes **repository ports only**:
 
 ```text
-Provider webhook → Payment ingests + updates attempt status
-                → settle_owner_order_after_payment_success (subject-aware)
-                → Order POST .../points_recharge/fulfillments → Account ledger
+Order webhook handler → verify/normalize (payment-providers lib)
+                     → ingest_provider_webhook (payment repository)
+                     → order in-process settlement saga
 ```
 
-Queued webhook worker drains `commerce_payment_webhook_event` rows with `status = queued` (admin replay / recovery) and returns `settlement_scopes` for the host to settle orders. Live PSP callbacks ingest synchronously and settle in the webhook handler.
+Legacy `POST /app/v3/api/payments/webhooks/{providerCode}` returns **410 Gone**.
 
-**Forbidden:** Payment webhook → direct Account backend adjustment.
+Queued webhook worker (`process_queued_webhook_events`) drains `commerce_payment_webhook_event` rows for admin replay and returns `payment_attempt_contexts` for the **order** host to settle.
+
+**Forbidden:** Payment routes calling order HTTP, `settle_owner_order_after_payment_success`, or account adjustments.
 
 ## 5. Provider credentials
 

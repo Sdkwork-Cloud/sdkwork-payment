@@ -156,13 +156,6 @@ const HTTP_ROUTES: &[HttpRoute] = &[
         "payments.reconciliationRuns.create",
     )
     .with_idempotent(true),
-    // === Owner Order Confirmation ===
-    HttpRoute::dual_token(
-        HttpMethod::Post,
-        "/backend/v3/api/payments/owner-orders/{orderId}/confirmations",
-        "payments",
-        "payments.ownerOrders.confirmations.create",
-    ),
 ];
 
 /// 构造 payment backend-api 的 route manifest。

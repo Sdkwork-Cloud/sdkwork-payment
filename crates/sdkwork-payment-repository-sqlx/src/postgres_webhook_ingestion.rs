@@ -2,7 +2,7 @@ use sdkwork_contract_service::CommerceServiceError;
 use sqlx::{Pool, Postgres, Row};
 
 use crate::payment_attempt_context::{
-    load_attempt_by_out_trade_no_postgres, load_owner_order_settlement_scope_by_out_trade_no_postgres,
+    load_attempt_by_out_trade_no_postgres, load_payment_webhook_attempt_context_by_out_trade_no_postgres,
 };
 use crate::shared::{current_timestamp_string, stable_storage_id, store_error};
 use crate::sqlite_webhook_ingestion::{
@@ -86,8 +86,8 @@ pub async fn ingest_provider_webhook_postgres(
     )
     .await?;
 
-    let settlement_scope = if applied_status.as_deref() == Some("succeeded") {
-        load_owner_order_settlement_scope_by_out_trade_no_postgres(&mut tx, out_trade_no).await?
+    let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
+        load_payment_webhook_attempt_context_by_out_trade_no_postgres(&mut tx, out_trade_no).await?
     } else {
         None
     };
@@ -114,7 +114,7 @@ pub async fn ingest_provider_webhook_postgres(
         replayed: false,
         payment_attempt_id,
         applied_status,
-        settlement_scope,
+        payment_attempt_context,
     })
 }
 

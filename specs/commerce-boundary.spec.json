@@ -23,11 +23,12 @@
   },
   "deprecatedApiPrefixes": {
     "app": [
-      "/app/v3/api/recharges"
+      "/app/v3/api/recharges",
+      "/app/v3/api/payments/webhooks"
     ],
-    "reason": "Migrate to sdkwork-order; opt-in proxy only",
+    "reason": "Recharge and PSP webhooks migrated to sdkwork-order",
     "enableEnv": "SDKWORK_PAYMENT_ENABLE_RECHARGE_PROXY",
-    "targetRemovalPhase": "P5"
+    "targetRemovalPhase": "P6"
   },
   "requiredForeignKeys": {
     "orderId": {
@@ -37,27 +38,37 @@
         "payments.intents.create",
         "refunds.create",
         "owner-order pay"
-      ]
+      ],
+      "note": "Payment stores orderId on intent/attempt; order orchestrates webhooks"
     }
   },
-  "upstreamDependencies": [
+  "upstreamDependencies": [],
+  "downstreamConsumers": [
     {
       "capability": "order",
-      "purpose": "Validate order exists and payment_status transitions"
+      "purpose": "In-process PaymentWebhookStore + OwnerOrderPaymentStore ports"
     }
   ],
-  "downstreamConsumers": [],
   "forbidden": [
     "insert commerce_order",
     "insert commerce_order_item",
     "commerce_recharge_package CRUD",
     "direct account wallet adjustments",
-    "recharges.orders.create in target state"
+    "recharges.orders.create in target state",
+    "HTTP callback to order backend",
+    "sdkwork_order_service / sdkwork_order_repository_sqlx in route crates",
+    "JOIN commerce_order in payment repository",
+    "settle_owner_order_after_payment_success",
+    "OrderPointsRechargeFulfillmentClient",
+    "POST /backend/v3/api/payments/owner-orders/{orderId}/confirmations"
   ],
   "migrationOut": {
     "status": "complete",
     "rechargeProxy": "crates/sdkwork-routes-payment-app-api/src/recharge_proxy_router.rs",
-    "targetCapability": "order"
+    "webhookShim": "crates/sdkwork-routes-payment-app-api/src/webhook_router.rs",
+    "targetCapability": "order",
+    "orderWebhookRoute": "POST /app/v3/api/orders/payments/webhooks/{providerCode}",
+    "orderConfirmRoute": "POST /backend/v3/api/orders/{orderId}/payment_confirmations"
   },
   "implementationPhases": [
     {
@@ -80,39 +91,34 @@
     {
       "id": "P4",
       "title": "Payment confirmation orchestrates order fulfillment saga",
-      "status": "complete",
-      "blockedBy": ["O6", "P3"],
-      "deliverables": [
-        "POST /backend/v3/api/payments/owner-orders/{orderId}/confirmations",
-        "OrderPointsRechargeFulfillmentClient HTTP adapter",
-        "confirm_owner_order_payment repository method"
-      ]
+      "status": "superseded",
+      "supersededBy": "P6"
     },
     {
       "id": "P5",
-      "title": "Webhook ingestion + automatic owner-order settlement",
+      "title": "Webhook ingestion + automatic owner-order settlement in payment routes",
+      "status": "superseded",
+      "supersededBy": "P6"
+    },
+    {
+      "id": "P6",
+      "title": "Webhook + settlement migrated to order; payment 410 webhook shim",
       "status": "complete",
-      "blockedBy": ["P4"],
+      "blockedBy": ["O13"],
       "deliverables": [
-        "ingest_provider_webhook_sqlite/postgres",
-        "webhook_router settle_owner_order_after_payment_success",
-        "OwnerOrderSettlementScope loaders"
+        "ingest_provider_webhook_sqlite/postgres (port only)",
+        "PaymentWebhookAttemptContext (no order subject join)",
+        "payment_webhook_router_deprecated 410 Gone",
+        "removed owner_order_settlement and order_fulfillment_client"
       ]
     }
   ],
   "backendOperationIds": {
     "payments": [
-      "payments.ownerOrders.confirmations.create"
+      "payments.webhookEvents.list",
+      "payments.webhookEvents.replay"
     ]
   },
-  "fulfillmentCallbacks": [
-    {
-      "operationId": "orders.pointsRecharge.fulfillments.create",
-      "httpPath": "/backend/v3/api/orders/{orderId}/points_recharge/fulfillments",
-      "targetCapability": "order",
-      "triggeredBy": "payments.ownerOrders.confirmations.create"
-    }
-  ],
   "cashierUrl": {
     "builder": "sdkwork-utils-rust::build_commerce_cashier_url",
     "baseUrlEnv": "SDKWORK_COMMERCE_CASHIER_BASE_URL"

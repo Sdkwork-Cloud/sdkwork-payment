@@ -4,7 +4,7 @@ use sdkwork_contract_service::CommerceServiceError;
 use serde_json::Value;
 use sqlx::{Pool, Row, Sqlite};
 
-use crate::payment_attempt_context::load_owner_order_settlement_scope_by_out_trade_no_sqlite;
+use crate::payment_attempt_context::load_payment_webhook_attempt_context_by_out_trade_no_sqlite;
 use crate::shared::current_timestamp_string;
 use crate::sqlite_webhook_ingestion::apply_webhook_payment_status_sqlite;
 
@@ -17,7 +17,7 @@ pub struct WebhookProcessSummary {
     pub claimed: usize,
     pub processed: usize,
     pub failed: usize,
-    pub settlement_scopes: Vec<crate::payment_attempt_context::OwnerOrderSettlementScope>,
+    pub payment_attempt_contexts: Vec<crate::payment_attempt_context::PaymentWebhookAttemptContext>,
 }
 
 /// Claim queued webhook events and apply normalized payment status transitions.
@@ -46,7 +46,7 @@ pub async fn process_queued_webhook_events(
     let claimed = rows.len();
     let mut processed = 0usize;
     let mut failed = 0usize;
-    let mut settlement_scopes = Vec::new();
+    let mut payment_attempt_contexts = Vec::new();
 
     for row in &rows {
         let event_id: String = row
@@ -61,10 +61,10 @@ pub async fn process_queued_webhook_events(
 
         match process_queued_webhook_row(pool, tenant_id, &event_id, &provider_code, &payload).await
         {
-            Ok(scope) => {
+            Ok(context) => {
                 processed += 1;
-                if let Some(scope) = scope {
-                    settlement_scopes.push(scope);
+                if let Some(context) = context {
+                    payment_attempt_contexts.push(context);
                 }
             }
             Err(_) => failed += 1,
@@ -75,7 +75,7 @@ pub async fn process_queued_webhook_events(
         claimed,
         processed,
         failed,
-        settlement_scopes,
+        payment_attempt_contexts,
     })
 }
 
@@ -85,7 +85,7 @@ async fn process_queued_webhook_row(
     event_id: &str,
     provider_code: &str,
     payload: &str,
-) -> Result<Option<crate::payment_attempt_context::OwnerOrderSettlementScope>, CommerceServiceError> {
+) -> Result<Option<crate::payment_attempt_context::PaymentWebhookAttemptContext>, CommerceServiceError> {
     let parsed: Value = serde_json::from_str(payload).map_err(|error| {
         CommerceServiceError::storage(format!("webhook payload json invalid: {error}"))
     })?;
@@ -126,8 +126,8 @@ async fn process_queued_webhook_row(
             &now,
         )
         .await?;
-        let settlement_scope = if applied_status.as_deref() == Some("succeeded") {
-            load_owner_order_settlement_scope_by_out_trade_no_sqlite(&mut tx, out_trade_no).await?
+        let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
+            load_payment_webhook_attempt_context_by_out_trade_no_sqlite(&mut tx, out_trade_no).await?
         } else {
             None
         };
@@ -150,7 +150,7 @@ async fn process_queued_webhook_row(
         tx.commit().await.map_err(|error| {
             CommerceServiceError::storage(format!("failed to commit queued webhook transaction: {error}"))
         })?;
-        return Ok(settlement_scope);
+        return Ok(payment_attempt_context);
     }
 
     let now = current_timestamp_string();

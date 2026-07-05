@@ -134,80 +134,64 @@ pub async fn load_payment_attempt_provider_context_by_id_postgres(
     }))
 }
 
+/// Payment-attempt context returned after webhook ingest (no order-table join).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OwnerOrderSettlementScope {
+pub struct PaymentWebhookAttemptContext {
     pub tenant_id: String,
     pub organization_id: Option<String>,
     pub owner_user_id: String,
     pub order_id: String,
-    pub order_subject: Option<String>,
 }
 
-pub(crate) async fn load_owner_order_settlement_scope_by_out_trade_no_sqlite(
+pub(crate) async fn load_payment_webhook_attempt_context_by_out_trade_no_sqlite(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     out_trade_no: &str,
-) -> Result<Option<OwnerOrderSettlementScope>, CommerceServiceError> {
+) -> Result<Option<PaymentWebhookAttemptContext>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT pa.tenant_id,
-               pa.organization_id,
-               pa.owner_user_id,
-               pa.order_id,
-               o.subject AS order_subject
-        FROM commerce_payment_attempt pa
-        INNER JOIN commerce_order o
-            ON o.id = pa.order_id
-           AND o.tenant_id = pa.tenant_id
-        WHERE pa.out_trade_no = CAST(? AS TEXT)
-        ORDER BY pa.created_at DESC, pa.id DESC
+        SELECT tenant_id, organization_id, owner_user_id, order_id
+        FROM commerce_payment_attempt
+        WHERE out_trade_no = CAST(? AS TEXT)
+        ORDER BY created_at DESC, id DESC
         LIMIT 1
         "#,
     )
     .bind(out_trade_no)
     .fetch_optional(&mut **tx)
     .await
-    .map_err(|error| store_error("failed to resolve owner order settlement scope", error))?;
+    .map_err(|error| store_error("failed to resolve payment webhook attempt context", error))?;
 
-    Ok(row.map(|row| OwnerOrderSettlementScope {
+    Ok(row.map(|row| PaymentWebhookAttemptContext {
         tenant_id: string_cell(&row, "tenant_id"),
         organization_id: row.try_get("organization_id").ok().flatten(),
         owner_user_id: string_cell(&row, "owner_user_id"),
         order_id: string_cell(&row, "order_id"),
-        order_subject: row.try_get("order_subject").ok().flatten(),
     }))
 }
 
-pub(crate) async fn load_owner_order_settlement_scope_by_out_trade_no_postgres(
+pub(crate) async fn load_payment_webhook_attempt_context_by_out_trade_no_postgres(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     out_trade_no: &str,
-) -> Result<Option<OwnerOrderSettlementScope>, CommerceServiceError> {
+) -> Result<Option<PaymentWebhookAttemptContext>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT pa.tenant_id,
-               pa.organization_id,
-               pa.owner_user_id,
-               pa.order_id,
-               o.subject AS order_subject
-        FROM commerce_payment_attempt pa
-        INNER JOIN commerce_order o
-            ON o.id = pa.order_id
-           AND o.tenant_id = pa.tenant_id
-        WHERE pa.out_trade_no = CAST($1 AS TEXT)
-        ORDER BY pa.created_at DESC, pa.id DESC
+        SELECT tenant_id, organization_id, owner_user_id, order_id
+        FROM commerce_payment_attempt
+        WHERE out_trade_no = CAST($1 AS TEXT)
+        ORDER BY created_at DESC, id DESC
         LIMIT 1
         "#,
     )
     .bind(out_trade_no)
     .fetch_optional(&mut **tx)
     .await
-    .map_err(|error| store_error("failed to resolve owner order settlement scope", error))?;
+    .map_err(|error| store_error("failed to resolve payment webhook attempt context", error))?;
 
-    Ok(row.map(|row| OwnerOrderSettlementScope {
+    Ok(row.map(|row| PaymentWebhookAttemptContext {
         tenant_id: string_cell(&row, "tenant_id"),
         organization_id: row.try_get("organization_id").ok().flatten(),
         owner_user_id: string_cell(&row, "owner_user_id"),
         order_id: string_cell(&row, "order_id"),
-        order_subject: row.try_get("order_subject").ok().flatten(),
     }))
 }
 
@@ -307,94 +291,5 @@ pub async fn load_webhook_attempt_context_by_out_trade_no_postgres(
         tenant_id: string_cell(&row, "tenant_id"),
         organization_id: row.try_get("organization_id").ok().flatten(),
         provider_code: string_cell(&row, "provider_code"),
-    }))
-}
-
-pub async fn load_owner_order_settlement_scope_by_order_id_sqlite(
-    pool: &Pool<Sqlite>,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    owner_user_id: &str,
-    order_id: &str,
-) -> Result<Option<OwnerOrderSettlementScope>, CommerceServiceError> {
-    let row = sqlx::query(
-        r#"
-        SELECT o.tenant_id,
-               o.organization_id,
-               o.owner_user_id,
-               o.id AS order_id,
-               o.subject AS order_subject
-        FROM commerce_order o
-        INNER JOIN commerce_payment_attempt pa
-            ON pa.order_id = o.id
-           AND pa.tenant_id = o.tenant_id
-           AND pa.owner_user_id = o.owner_user_id
-        WHERE o.tenant_id = CAST(? AS TEXT)
-          AND o.owner_user_id = CAST(? AS TEXT)
-          AND o.id = CAST(? AS TEXT)
-          AND ((o.organization_id = CAST(? AS TEXT)) OR (o.organization_id IS NULL AND ? IS NULL))
-        ORDER BY pa.created_at DESC, pa.id DESC
-        LIMIT 1
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(owner_user_id)
-    .bind(order_id)
-    .bind(organization_id)
-    .bind(organization_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| store_error("failed to resolve owner order settlement scope by order id", error))?;
-
-    Ok(row.map(|row| OwnerOrderSettlementScope {
-        tenant_id: string_cell(&row, "tenant_id"),
-        organization_id: row.try_get("organization_id").ok().flatten(),
-        owner_user_id: string_cell(&row, "owner_user_id"),
-        order_id: string_cell(&row, "order_id"),
-        order_subject: row.try_get("order_subject").ok().flatten(),
-    }))
-}
-
-pub async fn load_owner_order_settlement_scope_by_order_id_postgres(
-    pool: &Pool<Postgres>,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    owner_user_id: &str,
-    order_id: &str,
-) -> Result<Option<OwnerOrderSettlementScope>, CommerceServiceError> {
-    let row = sqlx::query(
-        r#"
-        SELECT o.tenant_id,
-               o.organization_id,
-               o.owner_user_id,
-               o.id AS order_id,
-               o.subject AS order_subject
-        FROM commerce_order o
-        INNER JOIN commerce_payment_attempt pa
-            ON pa.order_id = o.id
-           AND pa.tenant_id = o.tenant_id
-           AND pa.owner_user_id = o.owner_user_id
-        WHERE o.tenant_id = CAST($1 AS TEXT)
-          AND o.owner_user_id = CAST($2 AS TEXT)
-          AND o.id = CAST($3 AS TEXT)
-          AND ((o.organization_id = CAST($4 AS TEXT)) OR (o.organization_id IS NULL AND $4::text IS NULL))
-        ORDER BY pa.created_at DESC, pa.id DESC
-        LIMIT 1
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(owner_user_id)
-    .bind(order_id)
-    .bind(organization_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| store_error("failed to resolve owner order settlement scope by order id", error))?;
-
-    Ok(row.map(|row| OwnerOrderSettlementScope {
-        tenant_id: string_cell(&row, "tenant_id"),
-        organization_id: row.try_get("organization_id").ok().flatten(),
-        owner_user_id: string_cell(&row, "owner_user_id"),
-        order_id: string_cell(&row, "order_id"),
-        order_subject: row.try_get("order_subject").ok().flatten(),
     }))
 }

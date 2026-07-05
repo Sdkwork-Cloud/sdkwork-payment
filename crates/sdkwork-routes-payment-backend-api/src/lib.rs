@@ -3,9 +3,6 @@ pub mod backend_payment_admin_router;
 pub mod backend_payment_intent_router;
 pub mod command_headers;
 pub mod http_route_manifest;
-pub mod order_fulfillment_client;
-pub mod owner_order_confirmation_router;
-pub mod owner_order_settlement;
 pub mod routes;
 pub mod subject;
 pub mod web_bootstrap;
@@ -18,11 +15,6 @@ pub use backend_payment_admin_router::{
 pub use backend_payment_intent_router::{
     backend_payment_intent_router_with_postgres_pool, backend_payment_intent_router_with_sqlite_pool,
     build_backend_payment_intent_router, CommerceBackendPaymentIntentStore,
-};
-pub use order_fulfillment_client::OrderPointsRechargeFulfillmentClient;
-pub use owner_order_settlement::{
-    settle_owner_order_after_payment_success, OwnerOrderPaymentStoreKind,
-    OwnerOrderSettlementOutcome,
 };
 pub use routes::build_payment_backend_router_with_framework;
 pub use web_bootstrap::{wrap_router_with_web_framework, wrap_router_with_web_framework_from_env};
