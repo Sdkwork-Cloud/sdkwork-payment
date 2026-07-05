@@ -56,8 +56,8 @@
     "direct account wallet adjustments",
     "recharges.orders.create in target state",
     "HTTP callback to order backend",
-    "sdkwork_order_service / sdkwork_order_repository_sqlx in route crates",
-    "JOIN commerce_order in payment repository",
+    "settlement orchestration in payment route crates",
+    "JOIN commerce_order in payment webhook ingest",
     "settle_owner_order_after_payment_success",
     "OrderPointsRechargeFulfillmentClient",
     "POST /backend/v3/api/payments/owner-orders/{orderId}/confirmations"
