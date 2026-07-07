@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client};
 use serde_json::Value;
@@ -153,5 +151,3 @@ impl ReqwestHttpClient {
         }
     }
 }
-
-pub type SharedHttpClient = Arc<ReqwestHttpClient>;

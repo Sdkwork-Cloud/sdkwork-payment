@@ -14,8 +14,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
 sdkwork_contract_service.workspace = true
-sdkwork_order_repository_sqlx.workspace = true
-sdkwork_order_service.workspace = true
 sdkwork_payment_providers.workspace = true
 sdkwork_payment_repository_sqlx.workspace = true
 sdkwork_payment_service.workspace = true
@@ -27,7 +25,7 @@ sdkwork-web-axum.workspace = true
 sdkwork-web-bootstrap.workspace = true
 sdkwork-iam-web-adapter.workspace = true
 sdkwork-utils-rust = { workspace = true }
-reqwest = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
 tokio = { workspace = true }

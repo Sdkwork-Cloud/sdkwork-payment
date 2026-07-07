@@ -117,7 +117,6 @@ fn env_optional(key: &str) -> Option<String> {
 
 fn load_webhook_base_url() -> Option<String> {
     env_optional("ORDER_PAYMENT_WEBHOOK_BASE_URL")
-        .or_else(|| env_optional("PAYMENT_WEBHOOK_BASE_URL"))
 }
 
 pub struct EnvPaymentCredentialResolver;

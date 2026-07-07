@@ -120,14 +120,34 @@ pub fn map_service_error(
             SdkWorkResultCode::NotFound,
             error.message().to_string(),
         ),
-        "conflict" => (
+        "conflict" | "unsupported-capability" => (
             StatusCode::CONFLICT,
             SdkWorkResultCode::Conflict,
+            error.message().to_string(),
+        ),
+        "invalid-state" => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            SdkWorkResultCode::UnprocessableEntity,
             error.message().to_string(),
         ),
         "unauthorized" | "unauthenticated" => (
             StatusCode::UNAUTHORIZED,
             SdkWorkResultCode::AuthenticationRequired,
+            error.message().to_string(),
+        ),
+        "provider-unavailable" => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            SdkWorkResultCode::ServiceUnavailable,
+            error.message().to_string(),
+        ),
+        "transport" => (
+            StatusCode::BAD_GATEWAY,
+            SdkWorkResultCode::BadGateway,
+            error.message().to_string(),
+        ),
+        "storage" => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SdkWorkResultCode::InternalError,
             error.message().to_string(),
         ),
         _ => (
@@ -266,5 +286,20 @@ mod tests {
         assert_eq!(0, payload["code"].as_i64().unwrap());
         assert_eq!("pi-1", payload["data"]["item"]["id"].as_str().unwrap());
         assert!(payload["traceId"].is_string());
+    }
+
+    #[test]
+    fn provider_unavailable_maps_to_service_unavailable() {
+        let response = map_service_error(
+            None,
+            CommerceServiceError::provider_unavailable("stripe is unavailable"),
+        );
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(content_type.contains("application/problem+json"));
     }
 }

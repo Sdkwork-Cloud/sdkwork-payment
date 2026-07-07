@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
 
 use crate::api_response::{
-    conflict, map_service_error, not_found, success_command_accepted, success_item, success_list,
+    conflict, map_service_error, not_found, success_command_accepted, success_list,
     unauthorized, validation,
 };
 use crate::command_headers::{
@@ -26,9 +26,7 @@ use crate::subject::backend_runtime_subject_from_extension;
 pub type CommerceBackendPaymentAdminFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CommerceServiceError>> + Send + 'a>>;
 
-/// C15 修复：webhook 单事件最大重放次数。超过即拒绝并返回 409 Conflict。
-/// 行业实践（Stripe/Adyen）通常限制 5-10 次，这里取 5 次作为保守上限。
-const WEBHOOK_MAX_RETRIES: i64 = 5;
+use sdkwork_payment_repository_sqlx::WEBHOOK_STORED_REPLAY_MAX_RETRIES;
 
 /// C15 修复：webhook 重放结果，用于 handler 区分 404/409/200。
 #[derive(Debug, Clone, Serialize)]
@@ -840,42 +838,22 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
         event_id: String,
     ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult> {
         Box::pin(async move {
-            let now = current_timestamp_string();
-            // C15 修复：UPDATE 带 retries < MAX 谓词，原子化阻止超限重放。
-            let row = sqlx::query(
-                "UPDATE commerce_payment_webhook_event SET status = 'queued', processed_at = NULL, retries = COALESCE(retries, 0) + 1, updated_at = ? WHERE event_id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT)) AND COALESCE(retries, 0) < ? RETURNING id, event_id, provider_code, event_type, status, received_at, processed_at, retries",
-            )
-            .bind(&now)
-            .bind(&event_id)
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .bind(WEBHOOK_MAX_RETRIES)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to replay webhook event: {error}")))?;
+            use sdkwork_payment_repository_sqlx::{
+                replay_stored_webhook_event_sqlite, StoredWebhookReplayResult, WebhookStoredReplayScope,
+            };
 
-            if let Some(row) = row {
-                return Ok(WebhookReplayResult::Queued(map_webhook_event_sqlite(&row)));
-            }
-
-            // C15 修复：UPDATE 未命中，需区分 404（事件不存在）与 409（达到重放上限）。
-            let existing = sqlx::query(
-                "SELECT retries FROM commerce_payment_webhook_event WHERE event_id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))",
-            )
-            .bind(&event_id)
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to inspect webhook event: {error}")))?;
-
-            match existing {
-                None => Ok(WebhookReplayResult::NotFound),
-                Some(row) => Ok(WebhookReplayResult::LimitExceeded {
-                    current_retries: row.try_get::<i64, _>("retries").unwrap_or(WEBHOOK_MAX_RETRIES),
-                }),
+            let replay_scope = WebhookStoredReplayScope {
+                tenant_id: scope.tenant_id,
+                organization_id: scope.organization_id,
+            };
+            match replay_stored_webhook_event_sqlite(&self.pool, replay_scope, event_id).await? {
+                StoredWebhookReplayResult::Applied { webhook_event, .. } => {
+                    Ok(WebhookReplayResult::Queued(webhook_event.to_json()))
+                }
+                StoredWebhookReplayResult::NotFound => Ok(WebhookReplayResult::NotFound),
+                StoredWebhookReplayResult::LimitExceeded { current_retries } => {
+                    Ok(WebhookReplayResult::LimitExceeded { current_retries })
+                }
             }
         })
     }
@@ -1415,40 +1393,22 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
         event_id: String,
     ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult> {
         Box::pin(async move {
-            let now = current_timestamp_string();
-            // C15 修复：UPDATE 带 retries < MAX 谓词，原子化阻止超限重放。
-            let row = sqlx::query(
-                "UPDATE commerce_payment_webhook_event SET status = 'queued', processed_at = NULL, retries = COALESCE(retries, 0) + 1, updated_at = $1 WHERE event_id = CAST($2 AS TEXT) AND tenant_id = CAST($3 AS TEXT) AND (organization_id IS NULL AND $4::text IS NULL OR organization_id = CAST($4 AS TEXT)) AND COALESCE(retries, 0) < $5 RETURNING id, event_id, provider_code, event_type, status, received_at, processed_at, retries",
-            )
-            .bind(&now)
-            .bind(&event_id)
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(WEBHOOK_MAX_RETRIES)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to replay webhook event: {error}")))?;
+            use sdkwork_payment_repository_sqlx::{
+                replay_stored_webhook_event_postgres, StoredWebhookReplayResult, WebhookStoredReplayScope,
+            };
 
-            if let Some(row) = row {
-                return Ok(WebhookReplayResult::Queued(map_webhook_event_pg(&row)));
-            }
-
-            // C15 修复：UPDATE 未命中，需区分 404（事件不存在）与 409（达到重放上限）。
-            let existing = sqlx::query(
-                "SELECT retries FROM commerce_payment_webhook_event WHERE event_id = CAST($1 AS TEXT) AND tenant_id = CAST($2 AS TEXT) AND (organization_id IS NULL AND $3::text IS NULL OR organization_id = CAST($3 AS TEXT))",
-            )
-            .bind(&event_id)
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to inspect webhook event: {error}")))?;
-
-            match existing {
-                None => Ok(WebhookReplayResult::NotFound),
-                Some(row) => Ok(WebhookReplayResult::LimitExceeded {
-                    current_retries: row.try_get::<i64, _>("retries").unwrap_or(WEBHOOK_MAX_RETRIES),
-                }),
+            let replay_scope = WebhookStoredReplayScope {
+                tenant_id: scope.tenant_id,
+                organization_id: scope.organization_id,
+            };
+            match replay_stored_webhook_event_postgres(&self.pool, replay_scope, event_id).await? {
+                StoredWebhookReplayResult::Applied { webhook_event, .. } => {
+                    Ok(WebhookReplayResult::Queued(webhook_event.to_json()))
+                }
+                StoredWebhookReplayResult::NotFound => Ok(WebhookReplayResult::NotFound),
+                StoredWebhookReplayResult::LimitExceeded { current_retries } => {
+                    Ok(WebhookReplayResult::LimitExceeded { current_retries })
+                }
             }
         })
     }
@@ -1652,7 +1612,7 @@ async fn create_method(
     };
 
     match state.store.upsert_payment_method(command).await {
-        Ok(view) => success_item(ctx, map_method(view)),
+        Ok(view) => success_command_accepted(ctx, Some(view.id)),
         Err(error) => backend_payment_error_response(ctx, "payment method upsert failed", error),
     }
 }
@@ -1696,7 +1656,7 @@ async fn update_method(
     };
 
     match state.store.upsert_payment_method(command).await {
-        Ok(view) => success_item(ctx, map_method(view)),
+        Ok(view) => success_command_accepted(ctx, Some(view.id)),
         Err(error) => backend_payment_error_response(ctx, "payment method upsert failed", error),
     }
 }
@@ -1833,7 +1793,12 @@ async fn upsert_provider_account_inner(
         status: body.status.unwrap_or_else(|| "active".to_owned()),
     };
     match state.store.upsert_provider_account(payload).await {
-        Ok(item) => success_item(ctx, item),
+        Ok(item) => success_command_accepted(
+            ctx,
+            item.get("id")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned),
+        ),
         Err(error) => {
             backend_payment_error_response(ctx, "payment provider account upsert failed", error)
         }
@@ -1927,7 +1892,12 @@ async fn create_channel(
         priority: body.priority.unwrap_or(0),
     };
     match state.store.upsert_channel(payload).await {
-        Ok(item) => success_item(ctx, item),
+        Ok(item) => success_command_accepted(
+            ctx,
+            item.get("id")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned),
+        ),
         Err(error) => backend_payment_error_response(ctx, "payment channel upsert failed", error),
     }
 }
@@ -2039,7 +2009,12 @@ async fn upsert_route_rule_inner(
         ends_at: body.ends_at,
     };
     match state.store.upsert_route_rule(payload).await {
-        Ok(item) => success_item(ctx, item),
+        Ok(item) => success_command_accepted(
+            ctx,
+            item.get("id")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned),
+        ),
         Err(error) => backend_payment_error_response(ctx, "payment route rule upsert failed", error),
     }
 }
@@ -2123,6 +2098,7 @@ async fn replay_webhook_event(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
     request_context: Option<Extension<WebRequestContext>>,
+    headers: HeaderMap,
     Path(event_id): Path<String>,
 ) -> Response {
     let ctx = request_context.as_ref().map(|Extension(value)| value);
@@ -2130,19 +2106,30 @@ async fn replay_webhook_event(
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(ctx, message),
     };
+    let replay_body = serde_json::json!({ "eventId": event_id });
+    let _write_headers = match validate_backend_write_payload(
+        ctx,
+        &headers,
+        "payment-webhook-replay",
+        &replay_body,
+        "wh-replay",
+    ) {
+        Ok(headers) => headers,
+        Err(response) => return response,
+    };
     let scope = BackendTenantScope {
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
     };
-    match state.store.replay_webhook_event(scope, event_id).await {
-        Ok(WebhookReplayResult::Queued(item)) => success_item(ctx, item),
+    match state.store.replay_webhook_event(scope, event_id.clone()).await {
+        Ok(WebhookReplayResult::Queued(_item)) => success_command_accepted(ctx, Some(event_id)),
         Ok(WebhookReplayResult::NotFound) => {
             not_found(ctx, "payment webhook event was not found")
         }
         Ok(WebhookReplayResult::LimitExceeded { current_retries }) => conflict(
             ctx,
             format!(
-                "webhook event has reached the replay limit ({WEBHOOK_MAX_RETRIES}); current retries = {current_retries}"
+                "webhook event has reached the replay limit ({WEBHOOK_STORED_REPLAY_MAX_RETRIES}); current retries = {current_retries}"
             ),
         ),
         Err(error) => backend_payment_error_response(ctx, "payment webhook replay failed", error),
@@ -2260,7 +2247,12 @@ async fn create_reconciliation_run(
         idempotency_key: write_headers.idempotency_key,
     };
     match state.store.create_reconciliation_run(payload).await {
-        Ok(item) => success_item(ctx, item),
+        Ok(item) => success_command_accepted(
+            ctx,
+            item.get("id")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned),
+        ),
         Err(error) => {
             backend_payment_error_response(ctx, "payment reconciliation run create failed", error)
         }

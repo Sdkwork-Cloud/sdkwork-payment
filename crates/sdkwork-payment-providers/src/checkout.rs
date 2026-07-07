@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 use sdkwork_contract_service::CommerceServiceError;
-use sdkwork_order_service::PayOwnerOrderOutcome;
+use sdkwork_payment_service::PayOwnerOrderOutcome;
 
 use crate::adapter::{
     normalize_provider_code, PaymentCreateIntentRequest, PaymentProviderOperationOutcome,

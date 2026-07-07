@@ -120,14 +120,34 @@ pub fn map_service_error(
             SdkWorkResultCode::NotFound,
             error.message().to_string(),
         ),
-        "conflict" => (
+        "conflict" | "unsupported-capability" => (
             StatusCode::CONFLICT,
             SdkWorkResultCode::Conflict,
+            error.message().to_string(),
+        ),
+        "invalid-state" => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            SdkWorkResultCode::UnprocessableEntity,
             error.message().to_string(),
         ),
         "unauthorized" | "unauthenticated" => (
             StatusCode::UNAUTHORIZED,
             SdkWorkResultCode::AuthenticationRequired,
+            error.message().to_string(),
+        ),
+        "provider-unavailable" => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            SdkWorkResultCode::ServiceUnavailable,
+            error.message().to_string(),
+        ),
+        "transport" => (
+            StatusCode::BAD_GATEWAY,
+            SdkWorkResultCode::BadGateway,
+            error.message().to_string(),
+        ),
+        "storage" => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            SdkWorkResultCode::InternalError,
             error.message().to_string(),
         ),
         _ => (

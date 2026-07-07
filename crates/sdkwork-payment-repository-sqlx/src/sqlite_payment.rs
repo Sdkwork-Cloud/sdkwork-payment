@@ -1,5 +1,5 @@
 use sdkwork_contract_service::{
-    CommerceMoney, CommercePaymentStatus, CommerceRechargeStatus, CommerceServiceError,
+    CommerceMoney, CommercePaymentStatus, CommerceServiceError,
 };
 use sdkwork_payment_service::{
     ClosePaymentRecordCommand, PaymentRecordDetailQuery, PaymentRecordItem, PaymentRecordListPage,
@@ -354,6 +354,34 @@ WHERE o.tenant_id = CAST(?1 AS TEXT)
         .map_err(|error| store_error("failed to close payment attempt", error))?;
 
         if attempt.rows_affected() > 0 {
+            sqlx::query(
+                r#"
+                UPDATE commerce_payment_intent
+                SET status = ?, updated_at = ?
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND owner_user_id = CAST(? AS TEXT)
+                  AND id = (
+                      SELECT payment_intent_id
+                      FROM commerce_payment_attempt
+                      WHERE tenant_id = CAST(? AS TEXT)
+                        AND owner_user_id = CAST(? AS TEXT)
+                        AND id = CAST(? AS TEXT)
+                      LIMIT 1
+                  )
+                  AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
+                "#,
+            )
+            .bind(CommercePaymentStatus::Canceled.as_str())
+            .bind(&now)
+            .bind(&command.tenant_id)
+            .bind(&command.owner_user_id)
+            .bind(&command.tenant_id)
+            .bind(&command.owner_user_id)
+            .bind(&command.payment_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error("failed to close parent payment intent", error))?;
+
             tx.commit()
                 .await
                 .map_err(|error| store_error("failed to commit close payment record transaction", error))?;
@@ -411,7 +439,7 @@ fn payment_record_status(
     row: &sqlx::sqlite::SqliteRow,
 ) -> Result<&'static str, CommerceServiceError> {
     let order_status =
-        order_recharge_status_label(&required_status_cell(row, "order_status", "order")?)?;
+        owner_order_status_wire_label(&required_status_cell(row, "order_status", "order")?)?;
     let payment_status = related_status_cell(row, "payment_id", "payment_status", "payment")?
         .map(|status| payment_status_label(&status))
         .transpose()?
@@ -452,15 +480,11 @@ fn payment_record_status_label(
     }
 }
 
-fn order_recharge_status_label(value: &str) -> Result<&'static str, CommerceServiceError> {
+fn owner_order_status_wire_label(value: &str) -> Result<&'static str, CommerceServiceError> {
     match value.trim().to_ascii_lowercase().as_str() {
-        status if status == CommerceRechargeStatus::Pending.as_str() => Ok("pending"),
-        status if status == CommerceRechargeStatus::Paid.as_str() => Ok("success"),
-        status if status == CommerceRechargeStatus::Fulfilled.as_str() => Ok("success"),
-        status if status == CommerceRechargeStatus::Closed.as_str() => Ok("failed"),
-        "pending_payment" | "unpaid" | "wait_pay" | "draft" => Ok("pending"),
-        "paid" | "success" | "completed" => Ok("success"),
-        "cancelled" | "canceled" | "closed" | "failed" => Ok("failed"),
+        "draft" | "pending_payment" | "unpaid" | "wait_pay" | "pending" => Ok("pending"),
+        "paid" | "success" | "completed" | "fulfilled" => Ok("success"),
+        "cancelled" | "canceled" | "closed" | "failed" | "expired" => Ok("failed"),
         status => Err(CommerceServiceError::storage(format!(
             "unsupported payment record order status: {status}"
         ))),

@@ -25,7 +25,8 @@ pub fn map_provider_payment_status(
         },
         "wechat_pay" | "wechat-pay" => match status.as_str() {
             "success" => Some("succeeded"),
-            "refund" | "revoked" => Some("processing"),
+            "refund" => Some("refunding"),
+            "revoked" => Some("canceled"),
             "closed" | "payerror" => Some("canceled"),
             "notpay" | "userpaying" => Some("pending"),
             _ => None,
@@ -59,6 +60,22 @@ mod tests {
         assert_eq!(
             map_provider_payment_status("wechat_pay", "SUCCESS"),
             Some("succeeded")
+        );
+    }
+
+    #[test]
+    fn maps_wechat_refund_to_refunding() {
+        assert_eq!(
+            map_provider_payment_status("wechat_pay", "REFUND"),
+            Some("refunding")
+        );
+    }
+
+    #[test]
+    fn maps_wechat_revoked_to_canceled() {
+        assert_eq!(
+            map_provider_payment_status("wechat_pay", "REVOKED"),
+            Some("canceled")
         );
     }
 }

@@ -3,17 +3,14 @@
 use sdkwork_contract_service::{
     CommerceMoney, CommercePaymentStatus, CommerceServiceError,
 };
-use sdkwork_order_service::{OrderOwnerDetailQuery, PayOwnerOrderCommand};
-use sdkwork_order_repository_sqlx::SqliteCommerceOrderStore;
-use std::sync::Arc;
 use sdkwork_payment_service::{
     CancelOwnerPaymentIntentCommand, CreateOwnerPaymentAttemptCommand,
-    CreateOwnerPaymentAttemptOutcome, CreateOwnerPaymentIntentCommand, PaymentIntentDetailQuery,
-    PaymentIntentView,
+    CreateOwnerPaymentAttemptOutcome, CreateOwnerPaymentIntentCommand, OrderPaymentReferenceQuery,
+    PaymentIntentDetailQuery, PaymentIntentView,
 };
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
-
+use crate::order_reference::{load_order_payment_reference_sqlite, order_status_is_payable};
 
 #[derive(Debug, Clone)]
 struct ResolvedPaymentMethod {
@@ -24,15 +21,11 @@ struct ResolvedPaymentMethod {
 #[derive(Debug, Clone)]
 pub struct SqliteCommercePaymentIntentStore {
     pool: SqlitePool,
-    order_store: Arc<SqliteCommerceOrderStore>,
 }
 
 impl SqliteCommercePaymentIntentStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            pool: pool.clone(),
-            order_store: Arc::new(SqliteCommerceOrderStore::new(pool)),
-        }
+        Self { pool }
     }
 
     pub fn pool(&self) -> &SqlitePool {
@@ -52,25 +45,26 @@ impl SqliteCommercePaymentIntentStore {
             return Ok(existing);
         }
 
-        let detail_query = OrderOwnerDetailQuery::new(
+        let mut tx =
+            self.pool().begin_with("BEGIN IMMEDIATE").await.map_err(|error| {
+                store_error("failed to begin payment intent transaction", error)
+            })?;
+        let reference_query = OrderPaymentReferenceQuery::new(
             &command.tenant_id,
             command.organization_id.as_deref(),
             &command.owner_user_id,
             &command.order_id,
         )?;
-        let Some(detail) = self.order_store.retrieve_owner_order(detail_query).await? else {
+        let Some(order_ref) =
+            load_order_payment_reference_sqlite(&mut tx, &reference_query).await?
+        else {
             return Err(CommerceServiceError::not_found("order was not found"));
         };
-        if !order_status_is_payable(&detail.summary.status) {
+        if !order_status_is_payable(&order_ref.status) {
             return Err(CommerceServiceError::conflict(
                 "order is not pending payment",
             ));
         }
-
-        let mut tx =
-            self.pool().begin_with("BEGIN IMMEDIATE").await.map_err(|error| {
-                store_error("failed to begin payment intent transaction", error)
-            })?;
         let method = load_payment_method_for_intent(&mut tx, &command).await?;
         let now = current_timestamp_string();
         let payment_intent_id = payment_intent_id(&command);
@@ -93,10 +87,10 @@ impl SqliteCommercePaymentIntentStore {
         .bind(command.organization_id.as_deref())
         .bind(&command.owner_user_id)
         .bind(&command.order_id)
-        .bind(&command.request_no)
+        .bind(format!("PAY-{}", order_ref.order_sn))
         .bind(&method.method_key)
         .bind(&method.provider_code)
-        .bind(detail.summary.total_amount.as_str())
+        .bind(order_ref.total_amount.as_str())
         .bind(status)
         .bind(&command.request_no)
         .bind(&command.idempotency_key)
@@ -131,7 +125,7 @@ impl SqliteCommercePaymentIntentStore {
             payment_intent_no: command.request_no,
             payment_method: method.method_key,
             provider_code: method.provider_code,
-            amount: detail.summary.total_amount,
+            amount: order_ref.total_amount,
             currency_code: "CNY".to_owned(),
             status: status.to_owned(),
         })
@@ -217,6 +211,7 @@ impl SqliteCommercePaymentIntentStore {
             WHERE tenant_id = CAST(? AS TEXT)
               AND owner_user_id = CAST(? AS TEXT)
               AND payment_intent_id = CAST(? AS TEXT)
+              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
             "#,
         )
         .bind(canceled)
@@ -269,30 +264,35 @@ impl SqliteCommercePaymentIntentStore {
             return Ok(existing);
         }
 
-        let detail_query = OrderOwnerDetailQuery::new(
+        let reference_query = OrderPaymentReferenceQuery::new(
             &command.tenant_id,
             command.organization_id.as_deref(),
             &command.owner_user_id,
             &intent.order_id,
         )?;
-        let Some(detail) = self.order_store.retrieve_owner_order(detail_query).await? else {
-            return Err(CommerceServiceError::not_found("order was not found"));
-        };
-
         let mut tx =
             self.pool().begin().await.map_err(|error| {
                 store_error("failed to begin payment attempt transaction", error)
             })?;
+        let Some(order_ref) =
+            load_order_payment_reference_sqlite(&mut tx, &reference_query).await?
+        else {
+            return Err(CommerceServiceError::not_found("order was not found"));
+        };
+        if !order_status_is_payable(&order_ref.status) {
+            return Err(CommerceServiceError::conflict("order is not payable"));
+        }
+
         let now = current_timestamp_string();
         let attempt_id = payment_attempt_id(&command);
         let out_trade_no = format!(
             "OT-{}-{}",
-            detail.summary.order_sn,
+            order_ref.order_sn,
             command.idempotency_key.replace('-', "")
         );
         let pending = CommercePaymentStatus::Pending.as_str();
 
-        sqlx::query(
+        let insert = sqlx::query(
             r#"
             INSERT INTO commerce_payment_attempt
                 (id, tenant_id, organization_id, owner_user_id, payment_intent_id, order_id,
@@ -300,6 +300,7 @@ impl SqliteCommercePaymentIntentStore {
                  callback_payload, created_at, paid_at, updated_at)
             VALUES
                 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, NULL, ?)
+            ON CONFLICT (id) DO NOTHING
             "#,
         )
         .bind(&attempt_id)
@@ -320,6 +321,36 @@ impl SqliteCommercePaymentIntentStore {
         .await
         .map_err(|error| store_error("failed to insert payment attempt", error))?;
 
+        if insert.rows_affected() == 0 {
+            let row = sqlx::query(
+                r#"
+                SELECT id, payment_intent_id, order_id, out_trade_no, CAST(amount AS TEXT) AS amount,
+                       payment_method, provider_code, status
+                FROM commerce_payment_attempt
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND owner_user_id = CAST(? AS TEXT)
+                  AND id = CAST(? AS TEXT)
+                LIMIT 1
+                "#,
+            )
+            .bind(&command.tenant_id)
+            .bind(&command.owner_user_id)
+            .bind(&attempt_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|error| store_error("failed to load payment attempt idempotency replay", error))?;
+
+            tx.commit()
+                .await
+                .map_err(|error| store_error("failed to commit payment attempt idempotency replay", error))?;
+            return row
+                .map(map_payment_attempt_row)
+                .transpose()?
+                .ok_or_else(|| {
+                    CommerceServiceError::storage("payment attempt idempotency replay failed")
+                });
+        }
+
         sqlx::query(
             r#"
             UPDATE commerce_payment_intent
@@ -327,6 +358,7 @@ impl SqliteCommercePaymentIntentStore {
             WHERE tenant_id = CAST(? AS TEXT)
               AND owner_user_id = CAST(? AS TEXT)
               AND id = CAST(? AS TEXT)
+              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
             "#,
         )
         .bind(pending)
@@ -349,7 +381,9 @@ impl SqliteCommercePaymentIntentStore {
             out_trade_no,
             amount: intent.amount,
             payment_method: intent.payment_method,
+            provider_code: intent.provider_code,
             status: pending.to_owned(),
+            payment_params: std::collections::BTreeMap::new(),
         })
     }
 
@@ -409,15 +443,6 @@ async fn load_payment_method_for_intent(
     tx: &mut Transaction<'_, Sqlite>,
     command: &CreateOwnerPaymentIntentCommand,
 ) -> Result<ResolvedPaymentMethod, CommerceServiceError> {
-    let pay_command = PayOwnerOrderCommand::new(
-        &command.tenant_id,
-        command.organization_id.as_deref(),
-        &command.owner_user_id,
-        &command.order_id,
-        &command.payment_method,
-        &command.request_no,
-        &command.idempotency_key,
-    )?;
     let row = sqlx::query(
         r#"
         SELECT method_key, provider_code
@@ -432,11 +457,11 @@ async fn load_payment_method_for_intent(
         LIMIT 1
         "#,
     )
-    .bind(&pay_command.payment_method)
-    .bind(&pay_command.tenant_id)
-    .bind(pay_command.organization_id.as_deref())
-    .bind(&pay_command.tenant_id)
-    .bind(&pay_command.tenant_id)
+    .bind(&command.payment_method)
+    .bind(&command.tenant_id)
+    .bind(command.organization_id.as_deref())
+    .bind(&command.tenant_id)
+    .bind(&command.tenant_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|error| store_error("failed to load payment method for intent", error))?;
@@ -502,7 +527,9 @@ fn map_payment_attempt_row(
         amount: CommerceMoney::new(&string_cell(&row, "amount"))
             .map_err(CommerceServiceError::storage)?,
         payment_method: string_cell(&row, "payment_method"),
+        provider_code: string_cell(&row, "provider_code"),
         status: string_cell(&row, "status"),
+        payment_params: std::collections::BTreeMap::new(),
     })
 }
 
@@ -522,13 +549,6 @@ fn payment_attempt_id(command: &CreateOwnerPaymentAttemptCommand) -> String {
         &command.payment_intent_id,
         &command.idempotency_key,
     ])
-}
-
-fn order_status_is_payable(status: &str) -> bool {
-    matches!(
-        status.trim().to_ascii_lowercase().as_str(),
-        "pending_payment" | "pending" | "created" | "unpaid"
-    )
 }
 
 fn stable_storage_id(parts: &[&str]) -> String {

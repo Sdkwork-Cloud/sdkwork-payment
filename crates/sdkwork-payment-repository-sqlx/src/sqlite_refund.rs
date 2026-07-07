@@ -1,34 +1,29 @@
 #![allow(clippy::too_many_arguments)]
 
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
-use sdkwork_order_service::OrderOwnerDetailQuery;
-use sdkwork_order_repository_sqlx::SqliteCommerceOrderStore;
-use std::sync::Arc;
 use sdkwork_payment_service::{
-    CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,
+    CreateOwnerRefundCommand, OrderPaymentReferenceQuery, RefundDetailQuery, RefundListPage,
+    RefundListQuery, RefundView,
 };
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
+use crate::order_reference::{
+    load_order_payment_reference_sqlite, order_status_is_refundable,
+};
 use crate::shared::{
     ensure_refund_status_transition, current_timestamp_string,
     money_to_minor_cents, resolve_refund_amount, stable_storage_id, store_error,
     validate_refund_bounds,
 };
 
-
-
 #[derive(Debug, Clone)]
 pub struct SqliteCommerceRefundStore {
     pool: SqlitePool,
-    order_store: Arc<SqliteCommerceOrderStore>,
 }
 
 impl SqliteCommerceRefundStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            pool: pool.clone(),
-            order_store: Arc::new(SqliteCommerceOrderStore::new(pool)),
-        }
+        Self { pool }
     }
 
     pub fn pool(&self) -> &SqlitePool {
@@ -51,20 +46,18 @@ impl SqliteCommerceRefundStore {
             .await
             .map_err(|error| store_error("failed to begin refund transaction", error))?;
 
-        let detail_query = OrderOwnerDetailQuery::new(
+        let reference_query = OrderPaymentReferenceQuery::new(
             &command.tenant_id,
             command.organization_id.as_deref(),
             &command.owner_user_id,
             &command.order_id,
         )?;
-        let Some(detail) = self
-            .order_store
-            .retrieve_owner_order(detail_query)
-            .await?
+        let Some(order_ref) =
+            load_order_payment_reference_sqlite(&mut tx, &reference_query).await?
         else {
             return Err(CommerceServiceError::not_found("order was not found"));
         };
-        if detail.summary.status != "paid" || detail.summary.pay_time.is_none() {
+        if !order_status_is_refundable(&order_ref.status, order_ref.pay_time.as_deref()) {
             return Err(CommerceServiceError::conflict(
                 "order is not eligible for refund",
             ));
@@ -72,14 +65,13 @@ impl SqliteCommerceRefundStore {
 
         let payment_attempt_id = match command.payment_attempt_id.as_deref() {
             Some(value) => value.to_owned(),
-            None => self
-                .find_latest_succeeded_payment_attempt(&command)
+            None => find_latest_succeeded_payment_attempt_in_tx(&mut tx, &command)
                 .await?
                 .ok_or_else(|| CommerceServiceError::not_found("payment attempt was not found"))?,
         };
 
-        let refund_amount = resolve_refund_amount(&command, &detail.summary.total_amount)?;
-        let total_minor = money_to_minor_cents(detail.summary.total_amount.as_str())?;
+        let refund_amount = resolve_refund_amount(&command, &order_ref.total_amount)?;
+        let total_minor = money_to_minor_cents(order_ref.total_amount.as_str())?;
         let refund_minor = money_to_minor_cents(&refund_amount)?;
         validate_refund_bounds(refund_minor, total_minor)?;
         let already_refunded_minor = sum_refunded_amount_in_tx(&mut tx, &command).await?;
@@ -237,6 +229,83 @@ impl SqliteCommerceRefundStore {
         row.map(map_refund_row).transpose()
     }
 
+    pub async fn mark_owner_refund_provider_submission_failed(
+        &self,
+        tenant_id: &str,
+        refund_id: &str,
+    ) -> Result<RefundView, CommerceServiceError> {
+        let now = current_timestamp_string();
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|error| store_error("failed to begin refund provider failure transaction", error))?;
+
+        let row = sqlx::query(
+            r#"
+            SELECT id, refund_no, order_id, payment_attempt_id,
+                   CAST(amount AS TEXT) AS amount, currency_code, status, refund_reason_code
+            FROM commerce_refund
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(refund_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to load refund for provider failure", error))?;
+
+        let Some(row) = row else {
+            return Err(CommerceServiceError::not_found("refund was not found"));
+        };
+
+        let current_status = string_cell(&row, "status");
+        ensure_refund_status_transition(Some(&current_status), "failed")?;
+
+        sqlx::query(
+            r#"
+            UPDATE commerce_refund
+            SET status = 'failed', updated_at = ?
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND id = CAST(? AS TEXT)
+              AND status = 'submitted'
+            "#,
+        )
+        .bind(&now)
+        .bind(tenant_id)
+        .bind(refund_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to mark refund provider submission failed", error))?;
+
+        let request_no = format!("refund-provider-failed-{refund_id}");
+        let idempotency_key = format!("refund-provider-failed-{refund_id}");
+        insert_refund_event(
+            &mut tx,
+            tenant_id,
+            None,
+            refund_id,
+            "provider_submission_failed",
+            "failed",
+            &request_no,
+            &idempotency_key,
+            &now,
+        )
+        .await?;
+
+        tx.commit()
+            .await
+            .map_err(|error| store_error("failed to commit refund provider failure transaction", error))?;
+
+        map_refund_row(row).map(|mut view| {
+            view.status = "failed".to_owned();
+            view
+        })
+    }
+
     async fn find_refund_by_idempotency(
         &self,
         command: &CreateOwnerRefundCommand,
@@ -261,32 +330,32 @@ impl SqliteCommerceRefundStore {
 
         row.map(map_refund_row).transpose()
     }
+}
 
-    async fn find_latest_succeeded_payment_attempt(
-        &self,
-        command: &CreateOwnerRefundCommand,
-    ) -> Result<Option<String>, CommerceServiceError> {
-        let row = sqlx::query(
-            r#"
-            SELECT id
-            FROM commerce_payment_attempt
-            WHERE tenant_id = CAST(? AS TEXT)
-              AND owner_user_id = CAST(? AS TEXT)
-              AND order_id = CAST(? AS TEXT)
-              AND status = 'succeeded'
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-            "#,
-        )
-        .bind(&command.tenant_id)
-        .bind(&command.owner_user_id)
-        .bind(&command.order_id)
-        .fetch_optional(self.pool())
-        .await
-        .map_err(|error| store_error("failed to load payment attempt for refund", error))?;
+async fn find_latest_succeeded_payment_attempt_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    command: &CreateOwnerRefundCommand,
+) -> Result<Option<String>, CommerceServiceError> {
+    let row = sqlx::query(
+        r#"
+        SELECT id
+        FROM commerce_payment_attempt
+        WHERE tenant_id = CAST(? AS TEXT)
+          AND owner_user_id = CAST(? AS TEXT)
+          AND order_id = CAST(? AS TEXT)
+          AND LOWER(COALESCE(status, '')) IN ('succeeded', 'success', 'paid')
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&command.tenant_id)
+    .bind(&command.owner_user_id)
+    .bind(&command.order_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| store_error("failed to load payment attempt for refund", error))?;
 
-        Ok(row.map(|row| string_cell(&row, "id")))
-    }
+    Ok(row.map(|row| string_cell(&row, "id")))
 }
 
 async fn sum_refunded_amount_in_tx(

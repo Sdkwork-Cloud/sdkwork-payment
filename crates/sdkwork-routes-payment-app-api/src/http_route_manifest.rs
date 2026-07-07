@@ -12,7 +12,7 @@
 //! 表示该路由接受 `Idempotency-Key` / `Sdkwork-Request-Hash` 命令头并参与幂等
 //! 仓储层去重。
 
-use sdkwork_web_core::{HttpMethod, HttpRoute, HttpRouteManifest, RouteAuth};
+use sdkwork_web_core::{HttpMethod, HttpRoute, HttpRouteManifest};
 
 /// payment app-api 路由前缀（`API_SPEC.md` §4.2.1 规定 app-api `MUST` 使用
 /// `/app/v3/api`）。
@@ -86,6 +86,12 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
+        "/app/v3/api/payments/checkout/{paymentId}",
+        "payments",
+        "payments.checkout.retrieve",
+    ),
+    HttpRoute::dual_token(
+        HttpMethod::Get,
         "/app/v3/api/payments/status/{paymentId}",
         "payments",
         "payments.status.retrieve",
@@ -128,47 +134,8 @@ const HTTP_ROUTES: &[HttpRoute] = &[
         // Deprecated 410 shim — live PSP webhooks: order POST /orders/payments/webhooks/{providerCode}
         "/app/v3/api/payments/webhooks/{providerCode}",
         "payments",
-        "payments.webhooks.receive",
+        "payments.webhooks.receiveDeprecated",
     ),
-    // === Recharge ===
-    HttpRoute::dual_token(
-        HttpMethod::Get,
-        "/app/v3/api/recharges/packages",
-        "recharges",
-        "recharges.packages.fetch",
-    ),
-    HttpRoute::dual_token(
-        HttpMethod::Get,
-        "/app/v3/api/recharges/settings",
-        "recharges",
-        "recharges.settings.fetch",
-    ),
-    HttpRoute::dual_token(
-        HttpMethod::Get,
-        "/app/v3/api/recharges/orders",
-        "recharges",
-        "recharges.orders.list",
-    ),
-    HttpRoute::dual_token(
-        HttpMethod::Post,
-        "/app/v3/api/recharges/orders",
-        "recharges",
-        "recharges.orders.submit",
-    )
-    .with_idempotent(true),
-    HttpRoute::dual_token(
-        HttpMethod::Get,
-        "/app/v3/api/recharges/orders/{orderId}",
-        "recharges",
-        "recharges.orders.retrieve",
-    ),
-    HttpRoute::dual_token(
-        HttpMethod::Post,
-        "/app/v3/api/recharges/orders/{orderId}/cancel",
-        "recharges",
-        "recharges.orders.cancel",
-    )
-    .with_idempotent(true),
     // === Refund ===
     HttpRoute::dual_token(
         HttpMethod::Post,
@@ -199,6 +166,7 @@ pub fn app_route_manifest() -> HttpRouteManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sdkwork_web_core::RouteAuth;
 
     #[test]
     fn manifest_declares_all_routes_with_dual_token_auth() {
@@ -262,42 +230,21 @@ mod tests {
             .filter(|route| route.idempotent)
             .map(|route| route.operation_id)
             .collect();
-        // 至少覆盖核心写操作：create payment / intent / refund / recharge
+        // 至少覆盖核心写操作：create payment / intent / refund
         assert!(idempotent_post_routes.contains(&"payments.create"));
         assert!(idempotent_post_routes.contains(&"payments.intents.create"));
         assert!(idempotent_post_routes.contains(&"refunds.create"));
-        assert!(idempotent_post_routes.contains(&"recharges.orders.submit"));
     }
 
     #[test]
-    fn manifest_declares_full_recharge_proxy_surface() {
-        // 防止 recharge_proxy_router 实际暴露的路径与 manifest 声明漂移：
-        // - GET  /app/v3/api/recharges/packages
-        // - GET  /app/v3/api/recharges/settings
-        // - GET  /app/v3/api/recharges/orders
-        // - POST /app/v3/api/recharges/orders
-        // - GET  /app/v3/api/recharges/orders/{orderId}
-        // - POST /app/v3/api/recharges/orders/{orderId}/cancel
+    fn manifest_excludes_recharge_routes() {
         let manifest = app_route_manifest();
-        let declared: std::collections::HashSet<(String, &str)> = manifest
-            .routes()
-            .iter()
-            .map(|route| (format!("{:?}", route.method), route.path))
-            .collect();
-        for (method, path) in [
-            ("Get", "/app/v3/api/recharges/packages"),
-            ("Get", "/app/v3/api/recharges/settings"),
-            ("Get", "/app/v3/api/recharges/orders"),
-            ("Post", "/app/v3/api/recharges/orders"),
-            ("Get", "/app/v3/api/recharges/orders/{orderId}"),
-            ("Post", "/app/v3/api/recharges/orders/{orderId}/cancel"),
-        ] {
-            let owned = (method.to_string(), path);
+        for route in manifest.routes() {
             assert!(
-                declared.contains(&owned),
-                "recharge proxy route {:?} {} must be declared in app-api manifest",
-                method,
-                path,
+                !route.path.contains("/recharges"),
+                "payment app-api must not declare recharge routes: {:?} {}",
+                route.method,
+                route.path,
             );
         }
     }

@@ -1,14 +1,16 @@
 use sdkwork_contract_service::{
     CommerceMoney, CommercePaymentStatus, CommerceServiceError,
 };
-use sdkwork_order_service::{
-    CancelOwnerOrderCommand, PayOwnerOrderCommand, PayOwnerOrderOutcome,
+use sdkwork_payment_service::{
+    CancelOrderPaymentsCommand, ConfirmOwnerOrderPaymentOutcome, PayOwnerOrderCommand,
+    PayOwnerOrderOutcome,
 };
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::order_reference::order_status_is_payable;
 use crate::owner_payment_params::owner_order_payment_params;
-use crate::shared::{payment_attempt_is_terminal_success, stable_storage_id, ConfirmOwnerOrderPaymentOutcome};
+use crate::shared::{payment_attempt_is_terminal_success, stable_storage_id};
 
 #[derive(Debug, Clone)]
 pub struct SqliteCommerceOwnerOrderPaymentStore {
@@ -20,9 +22,9 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         Self { pool }
     }
 
-    pub async fn cancel_owner_order_payments(
+    pub async fn cancel_order_payments(
         &self,
-        command: CancelOwnerOrderCommand,
+        command: CancelOrderPaymentsCommand,
     ) -> Result<(), CommerceServiceError> {
         let now = current_command_timestamp();
         // C1/C2 修复：取消操作必须在单事务内执行，且只能取消未终结状态的支付意图/尝试，
@@ -250,6 +252,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
                  callback_payload, request_no, idempotency_key, created_at, paid_at, updated_at)
             VALUES
                 (?, CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), ?, ?, ?, ?, ?, ?, 'CNY', ?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT (id) DO NOTHING
             "#,
         )
         .bind(&payment_attempt_id)
@@ -272,25 +275,24 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .await
         .map_err(|error| store_error("failed to insert owner order payment attempt", error))?;
 
+        let outcome = load_owner_payment_outcome_by_idempotency_in_tx(
+            &mut tx,
+            &command,
+            &order_sn,
+            order_subject.as_deref(),
+        )
+        .await?
+        .ok_or_else(|| {
+            CommerceServiceError::storage(
+                "owner order payment attempt was not persisted after insert",
+            )
+        })?;
+
         tx.commit().await.map_err(|error| {
             store_error("failed to commit owner order payment transaction", error)
         })?;
 
-        let payment_params = owner_order_payment_params(
-            &method.provider_code,
-            &order_sn,
-            order_subject.as_deref(),
-            &out_trade_no,
-        );
-
-        Ok(PayOwnerOrderOutcome {
-            amount: total_amount,
-            order_id: command.order_id,
-            out_trade_no,
-            payment_id: payment_attempt_id,
-            payment_method: method.method_key,
-            payment_params,
-        })
+        Ok(outcome)
     }
 
     pub async fn confirm_owner_order_payment(
@@ -420,13 +422,6 @@ struct OwnerPaymentMethod {
     provider_code: String,
 }
 
-fn order_status_is_payable(status: &str) -> bool {
-    matches!(
-        status.trim().to_ascii_lowercase().as_str(),
-        "draft" | "pending" | "pending_payment" | "unpaid" | "wait_pay"
-    )
-}
-
 fn current_command_timestamp() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -481,7 +476,8 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
                pa.out_trade_no,
                CAST(pa.amount AS TEXT) AS amount,
                pa.payment_method,
-               pa.provider_code
+               pa.provider_code,
+               pa.status
         FROM commerce_payment_intent pi
         INNER JOIN commerce_payment_attempt pa
             ON pa.payment_intent_id = pi.id
@@ -525,6 +521,7 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
         out_trade_no,
         payment_id: string_cell(&row, "payment_attempt_id"),
         payment_method: string_cell(&row, "payment_method"),
+        status: string_cell(&row, "status"),
         payment_params,
     }))
 }
@@ -537,7 +534,7 @@ async fn load_reusable_owner_payment_in_tx(
 ) -> Result<Option<PayOwnerOrderOutcome>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT pa.id, pa.out_trade_no, pa.amount, pa.payment_method, pa.provider_code
+        SELECT pa.id, pa.out_trade_no, pa.amount, pa.payment_method, pa.provider_code, pa.status
         FROM commerce_payment_attempt pa
         INNER JOIN commerce_order o
             ON o.id = pa.order_id
@@ -546,6 +543,7 @@ async fn load_reusable_owner_payment_in_tx(
         WHERE pa.tenant_id = CAST(? AS TEXT)
           AND pa.owner_user_id = CAST(? AS TEXT)
           AND pa.order_id = CAST(? AS TEXT)
+          AND pa.payment_method = CAST(? AS TEXT)
           AND LOWER(COALESCE(pa.status, '')) IN ('created', 'pending', 'processing')
         ORDER BY pa.created_at DESC, pa.id DESC
         LIMIT 1
@@ -554,6 +552,7 @@ async fn load_reusable_owner_payment_in_tx(
     .bind(&command.tenant_id)
     .bind(&command.owner_user_id)
     .bind(&command.order_id)
+    .bind(&command.payment_method)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|error| store_error("failed to load reusable owner payment", error))?;
@@ -578,6 +577,7 @@ async fn load_reusable_owner_payment_in_tx(
         out_trade_no,
         payment_id: string_cell(&row, "id"),
         payment_method: string_cell(&row, "payment_method"),
+        status: string_cell(&row, "status"),
         payment_params,
     }))
 }

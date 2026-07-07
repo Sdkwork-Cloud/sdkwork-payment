@@ -1,6 +1,14 @@
 use crate::{CreatePaymentIntentCommand, CreateRefundCommand, PaymentIntentDraft};
 use sdkwork_contract_service::CommerceServiceError;
 
+mod owner_order_payment;
+
+pub use owner_order_payment::{
+    ConfirmOwnerOrderPaymentOutcome, OrderPaymentSettlementAttempt,
+    OwnerOrderPaymentConfirmationFuture, OwnerOrderPaymentConfirmationPort,
+    OWNER_ORDER_PAYMENT_CONFIRMATION_PORT,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PaymentProviderCommand {
     CreatePaymentIntent,

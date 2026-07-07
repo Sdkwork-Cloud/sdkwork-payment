@@ -1670,9 +1670,11 @@ dependencies = [
  "base64",
  "chrono",
  "rand_core 0.6.4",
+ "rsa",
  "sdkwork-database-id",
  "sdkwork-iam-context-service",
  "sdkwork-iam-module-registry",
+ "serde_json",
  "sha2",
  "sqlx",
  "uuid",
@@ -1735,30 +1737,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sdkwork-order-repository-sqlx"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "sdkwork-contract-service",
- "sdkwork-order-service",
- "sdkwork-payment-service",
- "sdkwork-utils-rust",
- "serde",
- "serde_json",
- "sqlx",
- "uuid",
-]
-
-[[package]]
-name = "sdkwork-order-service"
-version = "0.1.0"
-dependencies = [
- "sdkwork-contract-service",
- "sdkwork-utils-rust",
- "tracing",
-]
-
-[[package]]
 name = "sdkwork-payment-database-host"
 version = "0.1.0"
 dependencies = [
@@ -1795,7 +1773,7 @@ dependencies = [
  "ring",
  "rsa",
  "sdkwork-contract-service",
- "sdkwork-order-service",
+ "sdkwork-payment-service",
  "serde",
  "serde_json",
  "sha2",
@@ -1809,8 +1787,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "sdkwork-contract-service",
- "sdkwork-order-repository-sqlx",
- "sdkwork-order-service",
+ "sdkwork-payment-providers",
  "sdkwork-payment-service",
  "sdkwork-utils-rust",
  "serde",
@@ -1855,13 +1832,10 @@ name = "sdkwork-routes-payment-app-api"
 version = "0.1.0"
 dependencies = [
  "axum",
- "reqwest",
  "sdkwork-contract-service",
  "sdkwork-database-sqlx",
  "sdkwork-iam-context-service",
  "sdkwork-iam-web-adapter",
- "sdkwork-order-repository-sqlx",
- "sdkwork-order-service",
  "sdkwork-payment-providers",
  "sdkwork-payment-repository-sqlx",
  "sdkwork-payment-service",

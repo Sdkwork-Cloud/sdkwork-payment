@@ -14,6 +14,7 @@ pub async fn cancel_provider_payment(
     registry: &PaymentProviderRegistry,
     provider_code: &str,
     out_trade_no: &str,
+    provider_transaction_id: Option<&str>,
 ) -> Result<(), CommerceServiceError> {
     let provider_code = normalize_provider_code(provider_code);
     if provider_code == "sandbox" || provider_code.is_empty() {
@@ -24,9 +25,15 @@ pub async fn cancel_provider_payment(
             "payment provider {provider_code} is not configured"
         ))
     })?;
+    let cancel_reference = match provider_code.as_str() {
+        "stripe" => provider_transaction_id
+            .filter(|value| value.starts_with("pi_"))
+            .unwrap_or(out_trade_no),
+        _ => out_trade_no,
+    };
     adapter
         .cancel_payment_intent(PaymentCancelPaymentIntentRequest {
-            payment_intent_id: Some(out_trade_no.to_owned()),
+            payment_intent_id: Some(cancel_reference.to_owned()),
             reason: None,
             metadata: json!({}),
         })

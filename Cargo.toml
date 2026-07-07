@@ -53,8 +53,6 @@ sdkwork-database-config = { path = "../sdkwork-database/crates/sdkwork-database-
 sdkwork-database-lifecycle = { path = "../sdkwork-database/crates/sdkwork-database-lifecycle" }
 sdkwork-database-spi = { path = "../sdkwork-database/crates/sdkwork-database-spi" }
 sdkwork-database-sqlx = { path = "../sdkwork-database/crates/sdkwork-database-sqlx" }
-sdkwork_order_repository_sqlx = { path = "../sdkwork-order/crates/sdkwork-order-repository-sqlx", package = "sdkwork-order-repository-sqlx" }
-sdkwork_order_service = { path = "../sdkwork-order/crates/sdkwork-order-service", package = "sdkwork-order-service" }
 sdkwork_payment_service = { path = "crates/sdkwork-payment-service", package = "sdkwork-payment-service" }
 sdkwork_payment_providers = { path = "crates/sdkwork-payment-providers", package = "sdkwork-payment-providers" }
 sdkwork_payment_repository_sqlx = { path = "crates/sdkwork-payment-repository-sqlx", package = "sdkwork-payment-repository-sqlx" }

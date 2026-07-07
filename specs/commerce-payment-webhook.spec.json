@@ -28,10 +28,14 @@
     "note": "Ingest persists commerce_payment_webhook_event and updates attempt status; no commerce_order JOIN"
   },
   "providerNotifyUrls": {
-    "webhookBaseUrlEnvPrimary": "ORDER_PAYMENT_WEBHOOK_BASE_URL",
-    "webhookBaseUrlEnvLegacyAlias": "PAYMENT_WEBHOOK_BASE_URL",
+    "webhookBaseUrlEnv": "ORDER_PAYMENT_WEBHOOK_BASE_URL",
     "pathPattern": "{base}/app/v3/api/orders/payments/webhooks/{providerCode}",
     "builder": "sdkwork-payment-providers::build_order_payment_webhook_url"
+  },
+  "backendAdminWebhookOps": {
+    "list": "GET /backend/v3/api/payments/webhook_events",
+    "replay": "POST /backend/v3/api/payments/webhook_events/{eventId}/replays",
+    "replayScope": "Re-applies stored payment attempt status only; order settlement via order payment_confirmations"
   },
   "forbiddenInPayment": [
     "Live PSP webhook HTTP handlers (except deprecated 410 shim)",

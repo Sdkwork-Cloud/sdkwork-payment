@@ -57,7 +57,9 @@ pub struct CreateOwnerPaymentAttemptOutcome {
     pub out_trade_no: String,
     pub payment_intent_id: String,
     pub payment_method: String,
+    pub provider_code: String,
     pub status: String,
+    pub payment_params: std::collections::BTreeMap<String, String>,
 }
 
 impl PaymentIntentDetailQuery {

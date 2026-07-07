@@ -1,10 +1,15 @@
 mod intent;
+mod owner_payment;
 mod refund;
 
 pub use intent::{
     CancelOwnerPaymentIntentCommand, CreateOwnerPaymentAttemptCommand,
     CreateOwnerPaymentAttemptOutcome, CreateOwnerPaymentIntentCommand, PaymentIntentDetailQuery,
     PaymentIntentView,
+};
+pub use owner_payment::{
+    CancelOrderPaymentsCommand, OrderPaymentReferenceQuery, OrderPaymentReferenceSnapshot,
+    PayOwnerOrderCommand, PayOwnerOrderOutcome,
 };
 pub use refund::{
     CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,
@@ -24,29 +29,19 @@ pub struct PaymentRecordListPage {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RechargePackageListQuery {
-    pub organization_id: Option<String>,
-    pub tenant_id: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RechargeSettingsQuery {
-    pub organization_id: Option<String>,
-    pub tenant_id: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CheckoutStatusQuery {
-    pub order_no: String,
-    pub organization_id: Option<String>,
-    pub owner_user_id: String,
-    pub tenant_id: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaymentMethodListQuery {
     pub organization_id: Option<String>,
     pub tenant_id: String,
+    pub offset: i64,
+    pub limit: i64,
+    /// Filters methods that expose the given channel `scene_code` (e.g. `web`, `app`).
+    pub scene_code_filter: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentMethodListPage {
+    pub items: Vec<PaymentMethodItem>,
+    pub total_items: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,8 +64,37 @@ impl PaymentMethodListQuery {
         Ok(Self {
             organization_id: optional_text(organization_id),
             tenant_id: tenant_id.trim().to_string(),
+            offset: 0,
+            limit: 20,
+            scene_code_filter: None,
         })
     }
+
+    pub fn with_paging(mut self, offset: i64, limit: i64) -> Self {
+        self.offset = offset.max(0);
+        self.limit = limit.clamp(1, 200);
+        self
+    }
+
+    pub fn with_scene_code_filter(mut self, scene_code: Option<String>) -> Self {
+        self.scene_code_filter = scene_code;
+        self
+    }
+}
+
+/// Map API `clientType` wire values to persistence `scene_code` filters.
+pub fn scene_code_filter_from_client_type(client_type: Option<&str>) -> Option<String> {
+    let value = client_type?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(match value.to_ascii_lowercase().as_str() {
+        "pc" | "web" => "web".to_owned(),
+        "app" => "app".to_owned(),
+        "mini_program" | "miniprogram" => "mini_program".to_owned(),
+        "api" => "api".to_owned(),
+        other => other.to_owned(),
+    })
 }
 
 /// Map persistence `scene_code` values to API `productTypes` wire codes.
@@ -185,68 +209,6 @@ pub struct PaymentRecordStatistics {
     pub failed_payments: i64,
     pub timeout_payments: i64,
     pub closed_payments: i64,
-}
-
-impl RechargePackageListQuery {
-    pub fn new(
-        tenant_id: &str,
-        organization_id: Option<&str>,
-    ) -> Result<Self, sdkwork_contract_service::CommerceServiceError> {
-        crate::validation::require_non_empty("tenant_id", tenant_id)?;
-
-        Ok(Self {
-            organization_id: optional_text(organization_id),
-            tenant_id: tenant_id.trim().to_string(),
-        })
-    }
-
-    pub fn public() -> Self {
-        Self {
-            organization_id: None,
-            tenant_id: String::new(),
-        }
-    }
-}
-
-impl RechargeSettingsQuery {
-    pub fn new(
-        tenant_id: &str,
-        organization_id: Option<&str>,
-    ) -> Result<Self, sdkwork_contract_service::CommerceServiceError> {
-        crate::validation::require_non_empty("tenant_id", tenant_id)?;
-
-        Ok(Self {
-            organization_id: optional_text(organization_id),
-            tenant_id: tenant_id.trim().to_string(),
-        })
-    }
-
-    pub fn public() -> Self {
-        Self {
-            organization_id: None,
-            tenant_id: String::new(),
-        }
-    }
-}
-
-impl CheckoutStatusQuery {
-    pub fn new(
-        tenant_id: &str,
-        organization_id: Option<&str>,
-        owner_user_id: &str,
-        order_no: &str,
-    ) -> Result<Self, sdkwork_contract_service::CommerceServiceError> {
-        crate::validation::require_non_empty("tenant_id", tenant_id)?;
-        crate::validation::require_non_empty("owner_user_id", owner_user_id)?;
-        crate::validation::require_non_empty("order_no", order_no)?;
-
-        Ok(Self {
-            order_no: order_no.trim().to_string(),
-            organization_id: optional_text(organization_id),
-            owner_user_id: owner_user_id.trim().to_string(),
-            tenant_id: tenant_id.trim().to_string(),
-        })
-    }
 }
 
 impl PaymentRecordListQuery {

@@ -23,5 +23,5 @@ serde_json.workspace = true
 sha2.workspace = true
 urlencoding.workspace = true
 sdkwork_contract_service.workspace = true
-sdkwork_order_service.workspace = true
+sdkwork_payment_service.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

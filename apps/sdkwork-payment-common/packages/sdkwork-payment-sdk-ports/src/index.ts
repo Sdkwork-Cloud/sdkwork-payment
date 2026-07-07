@@ -23,6 +23,11 @@
       retrieveByOutTradeNo: true,
     },
   },
+  refunds: {
+    create: true,
+    list: true,
+    retrieve: true,
+  },
 } as const;
 
 export type PaymentRequestParams = Record<string, unknown>;
@@ -43,4 +48,5 @@ export type ClientFromMethodTree<TTree extends MethodTree> = {
 
 export type PaymentAppSdkClient = {
   commerce: ClientFromMethodTree<{ payments: (typeof APP_PAYMENT_METHOD_TREE)["payments"] }>;
+  refunds: ClientFromMethodTree<(typeof APP_PAYMENT_METHOD_TREE)["refunds"]>;
 };

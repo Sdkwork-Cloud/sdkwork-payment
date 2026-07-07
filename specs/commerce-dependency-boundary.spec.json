@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.commerce.dependency-boundary.spec",
+  "capability": "payment",
+  "domain": "commerce",
+  "principle": "sdkwork-payment MUST NOT depend on sdkwork-order crates or packages",
+  "allowedDependencyDirection": [
+    "order -> payment (in-process ports and HTTP SDK consumers)",
+    "payment -> commerce_order table (read-only FK validation SQL in payment-repository-sqlx)"
+  ],
+  "forbiddenDependencies": [
+    {
+      "from": "sdkwork-payment",
+      "to": "sdkwork-order-service",
+      "reason": "Payment executor owns pay/refund/webhook-ingest ports; order orchestrates settlement"
+    },
+    {
+      "from": "sdkwork-payment",
+      "to": "sdkwork-order-repository-sqlx",
+      "reason": "Order store types must not leak into payment repository"
+    }
+  ],
+  "canonicalSharedTypes": {
+    "crate": "sdkwork-payment-service",
+    "types": [
+      "PayOwnerOrderCommand",
+      "PayOwnerOrderOutcome",
+      "CancelOrderPaymentsCommand",
+      "OrderPaymentReferenceQuery",
+      "OrderPaymentReferenceSnapshot",
+      "OwnerOrderPaymentConfirmationPort",
+      "ConfirmOwnerOrderPaymentOutcome",
+      "OrderPaymentSettlementAttempt"
+    ],
+    "orderReExport": "sdkwork-order-service re-exports payment types for order routers only"
+  },
+  "repositoryPatterns": {
+    "orderReference": "crates/sdkwork-payment-repository-sqlx/src/order_reference.rs",
+    "paymentMethods": "crates/sdkwork-payment-repository-sqlx/src/payment_method.rs"
+  },
+  "verification": [
+    "rg 'sdkwork_order' crates/ Cargo.toml must return no matches in sdkwork-payment workspace",
+    "cargo test --workspace in sdkwork-payment",
+    "cargo build -p sdkwork-routes-order-app-api in sdkwork-order"
+  ]
+}

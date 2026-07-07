@@ -1,5 +1,4 @@
 use axum::http::HeaderValue;
-use axum::Router;
 use sdkwork_payment_gateway_assembly::{assemble_application_router, gateway_contract_fallback_config};
 use sdkwork_payment_service_host::PaymentServiceHost;
 use sdkwork_web_bootstrap::{service_router, ServiceRouterConfig};

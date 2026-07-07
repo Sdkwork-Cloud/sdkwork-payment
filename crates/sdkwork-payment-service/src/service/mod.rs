@@ -9,7 +9,6 @@ pub fn payment_service_contract() -> CommerceServiceContract {
             "payments.intents.attempts.create",
             "payments.providerAccounts.create",
             "refunds.create",
-            "recharges.orders.create",
         ],
         vec![
             "payments.methods.list",
@@ -25,9 +24,6 @@ pub fn payment_service_contract() -> CommerceServiceContract {
             "payments.reconciliationRuns.list",
             "refunds.list",
             "refunds.retrieve",
-            "recharges.packages.list",
-            "recharges.orders.list",
-            "recharges.orders.retrieve",
             "commerceReports.paymentReconciliation.retrieve",
             "commerceReports.refunds.list",
         ],

@@ -110,6 +110,15 @@ pub(crate) fn validate_write_payload(
     Ok(write_headers)
 }
 
+fn write_command_header_error_to_app_response(error: WriteCommandHeaderError) -> Response {
+    match error {
+        WriteCommandHeaderError::MissingHeader(name) => {
+            command_header_error_response(format!("{name} header is required"))
+        }
+        WriteCommandHeaderError::InvalidHeader(message) => validation_response(message),
+    }
+}
+
 #[allow(clippy::result_large_err)]
 pub(crate) fn validate_app_write_payload(
     headers: &HeaderMap,
@@ -152,38 +161,6 @@ pub(crate) fn parse_required_write_command_headers(
         request_hash,
         request_no,
     })
-}
-
-#[allow(clippy::result_large_err)]
-pub(crate) fn required_app_write_command_headers(
-    headers: &HeaderMap,
-    fallback_request_no: impl FnOnce(&str) -> String,
-) -> Result<AppWriteCommandHeaders, Response> {
-    parse_required_write_command_headers(headers, fallback_request_no)
-        .map_err(write_command_header_error_to_app_response)
-}
-
-fn write_command_header_error_to_app_response(error: WriteCommandHeaderError) -> Response {
-    match error {
-        WriteCommandHeaderError::MissingHeader(name) => {
-            command_header_error_response(format!("{name} header is required"))
-        }
-        WriteCommandHeaderError::InvalidHeader(message) => validation_response(message),
-    }
-}
-
-#[allow(clippy::result_large_err)]
-pub(crate) fn ensure_request_hash_matches(
-    expected_hash: &str,
-    provided_hash: &str,
-) -> Result<(), Response> {
-    if expected_hash.trim() == provided_hash.trim() {
-        return Ok(());
-    }
-
-    Err(validation_response(
-        "Sdkwork-Request-Hash does not match the command payload",
-    ))
 }
 
 #[allow(clippy::result_large_err)]
@@ -231,7 +208,7 @@ mod tests {
         headers.insert(IDEMPOTENCY_KEY_HEADER, HeaderValue::from_static("idem-1"));
         headers.insert(REQUEST_HASH_HEADER, HeaderValue::from_static("hash-1"));
 
-        let parsed = required_app_write_command_headers(&headers, |_| "request-1".to_owned())
+        let parsed = parse_required_write_command_headers(&headers, |_| "request-1".to_owned())
             .expect("headers");
         assert_eq!(parsed.idempotency_key, "idem-1");
         assert_eq!(parsed.request_hash, "hash-1");
@@ -271,8 +248,20 @@ mod tests {
     }
 
     #[test]
-    fn ensure_request_hash_matches_rejects_mismatch() {
-        let error = ensure_request_hash_matches("expected", "provided").expect_err("mismatch");
-        assert_eq!(error.status(), axum::http::StatusCode::BAD_REQUEST);
+    fn validate_write_payload_rejects_request_hash_mismatch() {
+        let mut headers = HeaderMap::new();
+        headers.insert(IDEMPOTENCY_KEY_HEADER, HeaderValue::from_static("idem-1"));
+        headers.insert(REQUEST_HASH_HEADER, HeaderValue::from_static("wrong"));
+        let error = validate_write_payload(
+            &headers,
+            "scope",
+            &serde_json::json!({"orderId":"o-1"}),
+            |_| "request-1".to_owned(),
+        )
+        .expect_err("mismatch");
+        assert!(matches!(
+            error,
+            WriteCommandHeaderError::InvalidHeader(_)
+        ));
     }
 }

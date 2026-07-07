@@ -15,7 +15,7 @@
 //! 去重。DELETE 与 replay action 不标记 idempotent（HTTP DELETE 本身幂等；
 //! replay 是递增 retries 的动作，非幂等）。
 
-use sdkwork_web_core::{HttpMethod, HttpRoute, HttpRouteManifest, RouteAuth};
+use sdkwork_web_core::{HttpMethod, HttpRoute, HttpRouteManifest};
 
 /// payment backend-api 路由前缀（`API_SPEC.md` §4.2.1 规定 backend-api `MUST`
 /// 使用 `/backend/v3/api`）。
@@ -166,6 +166,7 @@ pub fn backend_route_manifest() -> HttpRouteManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sdkwork_web_core::RouteAuth;
 
     #[test]
     fn manifest_declares_all_routes_with_dual_token_auth() {

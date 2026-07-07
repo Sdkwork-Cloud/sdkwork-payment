@@ -31,15 +31,44 @@ pub async fn ingest_provider_webhook_postgres(
     }))
         .map_err(|error| CommerceServiceError::storage(format!("webhook payload json: {error}")))?;
 
+    let out_trade_no = command.out_trade_no.as_deref().unwrap_or("").trim();
+    if out_trade_no.is_empty() {
+        if let Some(tenant_id) = command.tenant_id.as_deref().filter(|value| !value.is_empty()) {
+            let mut tx = pool.begin().await.map_err(|error| {
+                store_error("failed to begin unmatched webhook ingestion transaction", error)
+            })?;
+            sqlx::query(
+                r#"
+                INSERT INTO commerce_payment_webhook_event
+                    (id, tenant_id, event_id, event_type, provider_code, payload, status, received_at, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, 'unmatched', $7, $8, $9)
+                ON CONFLICT (tenant_id, event_id) DO NOTHING
+                "#,
+            )
+            .bind(&event_id)
+            .bind(tenant_id)
+            .bind(&command.provider_event_id)
+            .bind(command.event_type.as_deref().unwrap_or("payment"))
+            .bind(&command.provider_code)
+            .bind(&payload_json)
+            .bind(&now)
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error("failed to insert unmatched webhook event", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit unmatched webhook ingestion transaction", error)
+            })?;
+            return Ok(empty_ingest_outcome(event_id, false));
+        }
+        return Ok(empty_ingest_outcome(event_id, false));
+    }
+
     let mut tx = pool
         .begin()
         .await
         .map_err(|error| store_error("failed to begin webhook ingestion transaction", error))?;
-
-    let out_trade_no = command.out_trade_no.as_deref().unwrap_or("").trim();
-    if out_trade_no.is_empty() {
-        return Ok(empty_ingest_outcome(event_id, false));
-    }
 
     let (tenant_id, _) = match load_attempt_by_out_trade_no_postgres(&mut tx, out_trade_no).await? {
         Some(context) => context,
@@ -71,10 +100,32 @@ pub async fn ingest_provider_webhook_postgres(
     .map_err(|error| store_error("failed to insert webhook event", error))?;
 
     if insert.rows_affected() == 0 {
+        let (payment_attempt_id, applied_status) = apply_webhook_payment_status_postgres(
+            &mut tx,
+            &command.provider_code,
+            command.out_trade_no.as_deref(),
+            command.payment_status.as_deref(),
+            &now,
+        )
+        .await?;
+
+        let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
+            load_payment_webhook_attempt_context_by_out_trade_no_postgres(&mut tx, out_trade_no)
+                .await?
+        } else {
+            None
+        };
+
         tx.commit()
             .await
             .map_err(|error| store_error("failed to commit webhook idempotency replay", error))?;
-        return Ok(empty_ingest_outcome(event_id, true));
+        return Ok(IngestProviderWebhookOutcome {
+            webhook_event_id: event_id,
+            replayed: true,
+            payment_attempt_id,
+            applied_status,
+            payment_attempt_context,
+        });
     }
 
     let (payment_attempt_id, applied_status) = apply_webhook_payment_status_postgres(
@@ -118,7 +169,7 @@ pub async fn ingest_provider_webhook_postgres(
     })
 }
 
-async fn apply_webhook_payment_status_postgres(
+pub(crate) async fn apply_webhook_payment_status_postgres(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     provider_code: &str,
     out_trade_no: Option<&str>,
@@ -187,6 +238,7 @@ async fn apply_webhook_payment_status_postgres(
         WHERE pi.id = (
             SELECT payment_intent_id FROM commerce_payment_attempt WHERE id = CAST($3 AS TEXT)
         )
+          AND LOWER(COALESCE(pi.status, '')) IN ('created', 'pending', 'processing', 'refunding')
         "#,
     )
     .bind(target_status)

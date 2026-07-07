@@ -88,6 +88,20 @@ fn payment_provider_contract_exposes_required_commands() {
 fn validates_payment_wire_transitions() {
     assert!(validate_payment_wire_transition("pending", "canceled").is_ok());
     assert!(validate_payment_wire_transition("succeeded", "pending").is_err());
+    assert!(validate_payment_wire_transition("succeeded", "refunding").is_ok());
+}
+
+#[test]
+fn payment_status_refunding_round_trips() {
+    assert_eq!(PaymentStatus::Refunding.as_wire(), "refunding");
+    assert_eq!(
+        PaymentStatus::from_wire("refunding").unwrap(),
+        PaymentStatus::Refunding
+    );
+    assert_eq!(
+        PaymentStatus::from_wire("processing").unwrap(),
+        PaymentStatus::Pending
+    );
 }
 
 #[test]

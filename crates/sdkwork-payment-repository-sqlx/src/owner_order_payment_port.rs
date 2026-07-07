@@ -1,4 +1,4 @@
-use sdkwork_order_service::{
+use sdkwork_payment_service::{
     ConfirmOwnerOrderPaymentOutcome, OwnerOrderPaymentConfirmationFuture,
     OwnerOrderPaymentConfirmationPort,
 };
@@ -16,22 +16,14 @@ impl OwnerOrderPaymentConfirmationPort for SqliteCommerceOwnerOrderPaymentStore 
         order_id: &'a str,
     ) -> OwnerOrderPaymentConfirmationFuture<'a, ConfirmOwnerOrderPaymentOutcome> {
         Box::pin(async move {
-            let outcome = SqliteCommerceOwnerOrderPaymentStore::confirm_owner_order_payment(
+            SqliteCommerceOwnerOrderPaymentStore::confirm_owner_order_payment(
                 self,
                 tenant_id,
                 organization_id,
                 owner_user_id,
                 order_id,
             )
-            .await?;
-            Ok(ConfirmOwnerOrderPaymentOutcome {
-                tenant_id: outcome.tenant_id,
-                organization_id: outcome.organization_id,
-                owner_user_id: outcome.owner_user_id,
-                order_id: outcome.order_id,
-                paid_at: outcome.paid_at,
-                replayed: outcome.replayed,
-            })
+            .await
         })
     }
 }
@@ -45,22 +37,14 @@ impl OwnerOrderPaymentConfirmationPort for PostgresCommerceOwnerOrderPaymentStor
         order_id: &'a str,
     ) -> OwnerOrderPaymentConfirmationFuture<'a, ConfirmOwnerOrderPaymentOutcome> {
         Box::pin(async move {
-            let outcome = PostgresCommerceOwnerOrderPaymentStore::confirm_owner_order_payment(
+            PostgresCommerceOwnerOrderPaymentStore::confirm_owner_order_payment(
                 self,
                 tenant_id,
                 organization_id,
                 owner_user_id,
                 order_id,
             )
-            .await?;
-            Ok(ConfirmOwnerOrderPaymentOutcome {
-                tenant_id: outcome.tenant_id,
-                organization_id: outcome.organization_id,
-                owner_user_id: outcome.owner_user_id,
-                order_id: outcome.order_id,
-                paid_at: outcome.paid_at,
-                replayed: outcome.replayed,
-            })
+            .await
         })
     }
 }

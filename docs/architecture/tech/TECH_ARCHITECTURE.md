@@ -8,7 +8,9 @@ Updated: 2026-07-06
 
 ## 1. Architecture Overview
 
-`sdkwork-payment` owns the **payment executor** for the SDKWork commerce domain: payment intents, attempts, owner-order pay side-effects (via order orchestration), refunds, backend admin (methods, providers, channels, webhook event storage, reconciliation). PSP webhooks are **HTTP-owned by sdkwork-order**; payment exposes ingest ports only. Deprecated recharge HTTP proxy is opt-in only.
+`sdkwork-payment` owns the **payment executor** for the SDKWork commerce domain: payment intents, attempts, owner-order pay side-effects (via order orchestration), refunds, backend admin (methods, providers, channels, webhook event storage, reconciliation). PSP webhooks are **HTTP-owned by sdkwork-order**; payment exposes ingest ports only. Points recharge is **not** in this repository — use `sdkwork-order` (`/app/v3/api/recharges/*`).
+
+**Dependency rule:** `sdkwork-payment` must not take a crate dependency on `sdkwork-order`. Order orchestration calls payment in-process; payment validates `orderId` via read-only SQL in `order_reference.rs` and owns `commerce_payment_method` listing. Shared pay/settlement types are defined in `sdkwork-payment-service`. See `specs/commerce-dependency-boundary.spec.json`.
 
 ## Capability stack
 
@@ -25,7 +27,7 @@ Updated: 2026-07-06
 
 ## API ownership
 
-- App API prefix: `/app/v3/api/payments` (deprecated `/app/v3/api/recharges/*` proxy opt-in only)
+- App API prefix: `/app/v3/api/payments`, `/app/v3/api/refunds`
 - Backend API prefix: `/backend/v3/api/payments`
 - Table prefix: `commerce_`
 
@@ -50,24 +52,26 @@ Errors use HTTP 4xx/5xx `application/problem+json` (`SdkWorkProblemDetail`) with
 | `wechat_pay` | Native → `code_url` | out-trade-no query | close | domestic refund | platform RSA + AES-GCM |
 
 - Registry: `PaymentProviderRegistry::from_env()` reads deployment env vars; tenant-scoped `commerce_payment_provider_account` rows override per provider via `secret_ref` (env var name), `webhook_secret_ref`, `certificate_ref`, and `metadata` JSON.
-- Pay flow: after repository persists intent/attempt, `enrich_pay_owner_order_outcome` calls the configured PSP and returns real cashier params.
-- Close: `POST /payments/{paymentId}/close` cancels the PSP intent (when configured) before marking attempt/intent `canceled` in the database.
-- Refund: `POST /refunds` persists the refund row, then submits `create_refund` to the PSP using the linked payment attempt `out_trade_no`.
-- Webhook: order gateway `POST /app/v3/api/orders/payments/webhooks/{providerCode}` calls payment ingest ports; legacy payment path returns 410 Gone.
+- Pay flow: after repository persists intent/attempt, shared `enrich_owner_order_payment_*` (`owner_order_checkout.rs`) calls the configured PSP and merges `providerTransactionId` / `providerStatus` into attempt `callback_payload` for later close/cancel.
+- Reconcile (app): `POST /payments/reconciliations` is a **lookup** command — returns the latest payment record for `orderId` or `outTradeNo`; PSP status repair is not performed inline (use backend webhook replay or order settlement).
+- Close: `POST /payments/{paymentId}/close` marks attempt/intent `canceled` in the database first, then best-effort PSP cancel (Stripe uses `providerTransactionId` from attempt `callback_payload` when present).
+- Refund: `POST /refunds` persists the refund row, then submits `create_refund` to the PSP with up to three transient retries; terminal PSP failure marks the refund `failed` in DB and returns an error response.
+- Checkout polling: `GET /payments/checkout/{paymentId}` re-enriches pending attempts via PSP for cashier/QR parameters.
+- Webhook ingest: order gateway passes `tenantId` scope; events without resolvable `outTradeNo` are persisted as `unmatched` when tenant scope is provided. Intent status updates are guarded to non-terminal states.
 - Sandbox: when `provider_code` is `sandbox` or PSP credentials are absent, local cashier URLs from `sdkwork-utils-rust` are used without external HTTP.
 
 ### Provider and async processing
 
 - `SandboxPaymentProvider` remains for contract tests and offline draft generation.
-- `process_queued_webhook_events` (`sqlite_webhook_worker.rs`) drains `queued` rows for admin replay; returns `payment_attempt_contexts` for the **order** gateway to settle in-process.
+- Backend admin `webhook_events` replay re-applies stored payment attempt status inline; order settlement uses order `payment_confirmations`.
 
 ### Webhook replay (admin)
 
-Replay increments `retries` atomically with `COALESCE(retries, 0) < 5`; limit exceeded → 409, missing event → 404.
+Replay increments `retries` atomically with `COALESCE(retries, 0) < 5`; limit exceeded → 409, missing event → 404. `POST .../webhook_events/{eventId}/replay` requires `Idempotency-Key` and `Sdkwork-Request-Hash`; response uses command envelope (`data.accepted`).
 
 ### Payment methods catalog
 
-`GET /payments/methods` joins `commerce_payment_method` with active `commerce_payment_channel.scene_code` values and maps scenes to API `productTypes` (`web` → `pc`, `app`, `mini_program`, `api`). Optional `clientType` filters by available product type codes.
+`GET /payments/methods` joins `commerce_payment_method` with active `commerce_payment_channel.scene_code` values, maps scenes to API `productTypes` (`web` → `pc`, `app`, `mini_program`, `api`), and paginates in SQL (`page`/`pageSize`, `data.items` + `pageInfo`). Optional `clientType` filters by channel `scene_code` in the repository layer (not in-process).
 
 ### Route manifest
 
@@ -78,7 +82,7 @@ Manifests are injected via `WebFrameworkLayer::with_route_manifest`. Idempotent 
 
 ### Pagination (`PAGINATION_SPEC.md` §2)
 
-List/search endpoints push `page` / `pageSize` to SQL `LIMIT`/`OFFSET` with `COUNT(*) OVER()` (or equivalent aggregate) in the repository layer. Process-memory `fetch_all` + `skip`/`take` is forbidden on P0 paths.
+List/search endpoints push `page` / `pageSize` to SQL `LIMIT`/`OFFSET` with `COUNT(*) OVER()` (or equivalent aggregate) in the repository layer. Covered paths include payment records, order payments, refunds, backend admin lists, and **app payment methods**. Process-memory `fetch_all` + `skip`/`take` is forbidden on P0 paths.
 
 ### Idempotency and transactions
 
@@ -102,7 +106,6 @@ DDL baselines: `database/ddl/baseline/sqlite/` and `database/ddl/baseline/postgr
 | Variable | Provider | Purpose |
 | --- | --- | --- |
 | `ORDER_PAYMENT_WEBHOOK_BASE_URL` | all | Base URL for `{base}/app/v3/api/orders/payments/webhooks/{providerCode}` notify endpoints (order gateway) |
-| `PAYMENT_WEBHOOK_BASE_URL` | all | **Deprecated alias** for `ORDER_PAYMENT_WEBHOOK_BASE_URL` |
 | `STRIPE_SECRET_KEY` | stripe | API secret |
 | `STRIPE_WEBHOOK_SECRET` | stripe | Webhook HMAC verification |
 | `ALIPAY_APP_ID` | alipay | Application ID |
@@ -118,7 +121,7 @@ DDL baselines: `database/ddl/baseline/sqlite/` and `database/ddl/baseline/postgr
 
 ### Tenant provider accounts (`commerce_payment_provider_account`)
 
-Backend admin upserts provider accounts with `secretRef` pointing to an **environment variable name** (never plaintext secrets in DB). At runtime pay/close/refund resolve the active account for `(tenant_id, organization_id, provider_code)` and merge credentials into the PSP registry.
+Backend admin upserts (methods, provider accounts, channels, route rules) and reconciliation run creation use `success_command_accepted` (`data.accepted` + optional `resourceId`). Provider accounts use `secretRef` pointing to an **environment variable name** (never plaintext secrets in DB). At runtime pay/close/refund resolve the active account for `(tenant_id, organization_id, provider_code)` and merge credentials into the PSP registry.
 
 | Field | Purpose |
 | --- | --- |

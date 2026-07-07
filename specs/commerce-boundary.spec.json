@@ -8,6 +8,7 @@
     "commerce_payment_intent",
     "commerce_payment_attempt",
     "commerce_payment_record",
+    "commerce_payment_method",
     "commerce_refund",
     "commerce_payment_provider_account",
     "commerce_payment_channel",
@@ -15,7 +16,8 @@
   ],
   "ownedApiPrefixes": {
     "app": [
-      "/app/v3/api/payments"
+      "/app/v3/api/payments",
+      "/app/v3/api/refunds"
     ],
     "backend": [
       "/backend/v3/api/payments"
@@ -23,12 +25,9 @@
   },
   "deprecatedApiPrefixes": {
     "app": [
-      "/app/v3/api/recharges",
       "/app/v3/api/payments/webhooks"
     ],
-    "reason": "Recharge and PSP webhooks migrated to sdkwork-order",
-    "enableEnv": "SDKWORK_PAYMENT_ENABLE_RECHARGE_PROXY",
-    "targetRemovalPhase": "P6"
+    "reason": "PSP webhooks migrated to sdkwork-order"
   },
   "requiredForeignKeys": {
     "orderId": {
@@ -50,11 +49,15 @@
     }
   ],
   "forbidden": [
+    "crate dependency on sdkwork-order-service",
+    "crate dependency on sdkwork-order-repository-sqlx",
+    "import sdkwork_order_service or sdkwork_order_repository_sqlx from payment crates",
     "insert commerce_order",
     "insert commerce_order_item",
     "commerce_recharge_package CRUD",
     "direct account wallet adjustments",
-    "recharges.orders.create in target state",
+    "recharges.* HTTP routes in payment app-api",
+    "recharges.* service contract operations",
     "HTTP callback to order backend",
     "settlement orchestration in payment route crates",
     "JOIN commerce_order in payment webhook ingest",
@@ -64,11 +67,11 @@
   ],
   "migrationOut": {
     "status": "complete",
-    "rechargeProxy": "crates/sdkwork-routes-payment-app-api/src/recharge_proxy_router.rs",
     "webhookShim": "crates/sdkwork-routes-payment-app-api/src/webhook_router.rs",
     "webhookBoundarySpec": "specs/commerce-payment-webhook.spec.json",
     "targetCapability": "order",
     "orderWebhookRoute": "POST /app/v3/api/orders/payments/webhooks/{providerCode}",
+    "orderRechargeRoutePrefix": "/app/v3/api/recharges",
     "orderConfirmRoute": "POST /backend/v3/api/orders/{orderId}/payment_confirmations"
   },
   "implementationPhases": [
@@ -79,7 +82,7 @@
     },
     {
       "id": "P2",
-      "title": "Order owns recharge; payment /recharges proxy",
+      "title": "Order owns recharge; payment removes /recharges surface",
       "status": "complete",
       "blockedBy": ["O3"]
     },
@@ -111,6 +114,29 @@
         "PaymentWebhookAttemptContext (no order subject join)",
         "payment_webhook_router_deprecated 410 Gone",
         "removed owner_order_settlement and order_fulfillment_client"
+      ]
+    },
+    {
+      "id": "P7",
+      "title": "Remove recharge proxy, manifest, and service types from payment",
+      "status": "complete",
+      "deliverables": [
+        "deleted recharge_proxy_router.rs",
+        "removed recharges.* from http_route_manifest",
+        "removed recharge domain/commands/queries from sdkwork-payment-service"
+      ]
+    },
+    {
+      "id": "P8",
+      "title": "Production hardening: envelopes, pagination, PSP enrichment, checkout, refund retry",
+      "status": "complete",
+      "deliverables": [
+        "success_command_accepted on all write routes",
+        "SQL pagination for app payment methods and backend lists",
+        "PSP enrichment with callback_payload persistence",
+        "GET /payments/checkout/{paymentId} re-enrichment",
+        "refund PSP submit transient retry (3 attempts)",
+        "build_app_payment_router store-only without sqlite::memory checkout placeholder"
       ]
     }
   ],

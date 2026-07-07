@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::HeaderMap;
@@ -22,12 +23,14 @@ use sdkwork_payment_repository_sqlx::{
     PostgresCommerceRefundStore, SqliteCommerceRefundStore,
 };
 use sdkwork_iam_context_service::IamAppContext;
+use sdkwork_web_core::WebRequestContext;
 use sdkwork_utils_rust::OffsetListPageParams;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
 use crate::api_response::{
-    map_service_error, not_found, success_item, success_list, unauthorized, validation,
+    map_service_error, not_found, success_command_accepted, success_item, success_list,
+    unauthorized, validation,
 };
 use crate::command_headers::validate_app_write_payload;
 use crate::subject::app_runtime_subject_from_extension;
@@ -172,7 +175,9 @@ async fn submit_provider_refund(
     let Some(ctx) =
         load_payment_attempt_provider_context_by_id_sqlite(pool, &refund.payment_attempt_id).await?
     else {
-        return Ok(());
+        return Err(CommerceServiceError::not_found(
+            "payment attempt provider context was not found for refund submission",
+        ));
     };
     let account = load_active_provider_account_sqlite(
         pool,
@@ -213,7 +218,9 @@ async fn submit_provider_refund_postgres(
     )
     .await?
     else {
-        return Ok(());
+        return Err(CommerceServiceError::not_found(
+            "payment attempt provider context was not found for refund submission",
+        ));
     };
     let account = load_active_provider_account_postgres(
         pool,
@@ -240,6 +247,77 @@ async fn submit_provider_refund_postgres(
     .await
 }
 
+const REFUND_PROVIDER_SUBMIT_ATTEMPTS: u32 = 3;
+
+fn refund_submission_retryable(error: &CommerceServiceError) -> bool {
+    !matches!(
+        error.code(),
+        "not-found" | "validation-failed" | "forbidden" | "conflict"
+    )
+}
+
+async fn submit_provider_refund_with_retry(
+    credentials: &ProviderCredentialBundle,
+    pool: &SqlitePool,
+    tenant_id: &str,
+    organization_id: Option<&str>,
+    refund: &RefundView,
+    reason_code: Option<String>,
+) -> Result<(), CommerceServiceError> {
+    let mut last_error = None;
+    for attempt in 0..REFUND_PROVIDER_SUBMIT_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(150 * (1 << (attempt - 1)))).await;
+        }
+        match submit_provider_refund(
+            credentials,
+            pool,
+            tenant_id,
+            organization_id,
+            refund,
+            reason_code.clone(),
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(error) if refund_submission_retryable(&error) => last_error = Some(error),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.expect("refund submission attempted at least once"))
+}
+
+async fn submit_provider_refund_postgres_with_retry(
+    credentials: &ProviderCredentialBundle,
+    pool: &PgPool,
+    tenant_id: &str,
+    organization_id: Option<&str>,
+    refund: &RefundView,
+    reason_code: Option<String>,
+) -> Result<(), CommerceServiceError> {
+    let mut last_error = None;
+    for attempt in 0..REFUND_PROVIDER_SUBMIT_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(150 * (1 << (attempt - 1)))).await;
+        }
+        match submit_provider_refund_postgres(
+            credentials,
+            pool,
+            tenant_id,
+            organization_id,
+            refund,
+            reason_code.clone(),
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(error) if refund_submission_retryable(&error) => last_error = Some(error),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.expect("refund submission attempted at least once"))
+}
+
 impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
     fn create_owner_refund<'a>(
         &'a self,
@@ -254,7 +332,7 @@ impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
         Box::pin(async move {
             let refund = inner.create_owner_refund(command).await?;
             if refund.status == "submitted" {
-                submit_provider_refund(
+                if let Err(error) = submit_provider_refund_with_retry(
                     &credentials,
                     &pool,
                     &tenant_id,
@@ -262,7 +340,13 @@ impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
                     &refund,
                     reason_code,
                 )
-                .await?;
+                .await
+                {
+                    let _ = inner
+                        .mark_owner_refund_provider_submission_failed(&tenant_id, &refund.refund_id)
+                        .await;
+                    return Err(error);
+                }
             }
             Ok(refund)
         })
@@ -299,7 +383,7 @@ impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
         Box::pin(async move {
             let refund = inner.create_owner_refund(command).await?;
             if refund.status == "submitted" {
-                submit_provider_refund_postgres(
+                if let Err(error) = submit_provider_refund_postgres_with_retry(
                     &credentials,
                     &pool,
                     &tenant_id,
@@ -307,7 +391,13 @@ impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
                     &refund,
                     reason_code,
                 )
-                .await?;
+                .await
+                {
+                    let _ = inner
+                        .mark_owner_refund_provider_submission_failed(&tenant_id, &refund.refund_id)
+                        .await;
+                    return Err(error);
+                }
             }
             Ok(refund)
         })
@@ -364,12 +454,14 @@ pub fn build_app_refund_router(store: Arc<dyn CommerceRefundStore>) -> Router {
 async fn create_refund(
     State(state): State<AppRefundState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     headers: HeaderMap,
     Json(body): Json<CreateRefundBody>,
 ) -> Response {
+    let ctx = request_ctx(&request_context);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized(ctx, message),
     };
     let write_headers =
         match validate_app_write_payload(&headers, "refunds.create", &body, |idempotency_key| {
@@ -390,23 +482,25 @@ async fn create_refund(
         &write_headers.idempotency_key,
     ) {
         Ok(command) => command,
-        Err(error) => return validation_response(error.message()),
+        Err(error) => return validation(ctx, error.message()),
     };
 
     match state.store.create_owner_refund(command).await {
-        Ok(refund) => success_item(None, map_refund(refund)),
-        Err(error) => refund_system_response("refund create failed", error),
+        Ok(refund) => success_command_accepted(ctx, Some(refund.refund_id)),
+        Err(error) => refund_system_response(ctx, "refund create failed", error),
     }
 }
 
 async fn list_refunds(
     State(state): State<AppRefundState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     Query(params): Query<RefundListParams>,
 ) -> Response {
+    let ctx = request_ctx(&request_context);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized(ctx, message),
     };
     let page_params = OffsetListPageParams::parse(params.page, params.page_size);
     let query = match RefundListQuery::new(
@@ -416,26 +510,28 @@ async fn list_refunds(
         params.status.as_deref(),
     ) {
         Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
-        Err(error) => return validation_response(error.message()),
+        Err(error) => return validation(ctx, error.message()),
     };
 
     match state.store.list_owner_refunds(query).await {
         Ok(page) => {
             let items: Vec<RefundResponse> = page.items.into_iter().map(map_refund).collect();
-            success_list(None, items, page.total_items, page_params)
+            success_list(ctx, items, page.total_items, page_params)
         }
-        Err(error) => refund_system_response("refund list is unavailable", error),
+        Err(error) => refund_system_response(ctx, "refund list is unavailable", error),
     }
 }
 
 async fn retrieve_refund(
     State(state): State<AppRefundState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     Path(refund_id): Path<String>,
 ) -> Response {
+    let ctx = request_ctx(&request_context);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(message),
+        Err(message) => return unauthorized(ctx, message),
     };
     let query = match RefundDetailQuery::new(
         &subject.tenant_id,
@@ -444,13 +540,13 @@ async fn retrieve_refund(
         &refund_id,
     ) {
         Ok(query) => query,
-        Err(error) => return validation_response(error.message()),
+        Err(error) => return validation(ctx, error.message()),
     };
 
     match state.store.retrieve_owner_refund(query).await {
-        Ok(Some(refund)) => success_item(None, map_refund(refund)),
-        Ok(None) => not_found(None, "refund was not found"),
-        Err(error) => refund_system_response("refund read model is unavailable", error),
+        Ok(Some(refund)) => success_item(ctx, map_refund(refund)),
+        Ok(None) => not_found(ctx, "refund was not found"),
+        Err(error) => refund_system_response(ctx, "refund read model is unavailable", error),
     }
 }
 
@@ -467,14 +563,14 @@ fn map_refund(value: RefundView) -> RefundResponse {
     }
 }
 
-fn unauthorized_response(message: impl Into<String>) -> Response {
-    unauthorized(None, message)
+fn request_ctx(ext: &Option<Extension<WebRequestContext>>) -> Option<&WebRequestContext> {
+    ext.as_ref().map(|Extension(value)| value)
 }
 
-fn validation_response(message: impl Into<String>) -> Response {
-    validation(None, message)
-}
-
-fn refund_system_response(_context: &str, error: CommerceServiceError) -> Response {
-    map_service_error(None, error)
+fn refund_system_response(
+    context: Option<&WebRequestContext>,
+    _label: &str,
+    error: CommerceServiceError,
+) -> Response {
+    map_service_error(context, error)
 }

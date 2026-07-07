@@ -16,7 +16,7 @@
     {
       "file": "commerce-boundary.spec.json",
       "path": "specs/commerce-boundary.spec.json",
-      "purpose": "Deprecation of payment-owned recharge routes."
+      "purpose": "Payment executor scope; PSP channel integration only (no recharge)."
     },
     {
       "file": "commerce-payment-webhook.spec.json",

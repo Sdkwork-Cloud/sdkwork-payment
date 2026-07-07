@@ -9,6 +9,7 @@ Local specification index for the payment executor capability.
 | [component.spec.json](./component.spec.json) | Workspace manifest |
 | [PAYMENT_EXECUTOR_SPEC.md](./PAYMENT_EXECUTOR_SPEC.md) | Payment-only scope; no order header ownership |
 | [commerce-boundary.spec.json](./commerce-boundary.spec.json) | Machine-readable boundaries + migration |
+| [commerce-dependency-boundary.spec.json](./commerce-dependency-boundary.spec.json) | Payment ⊥ order crate dependency rule |
 | [commerce-payment-webhook.spec.json](./commerce-payment-webhook.spec.json) | PSP webhook HTTP owned by order; payment ports only |
 
 ## Sibling specs
