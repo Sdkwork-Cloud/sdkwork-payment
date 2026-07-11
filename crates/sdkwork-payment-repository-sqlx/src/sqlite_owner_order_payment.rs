@@ -1,6 +1,4 @@
-use sdkwork_contract_service::{
-    CommerceMoney, CommercePaymentStatus, CommerceServiceError,
-};
+use sdkwork_contract_service::{CommerceMoney, CommercePaymentStatus, CommerceServiceError};
 use sdkwork_payment_service::{
     CancelOrderPaymentsCommand, ConfirmOwnerOrderPaymentOutcome, PayOwnerOrderCommand,
     PayOwnerOrderOutcome,
@@ -33,7 +31,12 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             .pool
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(|error| store_error("failed to begin cancel owner order payment transaction", error))?;
+            .map_err(|error| {
+                store_error(
+                    "failed to begin cancel owner order payment transaction",
+                    error,
+                )
+            })?;
 
         let affected_intent = sqlx::query(
             r#"
@@ -74,7 +77,10 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .map_err(|error| store_error("failed to close order payment attempts", error))?;
 
         tx.commit().await.map_err(|error| {
-            store_error("failed to commit cancel owner order payment transaction", error)
+            store_error(
+                "failed to commit cancel owner order payment transaction",
+                error,
+            )
         })?;
 
         // 事务提交后校验是否存在已成功但未取消的支付意图，若有则上报冲突。
@@ -167,17 +173,27 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             ));
         }
 
-        if let Some(existing) =
-            load_owner_payment_outcome_by_idempotency_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
+        if let Some(existing) = load_owner_payment_outcome_by_idempotency_in_tx(
+            &mut tx,
+            &command,
+            &order_sn,
+            order_subject.as_deref(),
+        )
+        .await?
         {
-            tx.commit()
-                .await
-                .map_err(|error| store_error("failed to commit idempotent owner payment replay", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit idempotent owner payment replay", error)
+            })?;
             return Ok(existing);
         }
 
-        if let Some(existing) =
-            load_reusable_owner_payment_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
+        if let Some(existing) = load_reusable_owner_payment_in_tx(
+            &mut tx,
+            &command,
+            &order_sn,
+            order_subject.as_deref(),
+        )
+        .await?
         {
             tx.commit()
                 .await
@@ -199,7 +215,11 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             &command.order_id,
             &command.idempotency_key,
         ]);
-        let out_trade_no = format!("OT-{}-{}", order_sn, &command.idempotency_key[..command.idempotency_key.len().min(24)]);
+        let out_trade_no = format!(
+            "OT-{}-{}",
+            order_sn,
+            &command.idempotency_key[..command.idempotency_key.len().min(24)]
+        );
 
         sqlx::query(
             r#"
@@ -230,12 +250,17 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .await
         .map_err(|error| store_error("failed to insert owner order payment intent", error))?;
 
-        if let Some(existing) =
-            load_owner_payment_outcome_by_idempotency_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
+        if let Some(existing) = load_owner_payment_outcome_by_idempotency_in_tx(
+            &mut tx,
+            &command,
+            &order_sn,
+            order_subject.as_deref(),
+        )
+        .await?
         {
-            tx.commit()
-                .await
-                .map_err(|error| store_error("failed to commit idempotent owner payment replay", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit idempotent owner payment replay", error)
+            })?;
             return Ok(existing);
         }
 
@@ -308,7 +333,10 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(|error| {
-                store_error("failed to begin owner order payment confirmation transaction", error)
+                store_error(
+                    "failed to begin owner order payment confirmation transaction",
+                    error,
+                )
             })?;
 
         let attempt_row = sqlx::query(
@@ -340,7 +368,10 @@ impl SqliteCommerceOwnerOrderPaymentStore {
 
         let attempt_status = string_cell(&attempt_row, "status");
         if !payment_attempt_is_terminal_success(&attempt_status) {
-            crate::shared::ensure_payment_status_transition(&attempt_status, CommercePaymentStatus::Succeeded.as_str())?;
+            crate::shared::ensure_payment_status_transition(
+                &attempt_status,
+                CommercePaymentStatus::Succeeded.as_str(),
+            )?;
         }
         if payment_attempt_is_terminal_success(&attempt_status) {
             tx.commit().await.map_err(|error| {
@@ -402,7 +433,10 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .map_err(|error| store_error("failed to mark owner payment attempt succeeded", error))?;
 
         tx.commit().await.map_err(|error| {
-            store_error("failed to commit owner order payment confirmation transaction", error)
+            store_error(
+                "failed to commit owner order payment confirmation transaction",
+                error,
+            )
         })?;
 
         Ok(ConfirmOwnerOrderPaymentOutcome {
@@ -414,7 +448,6 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             replayed: false,
         })
     }
-
 }
 
 struct OwnerPaymentMethod {

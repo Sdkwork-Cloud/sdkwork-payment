@@ -8,9 +8,9 @@ use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use sdkwork_payment_service::{
     validate_payment_wire_transition, validate_refund_wire_transition, CreateOwnerRefundCommand,
 };
-use sqlx::Row;
 use sqlx::postgres::PgRow;
 use sqlx::sqlite::SqliteRow;
+use sqlx::Row;
 
 pub(crate) fn payment_attempt_is_terminal_success(status: &str) -> bool {
     matches!(
@@ -37,10 +37,7 @@ pub(crate) fn ensure_refund_status_transition(
 ///
 /// Accepts any `Display` type so it works uniformly with `sqlx::Error`,
 /// `std::io::Error`, and other error types.
-pub(crate) fn store_error(
-    message: &str,
-    error: impl std::fmt::Display,
-) -> CommerceServiceError {
+pub(crate) fn store_error(message: &str, error: impl std::fmt::Display) -> CommerceServiceError {
     CommerceServiceError::storage(format!("{message}: {error}"))
 }
 
@@ -79,70 +76,31 @@ pub(crate) fn current_timestamp_string() -> String {
     format!("{seconds}")
 }
 
-/// Parse a money string (e.g. `"12.34"`, `"0.5"`, `"100"`) into minor-cents
-/// (`i64`).
+/// Parse a money string into integer smallest currency units.
 ///
-/// This is the canonical money-parsing utility for the repository layer. It
-/// avoids floating-point arithmetic and validates scale (at most 2 decimal
-/// places). Negative values are supported for symmetry with refund/recharge
-/// flows that may need signed comparisons.
+/// `CommerceMoney` is stored and exchanged as a non-negative integer string in
+/// the smallest currency unit. For CNY/USD this means cents; for provider APIs
+/// this value can be passed directly as the minor-unit amount.
 ///
 /// # Errors
 ///
-/// Returns a `validation` error if the value is empty, non-numeric, has more
-/// than one decimal point, exceeds 2 decimal places, or overflows `i64`.
-pub(crate) fn money_to_minor_cents(value: &str) -> Result<i64, CommerceServiceError> {
+/// Returns a `validation` error if the value is empty, non-numeric, negative,
+/// or overflows `i64`.
+pub(crate) fn money_to_minor_units(value: &str) -> Result<i64, CommerceServiceError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(CommerceServiceError::validation(
             "money amount must not be empty",
         ));
     }
-    let (negative, digits) = if let Some(rest) = trimmed.strip_prefix('-') {
-        (true, rest)
-    } else {
-        (false, trimmed)
-    };
-    let mut parts = digits.split('.');
-    let int_part = parts.next().unwrap_or("");
-    let frac_part = parts.next().unwrap_or("");
-    if parts.next().is_some() {
+    if !trimmed.chars().all(|c| c.is_ascii_digit()) {
         return Err(CommerceServiceError::validation(
-            "money amount must have at most one decimal point",
+            "money amount must be a non-negative integer smallest-unit amount",
         ));
     }
-    if int_part.is_empty() && frac_part.is_empty() {
-        return Err(CommerceServiceError::validation(
-            "money amount must contain digits",
-        ));
-    }
-    if !int_part.chars().all(|c| c.is_ascii_digit())
-        || !frac_part.chars().all(|c| c.is_ascii_digit())
-    {
-        return Err(CommerceServiceError::validation(
-            "money amount must be numeric",
-        ));
-    }
-    if frac_part.len() > 2 {
-        return Err(CommerceServiceError::validation(
-            "money amount scale must not exceed 2 decimal places",
-        ));
-    }
-    let int_value: i64 = int_part.parse::<i64>().unwrap_or(0);
-    let frac_value: i64 = if frac_part.is_empty() {
-        0
-    } else if frac_part.len() == 1 {
-        frac_part.parse::<i64>().unwrap_or(0) * 10
-    } else {
-        frac_part.parse::<i64>().unwrap_or(0)
-    };
-    let minor = int_value
-        .checked_mul(100)
-        .and_then(|v| v.checked_add(frac_value))
-        .ok_or_else(|| {
-            CommerceServiceError::validation("money amount overflows i64 minor units")
-        })?;
-    Ok(if negative { -minor } else { minor })
+    trimmed
+        .parse::<i64>()
+        .map_err(|_| CommerceServiceError::validation("money amount overflows i64 minor units"))
 }
 
 /// Resolve the refund amount string from the command or default to the order total.

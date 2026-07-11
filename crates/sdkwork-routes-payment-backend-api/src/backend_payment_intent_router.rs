@@ -13,9 +13,7 @@ use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
 
-use crate::api_response::{
-    map_service_error, not_found, success_item, success_list, unauthorized,
-};
+use crate::api_response::{map_service_error, not_found, success_item, success_list, unauthorized};
 use crate::subject::backend_runtime_subject_from_extension;
 
 pub type CommerceBackendPaymentIntentFuture<'a, T> =
@@ -313,15 +311,15 @@ pub fn build_backend_payment_intent_router(
     store: Arc<dyn CommerceBackendPaymentIntentStore>,
 ) -> Router {
     Router::new()
-            .route(
-                "/backend/v3/api/payments/intents",
-                get(list_payment_intents),
-            )
-            .route(
-                "/backend/v3/api/payments/intents/{paymentIntentId}",
-                get(retrieve_payment_intent),
-            )
-            .with_state(BackendPaymentIntentState { store })
+        .route(
+            "/backend/v3/api/payments/intents",
+            get(list_payment_intents),
+        )
+        .route(
+            "/backend/v3/api/payments/intents/{paymentIntentId}",
+            get(retrieve_payment_intent),
+        )
+        .with_state(BackendPaymentIntentState { store })
 }
 
 async fn list_payment_intents(

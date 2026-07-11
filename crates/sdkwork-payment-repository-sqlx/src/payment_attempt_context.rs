@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use sdkwork_contract_service::CommerceServiceError;
-use sqlx::{Pool, Postgres, Row, Sqlite};
 use serde_json::json;
+use sqlx::{Pool, Postgres, Row, Sqlite};
 
 use crate::shared::{current_timestamp_string, store_error, string_cell};
 
@@ -174,7 +174,9 @@ pub async fn load_payment_attempt_provider_context_sqlite(
             amount: string_cell(&row, "amount"),
             tenant_id: string_cell(&row, "tenant_id"),
             idempotency_key: string_cell(&row, "idempotency_key"),
-            provider_transaction_id: provider_transaction_id_from_callback_payload(&callback_payload),
+            provider_transaction_id: provider_transaction_id_from_callback_payload(
+                &callback_payload,
+            ),
         }
     }))
 }
@@ -209,7 +211,9 @@ pub async fn load_payment_attempt_provider_context_by_id_sqlite(
             amount: string_cell(&row, "amount"),
             tenant_id: string_cell(&row, "tenant_id"),
             idempotency_key: string_cell(&row, "idempotency_key"),
-            provider_transaction_id: provider_transaction_id_from_callback_payload(&callback_payload),
+            provider_transaction_id: provider_transaction_id_from_callback_payload(
+                &callback_payload,
+            ),
         }
     }))
 }
@@ -245,7 +249,9 @@ pub async fn load_payment_attempt_provider_context_postgres(
             amount: string_cell(&row, "amount"),
             tenant_id: string_cell(&row, "tenant_id"),
             idempotency_key: string_cell(&row, "idempotency_key"),
-            provider_transaction_id: provider_transaction_id_from_callback_payload(&callback_payload),
+            provider_transaction_id: provider_transaction_id_from_callback_payload(
+                &callback_payload,
+            ),
         }
     }))
 }
@@ -280,7 +286,9 @@ pub async fn load_payment_attempt_provider_context_by_id_postgres(
             amount: string_cell(&row, "amount"),
             tenant_id: string_cell(&row, "tenant_id"),
             idempotency_key: string_cell(&row, "idempotency_key"),
-            provider_transaction_id: provider_transaction_id_from_callback_payload(&callback_payload),
+            provider_transaction_id: provider_transaction_id_from_callback_payload(
+                &callback_payload,
+            ),
         }
     }))
 }

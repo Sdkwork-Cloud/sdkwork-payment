@@ -71,7 +71,7 @@ Replay increments `retries` atomically with `COALESCE(retries, 0) < 5`; limit ex
 
 ### Payment methods catalog
 
-`GET /payments/methods` joins `commerce_payment_method` with active `commerce_payment_channel.scene_code` values, maps scenes to API `productTypes` (`web` → `pc`, `app`, `mini_program`, `api`), and paginates in SQL (`page`/`pageSize`, `data.items` + `pageInfo`). Optional `clientType` filters by channel `scene_code` in the repository layer (not in-process).
+`GET /payments/methods` joins `commerce_payment_method` with active `commerce_payment_channel.scene_code` values, maps scenes to API `productTypes` (`web` → `pc`, `app`, `mini_program`, `api`), and paginates in SQL (`page`/`page_size`, `data.items` + `pageInfo`). Optional `clientType` filters by channel `scene_code` in the repository layer (not in-process).
 
 ### Route manifest
 
@@ -82,7 +82,7 @@ Manifests are injected via `WebFrameworkLayer::with_route_manifest`. Idempotent 
 
 ### Pagination (`PAGINATION_SPEC.md` §2)
 
-List/search endpoints push `page` / `pageSize` to SQL `LIMIT`/`OFFSET` with `COUNT(*) OVER()` (or equivalent aggregate) in the repository layer. Covered paths include payment records, order payments, refunds, backend admin lists, and **app payment methods**. Process-memory `fetch_all` + `skip`/`take` is forbidden on P0 paths.
+List/search endpoints push `page` / `page_size` to SQL `LIMIT`/`OFFSET` with `COUNT(*) OVER()` (or equivalent aggregate) in the repository layer. Covered paths include payment records, order payments, refunds, backend admin lists, and **app payment methods**. Process-memory `fetch_all` + `skip`/`take` is forbidden on P0 paths.
 
 ### Idempotency and transactions
 

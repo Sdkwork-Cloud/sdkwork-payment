@@ -3,18 +3,21 @@ use sdkwork_database_sqlx::DatabasePool;
 use sdkwork_payment_service_host::PaymentServiceHost;
 use std::sync::Arc;
 
+use crate::web_bootstrap::wrap_router_with_web_framework_from_env;
 use crate::{
     backend_payment_admin_router_with_postgres_pool, backend_payment_admin_router_with_sqlite_pool,
-    backend_payment_intent_router_with_postgres_pool, backend_payment_intent_router_with_sqlite_pool,
+    backend_payment_intent_router_with_postgres_pool,
+    backend_payment_intent_router_with_sqlite_pool,
 };
-use crate::web_bootstrap::wrap_router_with_web_framework_from_env;
 
 pub fn build_payment_backend_router(host: Arc<PaymentServiceHost>) -> Router {
     match host.database_pool() {
         DatabasePool::Postgres(pool, _) => {
             let pool = pool.clone();
             Router::new()
-                .merge(backend_payment_admin_router_with_postgres_pool(pool.clone()))
+                .merge(backend_payment_admin_router_with_postgres_pool(
+                    pool.clone(),
+                ))
                 .merge(backend_payment_intent_router_with_postgres_pool(pool))
         }
         DatabasePool::Sqlite(pool, _) => {

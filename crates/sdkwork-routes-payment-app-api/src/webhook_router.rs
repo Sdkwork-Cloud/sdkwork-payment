@@ -13,8 +13,7 @@ use crate::api_response::resolve_trace_id;
 
 const MIGRATION_DETAIL: &str = "Payment webhooks moved to POST /app/v3/api/orders/payments/webhooks/{providerCode} on the order gateway.";
 const WEBHOOK_SHIM_SUNSET_DATE: &str = "Sun, 31 Dec 2026 23:59:59 GMT";
-const WEBHOOK_SUCCESSOR_LINK: &str =
-    "https://docs.sdkwork.ai/migrations/payment-webhooks-to-order";
+const WEBHOOK_SUCCESSOR_LINK: &str = "https://docs.sdkwork.ai/migrations/payment-webhooks-to-order";
 
 pub fn payment_webhook_router_deprecated() -> Router {
     Router::new().route(
@@ -30,16 +29,9 @@ async fn receive_provider_webhook_deprecated(
 ) -> Response {
     let ctx = request_context.as_ref().map(|Extension(value)| value);
     let trace_id = resolve_trace_id(ctx);
-    let problem = SdkWorkProblemDetail::platform(
-        SdkWorkResultCode::Gone,
-        MIGRATION_DETAIL,
-        trace_id.clone(),
-    );
-    attach_webhook_deprecation_headers(problem_json_response(
-        StatusCode::GONE,
-        problem,
-        trace_id,
-    ))
+    let problem =
+        SdkWorkProblemDetail::platform(SdkWorkResultCode::Gone, MIGRATION_DETAIL, trace_id.clone());
+    attach_webhook_deprecation_headers(problem_json_response(StatusCode::GONE, problem, trace_id))
 }
 
 fn problem_json_response(
@@ -53,10 +45,9 @@ fn problem_json_response(
         HeaderValue::from_static("application/problem+json"),
     );
     if let Ok(value) = HeaderValue::from_str(&trace_id) {
-        response.headers_mut().insert(
-            HeaderName::from_static("x-sdkwork-trace-id"),
-            value,
-        );
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static("x-sdkwork-trace-id"), value);
     }
     response
 }

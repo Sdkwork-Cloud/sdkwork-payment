@@ -1,5 +1,7 @@
 use axum::http::HeaderValue;
-use sdkwork_payment_gateway_assembly::{assemble_application_router, gateway_contract_fallback_config};
+use sdkwork_payment_gateway_assembly::{
+    assemble_application_router, gateway_contract_fallback_config,
+};
 use sdkwork_payment_service_host::PaymentServiceHost;
 use sdkwork_web_bootstrap::{service_router, ServiceRouterConfig};
 use std::sync::Arc;
@@ -88,7 +90,9 @@ fn build_cors_layer_from_env() -> CorsLayer {
         .collect();
 
     if origins.is_empty() {
-        tracing::warn!("PAYMENT_API_CORS_ORIGINS not set; CORS will deny all cross-origin requests");
+        tracing::warn!(
+            "PAYMENT_API_CORS_ORIGINS not set; CORS will deny all cross-origin requests"
+        );
         return CorsLayer::new();
     }
 

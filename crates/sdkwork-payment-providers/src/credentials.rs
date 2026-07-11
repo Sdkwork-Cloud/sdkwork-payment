@@ -2,8 +2,7 @@ use crate::registry::{AlipayRegistryConfig, WeChatPayRegistryConfig};
 use crate::stripe::StripePaymentProviderConfig;
 
 /// Canonical PSP notify path (HTTP owned by sdkwork-order).
-pub const ORDER_PAYMENT_WEBHOOK_PATH: &str =
-    "/app/v3/api/orders/payments/webhooks/{providerCode}";
+pub const ORDER_PAYMENT_WEBHOOK_PATH: &str = "/app/v3/api/orders/payments/webhooks/{providerCode}";
 
 /// Builds the order-gateway PSP notify URL for `provider_code`.
 pub fn build_order_payment_webhook_url(base: &str, provider_code: &str) -> String {

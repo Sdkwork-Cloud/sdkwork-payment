@@ -1,8 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
-use sdkwork_contract_service::{
-    CommerceMoney, CommercePaymentStatus, CommerceServiceError,
-};
+use sdkwork_contract_service::{CommerceMoney, CommercePaymentStatus, CommerceServiceError};
 use sdkwork_payment_service::{
     CancelOwnerPaymentIntentCommand, CreateOwnerPaymentAttemptCommand,
     CreateOwnerPaymentAttemptOutcome, CreateOwnerPaymentIntentCommand, OrderPaymentReferenceQuery,
@@ -104,7 +102,10 @@ impl PostgresCommercePaymentIntentStore {
         if inserted.rows_affected() == 0 {
             // 并发竞态下另一请求已写入，回查并返回已有记录，保证幂等语义。
             tx.commit().await.map_err(|error| {
-                store_error("failed to commit payment intent transaction after conflict", error)
+                store_error(
+                    "failed to commit payment intent transaction after conflict",
+                    error,
+                )
             })?;
             if let Some(existing) = self
                 .find_owner_payment_intent_by_idempotency(&command)
@@ -343,9 +344,9 @@ impl PostgresCommercePaymentIntentStore {
             .await
             .map_err(|error| store_error("failed to load payment attempt idempotency replay", error))?;
 
-            tx.commit()
-                .await
-                .map_err(|error| store_error("failed to commit payment attempt idempotency replay", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit payment attempt idempotency replay", error)
+            })?;
             return row
                 .map(map_payment_attempt_row)
                 .transpose()?

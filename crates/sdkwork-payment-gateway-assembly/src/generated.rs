@@ -2,6 +2,7 @@
 
 pub const ROUTE_CRATE_COUNT: usize = 2;
 
+#[allow(dead_code)]
 pub const ROUTE_CRATE_PACKAGES: &[&str] = &[
     "sdkwork-routes-payment-app-api",
     "sdkwork-routes-payment-backend-api",

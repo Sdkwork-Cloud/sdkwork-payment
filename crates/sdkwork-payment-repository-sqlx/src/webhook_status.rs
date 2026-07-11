@@ -1,9 +1,6 @@
 //! Maps provider webhook payment statuses to commerce persistence wire values.
 
-pub fn map_provider_payment_status(
-    provider_code: &str,
-    raw_status: &str,
-) -> Option<&'static str> {
+pub fn map_provider_payment_status(provider_code: &str, raw_status: &str) -> Option<&'static str> {
     let status = raw_status.trim().to_ascii_lowercase();
     match provider_code.trim().to_ascii_lowercase().as_str() {
         "stripe" => match status.as_str() {

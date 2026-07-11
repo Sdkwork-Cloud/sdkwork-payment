@@ -13,8 +13,9 @@ pub use backend_payment_admin_router::{
     CommerceBackendPaymentAdminStore,
 };
 pub use backend_payment_intent_router::{
-    backend_payment_intent_router_with_postgres_pool, backend_payment_intent_router_with_sqlite_pool,
-    build_backend_payment_intent_router, CommerceBackendPaymentIntentStore,
+    backend_payment_intent_router_with_postgres_pool,
+    backend_payment_intent_router_with_sqlite_pool, build_backend_payment_intent_router,
+    CommerceBackendPaymentIntentStore,
 };
 pub use routes::build_payment_backend_router_with_framework;
 pub use web_bootstrap::{wrap_router_with_web_framework, wrap_router_with_web_framework_from_env};

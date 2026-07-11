@@ -33,7 +33,9 @@ impl PaymentProviderRegistry {
     }
 
     pub fn resolve(&self, provider_code: &str) -> Option<Arc<dyn PaymentProviderAdapter>> {
-        self.adapters.get(&provider_code.to_ascii_lowercase()).cloned()
+        self.adapters
+            .get(&provider_code.to_ascii_lowercase())
+            .cloned()
     }
 
     pub fn default_notify_url(&self, provider_code: &str) -> Option<String> {
@@ -47,12 +49,15 @@ impl PaymentProviderRegistry {
             return;
         };
         if let Ok(adapter) = StripePaymentProviderAdapter::with_default_http_client(config) {
-            self.adapters
-                .insert("stripe".to_owned(), Arc::new(adapter));
+            self.adapters.insert("stripe".to_owned(), Arc::new(adapter));
         }
     }
 
-    fn register_alipay(&mut self, config: Option<AlipayRegistryConfig>, webhook_base: Option<&str>) {
+    fn register_alipay(
+        &mut self,
+        config: Option<AlipayRegistryConfig>,
+        webhook_base: Option<&str>,
+    ) {
         let Some(mut config) = config else {
             return;
         };
@@ -61,13 +66,11 @@ impl PaymentProviderRegistry {
                 webhook_base.map(|base| build_order_payment_webhook_url(base, "alipay"));
         }
         if let Some(notify_url) = config.notify_url.clone() {
-            self.notify_urls
-                .insert("alipay".to_owned(), notify_url);
+            self.notify_urls.insert("alipay".to_owned(), notify_url);
         }
-        if let Ok(signer) = RsaAlipaySigner::from_pkcs8_pem(
-            &config.private_key_pem,
-            &config.alipay_public_key_pem,
-        ) {
+        if let Ok(signer) =
+            RsaAlipaySigner::from_pkcs8_pem(&config.private_key_pem, &config.alipay_public_key_pem)
+        {
             let provider_config = AlipayPaymentProviderConfig {
                 app_id: config.app_id,
                 notify_url: config.notify_url,
@@ -77,13 +80,16 @@ impl PaymentProviderRegistry {
             if let Ok(adapter) =
                 AlipayPaymentProviderAdapter::new(provider_config, Arc::new(signer))
             {
-                self.adapters
-                    .insert("alipay".to_owned(), Arc::new(adapter));
+                self.adapters.insert("alipay".to_owned(), Arc::new(adapter));
             }
         }
     }
 
-    fn register_wechat_pay(&mut self, config: Option<WeChatPayRegistryConfig>, webhook_base: Option<&str>) {
+    fn register_wechat_pay(
+        &mut self,
+        config: Option<WeChatPayRegistryConfig>,
+        webhook_base: Option<&str>,
+    ) {
         let Some(mut config) = config else {
             return;
         };

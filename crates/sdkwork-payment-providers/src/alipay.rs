@@ -424,10 +424,7 @@ fn alipay_operation_outcome(
 
 fn alipay_response_payload(method: &str, payload: Value) -> ProviderResult<Value> {
     let response_key = format!("{}_response", method.replace('.', "_"));
-    let response = payload
-        .get(&response_key)
-        .cloned()
-        .unwrap_or(payload);
+    let response = payload.get(&response_key).cloned().unwrap_or(payload);
     let code = response
         .get("code")
         .and_then(Value::as_str)
@@ -446,7 +443,10 @@ fn alipay_response_payload(method: &str, payload: Value) -> ProviderResult<Value
     Ok(response)
 }
 
-fn parse_form_body(body: &[u8], operation: PaymentAdapterOperation) -> ProviderResult<Vec<(String, String)>> {
+fn parse_form_body(
+    body: &[u8],
+    operation: PaymentAdapterOperation,
+) -> ProviderResult<Vec<(String, String)>> {
     let body = std::str::from_utf8(body).map_err(|error| {
         ProviderError::invalid_response(
             operation,

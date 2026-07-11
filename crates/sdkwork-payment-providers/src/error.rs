@@ -34,7 +34,10 @@ impl ProviderError {
         }
     }
 
-    pub fn invalid_response(operation: PaymentAdapterOperation, message: impl Into<String>) -> Self {
+    pub fn invalid_response(
+        operation: PaymentAdapterOperation,
+        message: impl Into<String>,
+    ) -> Self {
         Self::InvalidResponse {
             operation,
             message: message.into(),
@@ -60,7 +63,9 @@ impl From<ProviderError> for CommerceServiceError {
             } => Self::provider_unavailable(format!(
                 "provider {provider_code} does not support {operation:?}"
             )),
-            ProviderError::ProviderUnavailable { message, .. } => Self::provider_unavailable(message),
+            ProviderError::ProviderUnavailable { message, .. } => {
+                Self::provider_unavailable(message)
+            }
             ProviderError::Transport { message, .. } => Self::provider_unavailable(message),
         }
     }

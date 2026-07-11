@@ -4,7 +4,7 @@
   "applicationCode": "payment",
   "packageName": "sdkwork-payment-gateway-assembly",
   "crateDir": "crates/sdkwork-payment-gateway-assembly",
-  "generatedAt": "2026-06-25T13:08:05.589Z",
+  "generatedAt": "2026-07-08T01:34:20.980Z",
   "routeCrates": [
     {
       "packageName": "sdkwork-routes-payment-app-api",
@@ -14,7 +14,7 @@
       "pathPrefix": null,
       "mountOrder": 0,
       "hasGatewayMount": true,
-      "hasGatewayRouteManifest": false
+      "hasGatewayRouteManifest": true
     },
     {
       "packageName": "sdkwork-routes-payment-backend-api",
@@ -24,7 +24,7 @@
       "pathPrefix": null,
       "mountOrder": 1,
       "hasGatewayMount": true,
-      "hasGatewayRouteManifest": false
+      "hasGatewayRouteManifest": true
     }
   ]
 }

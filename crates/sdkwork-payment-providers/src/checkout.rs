@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use serde_json::{json, Value};
 use sdkwork_contract_service::CommerceServiceError;
 use sdkwork_payment_service::PayOwnerOrderOutcome;
+use serde_json::{json, Value};
 
 use crate::adapter::{
     normalize_provider_code, PaymentCreateIntentRequest, PaymentProviderOperationOutcome,
@@ -29,11 +29,11 @@ pub async fn enrich_pay_owner_order_outcome(
     if provider_code == "sandbox" || provider_code.is_empty() {
         return Ok(outcome);
     }
-    let adapter = registry
-        .resolve(&provider_code)
-        .ok_or_else(|| CommerceServiceError::provider_unavailable(format!(
+    let adapter = registry.resolve(&provider_code).ok_or_else(|| {
+        CommerceServiceError::provider_unavailable(format!(
             "payment provider {provider_code} is not configured"
-        )))?;
+        ))
+    })?;
 
     let amount_minor = money_to_minor(&outcome.amount)?;
     let _notify_url = context

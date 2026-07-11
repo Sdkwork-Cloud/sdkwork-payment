@@ -96,11 +96,19 @@ pub(crate) async fn load_order_payment_reference_postgres(
 }
 
 fn map_sqlite_order_payment_reference_row(row: SqliteRow) -> OrderPaymentReferenceSnapshot {
-    map_order_payment_reference_row(&row, optional_sqlite_string_cell(&row, "order_subject"), optional_sqlite_string_cell(&row, "pay_time"))
+    map_order_payment_reference_row(
+        &row,
+        optional_sqlite_string_cell(&row, "order_subject"),
+        optional_sqlite_string_cell(&row, "pay_time"),
+    )
 }
 
 fn map_postgres_order_payment_reference_row(row: PgRow) -> OrderPaymentReferenceSnapshot {
-    map_order_payment_reference_row(&row, optional_postgres_string_cell(&row, "order_subject"), optional_postgres_string_cell(&row, "pay_time"))
+    map_order_payment_reference_row(
+        &row,
+        optional_postgres_string_cell(&row, "order_subject"),
+        optional_postgres_string_cell(&row, "pay_time"),
+    )
 }
 
 fn map_order_payment_reference_row<R: StringCellRow>(
@@ -130,12 +138,7 @@ fn optional_postgres_string_cell(row: &PgRow, column: &str) -> Option<String> {
 pub(crate) fn order_status_is_payable(status: &str) -> bool {
     matches!(
         status.trim().to_ascii_lowercase().as_str(),
-        "draft"
-            | "pending"
-            | "pending_payment"
-            | "unpaid"
-            | "wait_pay"
-            | "created"
+        "draft" | "pending" | "pending_payment" | "unpaid" | "wait_pay" | "created"
     )
 }
 
@@ -145,5 +148,7 @@ pub(crate) fn order_status_is_refundable(status: &str, pay_time: Option<&str>) -
         normalized.as_str(),
         "paid" | "succeeded" | "success" | "completed" | "finished"
     );
-    paid && pay_time.map(|value| !value.trim().is_empty()).unwrap_or(false)
+    paid && pay_time
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
 }

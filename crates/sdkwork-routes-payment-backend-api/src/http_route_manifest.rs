@@ -218,9 +218,7 @@ mod tests {
         let idempotent_write_routes: Vec<_> = manifest
             .routes()
             .iter()
-            .filter(|route| {
-                route.method == HttpMethod::Post || route.method == HttpMethod::Patch
-            })
+            .filter(|route| route.method == HttpMethod::Post || route.method == HttpMethod::Patch)
             .filter(|route| route.idempotent)
             .map(|route| route.operation_id)
             .collect();

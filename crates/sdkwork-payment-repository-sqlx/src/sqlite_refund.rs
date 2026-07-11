@@ -7,13 +7,10 @@ use sdkwork_payment_service::{
 };
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
-use crate::order_reference::{
-    load_order_payment_reference_sqlite, order_status_is_refundable,
-};
+use crate::order_reference::{load_order_payment_reference_sqlite, order_status_is_refundable};
 use crate::shared::{
-    ensure_refund_status_transition, current_timestamp_string,
-    money_to_minor_cents, resolve_refund_amount, stable_storage_id, store_error,
-    validate_refund_bounds,
+    current_timestamp_string, ensure_refund_status_transition, money_to_minor_units,
+    resolve_refund_amount, stable_storage_id, store_error, validate_refund_bounds,
 };
 
 #[derive(Debug, Clone)]
@@ -71,8 +68,8 @@ impl SqliteCommerceRefundStore {
         };
 
         let refund_amount = resolve_refund_amount(&command, &order_ref.total_amount)?;
-        let total_minor = money_to_minor_cents(order_ref.total_amount.as_str())?;
-        let refund_minor = money_to_minor_cents(&refund_amount)?;
+        let total_minor = money_to_minor_units(order_ref.total_amount.as_str())?;
+        let refund_minor = money_to_minor_units(&refund_amount)?;
         validate_refund_bounds(refund_minor, total_minor)?;
         let already_refunded_minor = sum_refunded_amount_in_tx(&mut tx, &command).await?;
         if refund_minor > total_minor.saturating_sub(already_refunded_minor) {
@@ -93,7 +90,7 @@ impl SqliteCommerceRefundStore {
                  amount, currency_code, status, refund_reason_code, requested_by_type,
                  requested_by, request_no, idempotency_key, created_at, updated_at)
             VALUES
-                (?, ?, ?, ?, ?, ?, ?, 'CNY', 'submitted', ?, 'buyer', ?, ?, ?, ?, ?)
+                (?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, 'buyer', ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -104,6 +101,7 @@ impl SqliteCommerceRefundStore {
         .bind(&payment_attempt_id)
         .bind(&refund_no)
         .bind(&refund_amount)
+        .bind(&command.currency_code)
         .bind(command.reason_code.as_deref())
         .bind(&command.owner_user_id)
         .bind(&command.request_no)
@@ -115,9 +113,9 @@ impl SqliteCommerceRefundStore {
         .map_err(|error| store_error("failed to insert refund", error))?;
 
         if let Some(existing) = find_refund_by_idempotency_in_tx(&mut tx, &command).await? {
-            tx.commit()
-                .await
-                .map_err(|error| store_error("failed to commit refund idempotency replay", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit refund idempotency replay", error)
+            })?;
             return Ok(existing);
         }
 
@@ -144,7 +142,7 @@ impl SqliteCommerceRefundStore {
             order_id: command.order_id,
             payment_attempt_id,
             amount: CommerceMoney::new(&refund_amount).map_err(CommerceServiceError::storage)?,
-            currency_code: "CNY".to_owned(),
+            currency_code: command.currency_code,
             status: "submitted".to_owned(),
             reason_code: command.reason_code,
         })
@@ -193,7 +191,10 @@ impl SqliteCommerceRefundStore {
             .first()
             .and_then(|row| row.try_get::<i64, _>("total_count").ok())
             .unwrap_or(0);
-        let items = rows.into_iter().map(map_refund_row).collect::<Result<Vec<_>, _>>()?;
+        let items = rows
+            .into_iter()
+            .map(map_refund_row)
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(RefundListPage { items, total_items })
     }
@@ -239,7 +240,9 @@ impl SqliteCommerceRefundStore {
             .pool
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(|error| store_error("failed to begin refund provider failure transaction", error))?;
+            .map_err(|error| {
+                store_error("failed to begin refund provider failure transaction", error)
+            })?;
 
         let row = sqlx::query(
             r#"
@@ -296,9 +299,12 @@ impl SqliteCommerceRefundStore {
         )
         .await?;
 
-        tx.commit()
-            .await
-            .map_err(|error| store_error("failed to commit refund provider failure transaction", error))?;
+        tx.commit().await.map_err(|error| {
+            store_error(
+                "failed to commit refund provider failure transaction",
+                error,
+            )
+        })?;
 
         map_refund_row(row).map(|mut view| {
             view.status = "failed".to_owned();
@@ -380,10 +386,9 @@ async fn sum_refunded_amount_in_tx(
 
     rows.iter().try_fold(0_i64, |acc, row| {
         let amount = string_cell(row, "amount");
-        let minor = money_to_minor_cents(&amount)?;
-        acc.checked_add(minor).ok_or_else(|| {
-            CommerceServiceError::validation("refunded amount sum overflows i64")
-        })
+        let minor = money_to_minor_units(&amount)?;
+        acc.checked_add(minor)
+            .ok_or_else(|| CommerceServiceError::validation("refunded amount sum overflows i64"))
     })
 }
 

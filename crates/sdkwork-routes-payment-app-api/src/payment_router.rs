@@ -8,13 +8,7 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
-use sdkwork_payment_service::{
-    ClosePaymentRecordCommand, PaymentMethodItem, PaymentMethodListPage, PaymentMethodListQuery,
-    PayOwnerOrderCommand, PayOwnerOrderOutcome, PaymentRecordDetailQuery, PaymentRecordItem,
-    PaymentRecordListPage, PaymentRecordListQuery, PaymentRecordOrderListPage,
-    PaymentRecordOrderListQuery, PaymentRecordOutTradeNoQuery, PaymentRecordStatistics,
-    PaymentRecordStatisticsQuery, scene_code_filter_from_client_type,
-};
+use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{
     cancel_provider_payment, provider_registry_for_account, PaymentProviderRegistry,
     ProviderCredentialBundle,
@@ -29,7 +23,13 @@ use sdkwork_payment_repository_sqlx::{
     SqliteCommerceOwnerOrderPaymentStore, SqliteCommercePaymentMethodStore,
     SqliteCommercePaymentRecordStore,
 };
-use sdkwork_iam_context_service::IamAppContext;
+use sdkwork_payment_service::{
+    scene_code_filter_from_client_type, ClosePaymentRecordCommand, PayOwnerOrderCommand,
+    PayOwnerOrderOutcome, PaymentMethodItem, PaymentMethodListPage, PaymentMethodListQuery,
+    PaymentRecordDetailQuery, PaymentRecordItem, PaymentRecordListPage, PaymentRecordListQuery,
+    PaymentRecordOrderListPage, PaymentRecordOrderListQuery, PaymentRecordOutTradeNoQuery,
+    PaymentRecordStatistics, PaymentRecordStatisticsQuery,
+};
 use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
@@ -110,21 +110,18 @@ pub(crate) struct AppPaymentState {
 #[derive(Debug, Deserialize)]
 struct OrderPaymentsQueryParams {
     page: Option<i64>,
-    #[serde(rename = "pageSize", alias = "page_size")]
     page_size: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PaymentRecordsQueryParams {
     page: Option<i64>,
-    #[serde(rename = "pageSize", alias = "page_size")]
     page_size: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PaymentMethodsQueryParams {
     page: Option<i64>,
-    #[serde(rename = "pageSize", alias = "page_size")]
     page_size: Option<i64>,
     #[serde(rename = "clientType", alias = "client_type")]
     client_type: Option<String>,
@@ -379,41 +376,41 @@ pub(crate) fn build_app_payment_router_with_options(
     options: PaymentAppRouterMountOptions,
 ) -> Router {
     let mut router = Router::new()
-            .route("/app/v3/api/payments/methods", get(list_payment_methods))
-            .route("/app/v3/api/payments/records", get(list_payment_records))
-            .route(
-                "/app/v3/api/payments/records/{paymentId}",
-                get(retrieve_payment_record),
-            )
-            .route(
-                "/app/v3/api/payments/attempts/{paymentAttemptId}",
-                get(retrieve_payment_attempt),
-            )
-            .route(
-                "/app/v3/api/payments/statistics",
-                get(fetch_payment_statistics),
-            )
-            .route(
-                "/app/v3/api/payments/checkout/{paymentId}",
-                get(retrieve_payment_checkout),
-            )
-            .route(
-                "/app/v3/api/payments/status/{paymentId}",
-                get(retrieve_payment_status),
-            )
-            .route(
-                "/app/v3/api/payments/status/out_trade_no/{outTradeNo}",
-                get(retrieve_payment_status_by_out_trade_no),
-            )
-            .route("/app/v3/api/payments", post(create_payment))
-            .route(
-                "/app/v3/api/payments/reconciliations",
-                post(reconcile_payment),
-            )
-            .route(
-                "/app/v3/api/payments/{paymentId}/close",
-                post(close_payment_record),
-            );
+        .route("/app/v3/api/payments/methods", get(list_payment_methods))
+        .route("/app/v3/api/payments/records", get(list_payment_records))
+        .route(
+            "/app/v3/api/payments/records/{paymentId}",
+            get(retrieve_payment_record),
+        )
+        .route(
+            "/app/v3/api/payments/attempts/{paymentAttemptId}",
+            get(retrieve_payment_attempt),
+        )
+        .route(
+            "/app/v3/api/payments/statistics",
+            get(fetch_payment_statistics),
+        )
+        .route(
+            "/app/v3/api/payments/checkout/{paymentId}",
+            get(retrieve_payment_checkout),
+        )
+        .route(
+            "/app/v3/api/payments/status/{paymentId}",
+            get(retrieve_payment_status),
+        )
+        .route(
+            "/app/v3/api/payments/status/out_trade_no/{outTradeNo}",
+            get(retrieve_payment_status_by_out_trade_no),
+        )
+        .route("/app/v3/api/payments", post(create_payment))
+        .route(
+            "/app/v3/api/payments/reconciliations",
+            post(reconcile_payment),
+        )
+        .route(
+            "/app/v3/api/payments/{paymentId}/close",
+            post(close_payment_record),
+        );
 
     if options.include_order_payments_list {
         router = router.route(
@@ -945,7 +942,9 @@ async fn list_payment_methods(
                 .collect::<Vec<_>>();
             success_list(ctx, items, page.total_items, page_params)
         }
-        Err(error) => payment_system_response(ctx, "payment methods read model is unavailable", error),
+        Err(error) => {
+            payment_system_response(ctx, "payment methods read model is unavailable", error)
+        }
     }
 }
 
@@ -974,14 +973,12 @@ async fn list_payment_records(
         Ok(page) => {
             // Phase 1.3：store 已在 SQL 层完成 LIMIT/OFFSET 并返回真实 total_items，
             // handler 不再做进程内 skip/take（PAGINATION_SPEC §2 合规）。
-            let items: Vec<_> = page
-                .items
-                .into_iter()
-                .map(map_payment_record)
-                .collect();
+            let items: Vec<_> = page.items.into_iter().map(map_payment_record).collect();
             success_list(None, items, page.total_items, page_params)
         }
-        Err(error) => payment_system_response(None, "payment records read model is unavailable", error),
+        Err(error) => {
+            payment_system_response(None, "payment records read model is unavailable", error)
+        }
     }
 }
 
@@ -1017,7 +1014,9 @@ async fn list_order_payments(
                 .collect::<Vec<_>>();
             success_list(ctx, items, page.total_items, page_params)
         }
-        Err(error) => payment_system_response(ctx, "order payment read model is unavailable", error),
+        Err(error) => {
+            payment_system_response(ctx, "order payment read model is unavailable", error)
+        }
     }
 }
 
@@ -1070,7 +1069,11 @@ async fn retrieve_payment_checkout(
     let record = match state.store.retrieve_payment_record(query).await {
         Ok(record) => record,
         Err(error) => {
-            return payment_system_response(ctx, "payment checkout read model is unavailable", error)
+            return payment_system_response(
+                ctx,
+                "payment checkout read model is unavailable",
+                error,
+            )
         }
     };
     let Some(checkout) = state.checkout.as_ref() else {
@@ -1156,9 +1159,15 @@ async fn retrieve_payment_status_by_out_trade_no(
         Err(error) => return validation(ctx, error.message()),
     };
 
-    match state.store.retrieve_payment_record_by_out_trade_no(query).await {
+    match state
+        .store
+        .retrieve_payment_record_by_out_trade_no(query)
+        .await
+    {
         Ok(record) => success_item(ctx, map_payment_record(record)),
-        Err(error) => payment_system_response(ctx, "payment record read model is unavailable", error),
+        Err(error) => {
+            payment_system_response(ctx, "payment record read model is unavailable", error)
+        }
     }
 }
 
@@ -1213,7 +1222,9 @@ async fn load_payment_record(
         .store
         .retrieve_payment_record(query)
         .await
-        .map_err(|error| payment_system_response(ctx, "payment record read model is unavailable", error))
+        .map_err(|error| {
+            payment_system_response(ctx, "payment record read model is unavailable", error)
+        })
 }
 
 async fn reconcile_payment(
@@ -1287,7 +1298,10 @@ async fn reconcile_payment(
         }
     } else if out_trade_no.is_some() || reconcile_type.eq_ignore_ascii_case("OUT_TRADE_NO") {
         let Some(out_trade_no) = out_trade_no else {
-            return validation(ctx, "outTradeNo is required for OUT_TRADE_NO reconciliation");
+            return validation(
+                ctx,
+                "outTradeNo is required for OUT_TRADE_NO reconciliation",
+            );
         };
         let query = match PaymentRecordOutTradeNoQuery::new(
             &subject.tenant_id,
@@ -1308,10 +1322,10 @@ async fn reconcile_payment(
 
     match record_result {
         Ok(record) => success_item(ctx, map_payment_record(record)),
-        Err(error) if error.code() == "not-found" => {
-            not_found(ctx, "payment record was not found")
+        Err(error) if error.code() == "not-found" => not_found(ctx, "payment record was not found"),
+        Err(error) => {
+            payment_system_response(ctx, "payment reconcile read model is unavailable", error)
         }
-        Err(error) => payment_system_response(ctx, "payment reconcile read model is unavailable", error),
     }
 }
 
@@ -1329,15 +1343,13 @@ async fn create_payment(
     };
     // C9 修复：所有写操作必须校验 Idempotency-Key 与 Sdkwork-Request-Hash 命令头，
     // 保证客户端重试不会触发非幂等副作用。原代码完全跳过此校验。
-    let write_headers = match validate_app_write_payload(
-        &headers,
-        "payment-create",
-        &body.0,
-        |idempotency_key| format!("payment-create-{idempotency_key}"),
-    ) {
-        Ok(headers) => headers,
-        Err(response) => return response,
-    };
+    let write_headers =
+        match validate_app_write_payload(&headers, "payment-create", &body.0, |idempotency_key| {
+            format!("payment-create-{idempotency_key}")
+        }) {
+            Ok(headers) => headers,
+            Err(response) => return response,
+        };
     let payment_method = body
         .payment_method
         .clone()
@@ -1383,15 +1395,13 @@ async fn close_payment_record(
         Err(message) => return unauthorized(ctx, message),
     };
     let payload = write_payload_with_route_param("paymentId", &payment_id, &serde_json::json!({}));
-    let _write_headers = match validate_app_write_payload(
-        &headers,
-        "payments.close",
-        &payload,
-        |idempotency_key| format!("payment-close-{payment_id}-{idempotency_key}"),
-    ) {
-        Ok(headers) => headers,
-        Err(response) => return response,
-    };
+    let _write_headers =
+        match validate_app_write_payload(&headers, "payments.close", &payload, |idempotency_key| {
+            format!("payment-close-{payment_id}-{idempotency_key}")
+        }) {
+            Ok(headers) => headers,
+            Err(response) => return response,
+        };
     let command = match ClosePaymentRecordCommand::new(
         &subject.tenant_id,
         subject.organization_id.as_deref(),
@@ -1434,14 +1444,15 @@ fn map_checkout_from_outcome(value: PayOwnerOrderOutcome) -> CreatePaymentRespon
 }
 
 fn map_payment_method(value: PaymentMethodItem) -> PaymentMethodResponse {
-    let product_types = sdkwork_payment_service::wire_product_types_from_scene_codes(&value.scene_codes)
-        .into_iter()
-        .map(|(code, name)| PaymentMethodProductTypeResponse {
-            code,
-            name,
-            available: true,
-        })
-        .collect();
+    let product_types =
+        sdkwork_payment_service::wire_product_types_from_scene_codes(&value.scene_codes)
+            .into_iter()
+            .map(|(code, name)| PaymentMethodProductTypeResponse {
+                code,
+                name,
+                available: true,
+            })
+            .collect();
     PaymentMethodResponse {
         method_id: value.id,
         code: value.method_key,
@@ -1521,7 +1532,10 @@ fn unauthorized_response(context: Option<&WebRequestContext>, message: String) -
     unauthorized(context, message)
 }
 
-fn validation_response(context: Option<&WebRequestContext>, message: impl Into<String>) -> Response {
+fn validation_response(
+    context: Option<&WebRequestContext>,
+    message: impl Into<String>,
+) -> Response {
     validation(context, message)
 }
 
@@ -1537,9 +1551,7 @@ mod mount_options_tests {
         unsafe {
             std::env::set_var(FEDERATED_COMMERCE_ENV, "true");
         }
-        assert!(
-            !resolve_payment_app_router_mount_options_from_env().include_order_payments_list
-        );
+        assert!(!resolve_payment_app_router_mount_options_from_env().include_order_payments_list);
 
         // SAFETY: single-threaded unit test with env restore.
         unsafe {

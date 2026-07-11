@@ -259,9 +259,6 @@ mod tests {
             |_| "request-1".to_owned(),
         )
         .expect_err("mismatch");
-        assert!(matches!(
-            error,
-            WriteCommandHeaderError::InvalidHeader(_)
-        ));
+        assert!(matches!(error, WriteCommandHeaderError::InvalidHeader(_)));
     }
 }

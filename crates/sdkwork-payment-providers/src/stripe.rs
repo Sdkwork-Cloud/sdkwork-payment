@@ -275,9 +275,7 @@ impl PaymentProviderAdapter for StripePaymentProviderAdapter {
                     format!("Stripe webhook JSON is invalid: {error}"),
                 )
             })?;
-            let object = payload
-                .get("data")
-                .and_then(|data| data.get("object"));
+            let object = payload.get("data").and_then(|data| data.get("object"));
             let out_trade_no = object
                 .and_then(|value| {
                     value
@@ -326,7 +324,10 @@ fn stripe_operation_outcome(
     })
 }
 
-fn require_currency(currency: Option<&str>, operation: PaymentAdapterOperation) -> ProviderResult<String> {
+fn require_currency(
+    currency: Option<&str>,
+    operation: PaymentAdapterOperation,
+) -> ProviderResult<String> {
     let currency = require_non_empty(currency, operation, "currency")?;
     if currency.len() != 3
         || !currency
@@ -513,6 +514,9 @@ mod tests {
         let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(signed_payload.as_bytes());
         mac.update(body);
-        format!("t={timestamp},v1={}", hex_encode(mac.finalize().into_bytes()))
+        format!(
+            "t={timestamp},v1={}",
+            hex_encode(mac.finalize().into_bytes())
+        )
     }
 }

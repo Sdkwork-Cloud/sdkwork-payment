@@ -10,7 +10,7 @@ name = "sdkwork-payment-standalone-gateway"
 path = "src/main.rs"
 
 [dependencies]
-sdkwork_payment_gateway_assembly = { package = "sdkwork-payment-gateway-assembly", path = "../sdkwork-payment-gateway-assembly" }
+sdkwork_payment_gateway_assembly.workspace = true
 axum = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true }

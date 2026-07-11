@@ -1,6 +1,4 @@
-use sdkwork_contract_service::{
-    CommerceMoney, CommercePaymentStatus, CommerceServiceError,
-};
+use sdkwork_contract_service::{CommerceMoney, CommercePaymentStatus, CommerceServiceError};
 use sdkwork_payment_service::{
     ClosePaymentRecordCommand, PaymentRecordDetailQuery, PaymentRecordItem, PaymentRecordListPage,
     PaymentRecordListQuery, PaymentRecordOrderListPage, PaymentRecordOrderListQuery,
@@ -211,7 +209,10 @@ LIMIT ?5 OFFSET ?6"
             .first()
             .and_then(|row| row.try_get::<i64, _>("total_count").ok())
             .unwrap_or(0);
-        let items = rows.iter().map(payment_record_from_row).collect::<Result<Vec<_>, _>>()?;
+        let items = rows
+            .iter()
+            .map(payment_record_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(PaymentRecordOrderListPage { items, total_items })
     }
@@ -264,7 +265,9 @@ LIMIT 1"
             .fetch_optional(&self.pool)
             .await
             .or_else(none_when_read_model_is_missing)
-            .map_err(|error| store_error("failed to retrieve payment record by out trade no", error))?;
+            .map_err(|error| {
+                store_error("failed to retrieve payment record by out trade no", error)
+            })?;
 
         row.as_ref()
             .map(payment_record_from_row)
@@ -328,11 +331,9 @@ WHERE o.tenant_id = CAST(?1 AS TEXT)
                 .map(|duration| duration.as_secs())
                 .unwrap_or(0)
         );
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| store_error("failed to begin close payment record transaction", error))?;
+        let mut tx = self.pool.begin().await.map_err(|error| {
+            store_error("failed to begin close payment record transaction", error)
+        })?;
 
         let attempt = sqlx::query(
             r#"
@@ -382,9 +383,9 @@ WHERE o.tenant_id = CAST(?1 AS TEXT)
             .await
             .map_err(|error| store_error("failed to close parent payment intent", error))?;
 
-            tx.commit()
-                .await
-                .map_err(|error| store_error("failed to commit close payment record transaction", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit close payment record transaction", error)
+            })?;
             return Ok(());
         }
 
@@ -413,9 +414,9 @@ WHERE o.tenant_id = CAST(?1 AS TEXT)
             ));
         }
 
-        tx.commit()
-            .await
-            .map_err(|error| store_error("failed to commit close payment record transaction", error))?;
+        tx.commit().await.map_err(|error| {
+            store_error("failed to commit close payment record transaction", error)
+        })?;
 
         Ok(())
     }
@@ -549,51 +550,18 @@ fn commerce_money_cell(
     field_name: &str,
 ) -> Result<CommerceMoney, CommerceServiceError> {
     let value = string_cell(row, column);
-    let cents = money_cents(&value)
-        .map_err(|_| CommerceServiceError::storage(format!("invalid {field_name}: {value}")))?;
-    CommerceMoney::new(&format_money_minor(cents))
-        .map_err(|message| CommerceServiceError::storage(format!("{message}: {value}")))
-}
-
-fn money_cents(amount: &str) -> Result<i64, CommerceServiceError> {
-    let value = amount.trim();
-    let mut parts = value.split('.');
-    let whole = parts
-        .next()
-        .unwrap_or_default()
-        .parse::<i64>()
-        .map_err(|_| {
-            CommerceServiceError::storage(format!("invalid commerce money amount: {value}"))
-        })?;
-    let fraction = parts.next().unwrap_or_default();
-    if parts.next().is_some() || fraction.len() > 2 {
+    if value.trim().is_empty()
+        || !value
+            .trim()
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
         return Err(CommerceServiceError::storage(format!(
-            "invalid commerce money amount: {value}"
+            "invalid {field_name}: {value}"
         )));
     }
-    let mut padded = fraction.to_string();
-    while padded.len() < 2 {
-        padded.push('0');
-    }
-    let cents = if padded.is_empty() {
-        0
-    } else {
-        padded.parse::<i64>().map_err(|_| {
-            CommerceServiceError::storage(format!("invalid commerce money amount: {value}"))
-        })?
-    };
-    whole
-        .checked_mul(100)
-        .and_then(|amount| amount.checked_add(cents))
-        .ok_or_else(|| {
-            CommerceServiceError::storage(format!("invalid commerce money amount: {value}"))
-        })
-}
-
-fn format_money_minor(cents: i64) -> String {
-    let sign = if cents < 0 { "-" } else { "" };
-    let abs = cents.abs();
-    format!("{sign}{}.{:02}", abs / 100, abs % 100)
+    CommerceMoney::new(value.trim())
+        .map_err(|message| CommerceServiceError::storage(format!("{message}: {value}")))
 }
 
 fn empty_rows_when_read_model_is_missing(

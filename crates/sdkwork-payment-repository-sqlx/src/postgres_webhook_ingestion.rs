@@ -2,7 +2,8 @@ use sdkwork_contract_service::CommerceServiceError;
 use sqlx::{Pool, Postgres, Row};
 
 use crate::payment_attempt_context::{
-    load_attempt_by_out_trade_no_postgres, load_payment_webhook_attempt_context_by_out_trade_no_postgres,
+    load_attempt_by_out_trade_no_postgres,
+    load_payment_webhook_attempt_context_by_out_trade_no_postgres,
 };
 use crate::shared::{current_timestamp_string, stable_storage_id, store_error};
 use crate::sqlite_webhook_ingestion::{
@@ -29,13 +30,20 @@ pub async fn ingest_provider_webhook_postgres(
         },
         "providerPayload": command.payload,
     }))
-        .map_err(|error| CommerceServiceError::storage(format!("webhook payload json: {error}")))?;
+    .map_err(|error| CommerceServiceError::storage(format!("webhook payload json: {error}")))?;
 
     let out_trade_no = command.out_trade_no.as_deref().unwrap_or("").trim();
     if out_trade_no.is_empty() {
-        if let Some(tenant_id) = command.tenant_id.as_deref().filter(|value| !value.is_empty()) {
+        if let Some(tenant_id) = command
+            .tenant_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
             let mut tx = pool.begin().await.map_err(|error| {
-                store_error("failed to begin unmatched webhook ingestion transaction", error)
+                store_error(
+                    "failed to begin unmatched webhook ingestion transaction",
+                    error,
+                )
             })?;
             sqlx::query(
                 r#"
@@ -58,7 +66,10 @@ pub async fn ingest_provider_webhook_postgres(
             .await
             .map_err(|error| store_error("failed to insert unmatched webhook event", error))?;
             tx.commit().await.map_err(|error| {
-                store_error("failed to commit unmatched webhook ingestion transaction", error)
+                store_error(
+                    "failed to commit unmatched webhook ingestion transaction",
+                    error,
+                )
             })?;
             return Ok(empty_ingest_outcome(event_id, false));
         }
@@ -73,9 +84,9 @@ pub async fn ingest_provider_webhook_postgres(
     let (tenant_id, _) = match load_attempt_by_out_trade_no_postgres(&mut tx, out_trade_no).await? {
         Some(context) => context,
         None => {
-            tx.commit()
-                .await
-                .map_err(|error| store_error("failed to commit webhook without matching attempt", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit webhook without matching attempt", error)
+            })?;
             return Ok(empty_ingest_outcome(event_id, false));
         }
     };

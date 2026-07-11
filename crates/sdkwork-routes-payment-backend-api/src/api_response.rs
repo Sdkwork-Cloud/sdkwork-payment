@@ -29,10 +29,7 @@ pub fn resolve_trace_id(context: Option<&WebRequestContext>) -> String {
 }
 
 /// 构建 HTTP 200 单资源成功响应：`{code:0, data:{item}, traceId}`。
-pub fn success_item<T: Serialize>(
-    context: Option<&WebRequestContext>,
-    item: T,
-) -> Response {
+pub fn success_item<T: Serialize>(context: Option<&WebRequestContext>, item: T) -> Response {
     let trace_id = resolve_trace_id(context);
     let envelope = SdkWorkApiResponse::success(SdkWorkResourceData { item }, trace_id.clone());
     attach_trace_header((StatusCode::OK, Json(envelope)).into_response(), &trace_id)
@@ -93,7 +90,10 @@ pub fn accepted_command(
         status,
     };
     let envelope = SdkWorkApiResponse::success(command, trace_id.clone());
-    attach_trace_header((StatusCode::ACCEPTED, Json(envelope)).into_response(), &trace_id)
+    attach_trace_header(
+        (StatusCode::ACCEPTED, Json(envelope)).into_response(),
+        &trace_id,
+    )
 }
 
 /// 将 `CommerceServiceError` 映射为 `application/problem+json` 响应。
@@ -163,11 +163,8 @@ pub fn map_service_error(
 /// 构建 502 Bad Gateway Problem+json 响应（上游依赖不可用）。
 pub fn bad_gateway(context: Option<&WebRequestContext>, detail: impl Into<String>) -> Response {
     let trace_id = resolve_trace_id(context);
-    let problem = SdkWorkProblemDetail::platform(
-        SdkWorkResultCode::BadGateway,
-        detail,
-        trace_id.clone(),
-    );
+    let problem =
+        SdkWorkProblemDetail::platform(SdkWorkResultCode::BadGateway, detail, trace_id.clone());
     problem_json_response(StatusCode::BAD_GATEWAY, problem, trace_id)
 }
 
@@ -239,10 +236,9 @@ fn problem_json_response(
 fn attach_trace_header(response: Response, trace_id: &str) -> Response {
     let mut response = response;
     if let Ok(value) = HeaderValue::from_str(trace_id) {
-        response.headers_mut().insert(
-            HeaderName::from_static("x-sdkwork-trace-id"),
-            value,
-        );
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static("x-sdkwork-trace-id"), value);
     }
     response
 }

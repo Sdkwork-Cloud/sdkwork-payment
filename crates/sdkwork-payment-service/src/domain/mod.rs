@@ -163,10 +163,7 @@ impl RefundStatus {
 }
 
 /// Validate a payment status change using persistence wire values (`pending`, `canceled`, …).
-pub fn validate_payment_wire_transition(
-    from: &str,
-    to: &str,
-) -> Result<(), CommerceServiceError> {
+pub fn validate_payment_wire_transition(from: &str, to: &str) -> Result<(), CommerceServiceError> {
     let from_status = PaymentStatus::from_wire(from)?;
     let to_status = PaymentStatus::from_wire(to)?;
     if from_status == to_status {

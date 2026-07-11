@@ -1,5 +1,5 @@
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{Client};
+use reqwest::Client;
 use serde_json::Value;
 
 use crate::adapter::PaymentAdapterFuture;
@@ -25,8 +25,10 @@ impl ReqwestHttpClient {
     }
 
     pub fn with_bearer_auth(mut self, token: impl Into<String>) -> Self {
-        self.default_headers
-            .push((AUTHORIZATION.to_string(), format!("Bearer {}", token.into())));
+        self.default_headers.push((
+            AUTHORIZATION.to_string(),
+            format!("Bearer {}", token.into()),
+        ));
         self
     }
 

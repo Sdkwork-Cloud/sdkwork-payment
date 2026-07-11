@@ -1,6 +1,6 @@
 //! Owner-order pay PSP enrichment after repository persistence.
 //!
-//! Shared by payment and order app-api routers so `orders.pay` and `payments.create`
+//! Shared by payment and order app-api routers so `orders.payments.create` and `payments.create`
 //! return the same cashier parameters.
 
 use sdkwork_contract_service::CommerceServiceError;
@@ -8,7 +8,9 @@ use sdkwork_payment_providers::{
     enrich_pay_owner_order_outcome, normalize_provider_code, provider_registry_for_account,
     CheckoutContext, PaymentProviderRegistry, ProviderAccountBinding, ProviderCredentialBundle,
 };
-use sdkwork_payment_service::{CreateOwnerPaymentAttemptOutcome, PayOwnerOrderOutcome, PaymentRecordItem};
+use sdkwork_payment_service::{
+    CreateOwnerPaymentAttemptOutcome, PayOwnerOrderOutcome, PaymentRecordItem,
+};
 use sqlx::{PgPool, Pool, Sqlite};
 
 use crate::provider_account::{
@@ -54,13 +56,9 @@ pub async fn enrich_payment_record_checkout_sqlite(
     if !payment_record_is_checkout_eligible(&record.status) {
         return Ok(base);
     }
-    let Some(ctx) = load_payment_attempt_provider_context_sqlite(
-        pool,
-        tenant_id,
-        owner_user_id,
-        &record.id,
-    )
-    .await?
+    let Some(ctx) =
+        load_payment_attempt_provider_context_sqlite(pool, tenant_id, owner_user_id, &record.id)
+            .await?
     else {
         return Ok(base);
     };
@@ -78,13 +76,8 @@ pub async fn enrich_payment_record_checkout_sqlite(
         outcome,
     )
     .await?;
-    persist_attempt_enrichment_sqlite(
-        pool,
-        tenant_id,
-        &record.id,
-        &enriched.payment_params,
-    )
-    .await?;
+    persist_attempt_enrichment_sqlite(pool, tenant_id, &record.id, &enriched.payment_params)
+        .await?;
     Ok(enriched)
 }
 
@@ -101,13 +94,9 @@ pub async fn enrich_payment_record_checkout_postgres(
     if !payment_record_is_checkout_eligible(&record.status) {
         return Ok(base);
     }
-    let Some(ctx) = load_payment_attempt_provider_context_postgres(
-        pool,
-        tenant_id,
-        owner_user_id,
-        &record.id,
-    )
-    .await?
+    let Some(ctx) =
+        load_payment_attempt_provider_context_postgres(pool, tenant_id, owner_user_id, &record.id)
+            .await?
     else {
         return Ok(base);
     };
@@ -125,13 +114,8 @@ pub async fn enrich_payment_record_checkout_postgres(
         outcome,
     )
     .await?;
-    persist_attempt_enrichment_postgres(
-        pool,
-        tenant_id,
-        &record.id,
-        &enriched.payment_params,
-    )
-    .await?;
+    persist_attempt_enrichment_postgres(pool, tenant_id, &record.id, &enriched.payment_params)
+        .await?;
     Ok(enriched)
 }
 
@@ -145,12 +129,8 @@ fn payment_record_to_pay_outcome(
     let out_trade_no = provider_ctx
         .map(|ctx| ctx.out_trade_no.clone())
         .unwrap_or_else(|| record.order_no.clone());
-    let mut payment_params = owner_order_payment_params(
-        &provider_code,
-        &record.order_no,
-        None,
-        &out_trade_no,
-    );
+    let mut payment_params =
+        owner_order_payment_params(&provider_code, &record.order_no, None, &out_trade_no);
     if let Some(ctx) = provider_ctx {
         if let Some(native_id) = ctx.provider_transaction_id.as_deref() {
             payment_params.insert("providerTransactionId".to_owned(), native_id.to_owned());
@@ -183,13 +163,9 @@ pub async fn enrich_owner_order_payment_sqlite(
         .get("providerCode")
         .cloned()
         .unwrap_or_else(|| "sandbox".to_owned());
-    let account = load_active_provider_account_sqlite(
-        pool,
-        tenant_id,
-        organization_id,
-        &provider_code,
-    )
-    .await?;
+    let account =
+        load_active_provider_account_sqlite(pool, tenant_id, organization_id, &provider_code)
+            .await?;
     let enriched = enrich_owner_order_payment_outcome(
         deployment_registry,
         credentials,
@@ -228,13 +204,9 @@ pub async fn enrich_owner_order_payment_postgres(
         .get("providerCode")
         .cloned()
         .unwrap_or_else(|| "sandbox".to_owned());
-    let account = load_active_provider_account_postgres(
-        pool,
-        tenant_id,
-        organization_id,
-        &provider_code,
-    )
-    .await?;
+    let account =
+        load_active_provider_account_postgres(pool, tenant_id, organization_id, &provider_code)
+            .await?;
     let enriched = enrich_owner_order_payment_outcome(
         deployment_registry,
         credentials,
@@ -281,7 +253,10 @@ pub async fn enrich_owner_payment_attempt_sqlite(
         pay_outcome,
     )
     .await?;
-    Ok(merge_attempt_payment_params(outcome, enriched.payment_params))
+    Ok(merge_attempt_payment_params(
+        outcome,
+        enriched.payment_params,
+    ))
 }
 
 pub async fn enrich_owner_payment_attempt_postgres(
@@ -308,7 +283,10 @@ pub async fn enrich_owner_payment_attempt_postgres(
         pay_outcome,
     )
     .await?;
-    Ok(merge_attempt_payment_params(outcome, enriched.payment_params))
+    Ok(merge_attempt_payment_params(
+        outcome,
+        enriched.payment_params,
+    ))
 }
 
 fn attempt_outcome_to_pay_outcome(

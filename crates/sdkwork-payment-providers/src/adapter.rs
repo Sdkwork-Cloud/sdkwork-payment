@@ -5,8 +5,7 @@ use serde_json::Value;
 
 use crate::error::ProviderResult;
 
-pub type PaymentAdapterFuture<'a, T> =
-    Pin<Box<dyn Future<Output = ProviderResult<T>> + Send + 'a>>;
+pub type PaymentAdapterFuture<'a, T> = Pin<Box<dyn Future<Output = ProviderResult<T>> + Send + 'a>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaymentAdapterOperation {
@@ -190,8 +189,5 @@ pub(crate) fn metadata_string<'a>(metadata: &'a Value, key: &str) -> Option<&'a 
 }
 
 pub fn normalize_provider_code(provider_code: &str) -> String {
-    provider_code
-        .trim()
-        .to_ascii_lowercase()
-        .replace('-', "_")
+    provider_code.trim().to_ascii_lowercase().replace('-', "_")
 }

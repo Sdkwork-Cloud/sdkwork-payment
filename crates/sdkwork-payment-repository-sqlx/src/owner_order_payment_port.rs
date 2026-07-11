@@ -3,9 +3,7 @@ use sdkwork_payment_service::{
     OwnerOrderPaymentConfirmationPort,
 };
 
-use crate::{
-    PostgresCommerceOwnerOrderPaymentStore, SqliteCommerceOwnerOrderPaymentStore,
-};
+use crate::{PostgresCommerceOwnerOrderPaymentStore, SqliteCommerceOwnerOrderPaymentStore};
 
 impl OwnerOrderPaymentConfirmationPort for SqliteCommerceOwnerOrderPaymentStore {
     fn confirm_owner_order_payment<'a>(

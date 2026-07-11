@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
 
 use crate::api_response::{
-    conflict, map_service_error, not_found, success_command_accepted, success_list,
-    unauthorized, validation,
+    conflict, map_service_error, not_found, success_command_accepted, success_list, unauthorized,
+    validation,
 };
 use crate::command_headers::{
     validate_write_payload, AppWriteCommandHeaders, WriteCommandHeaderError,
@@ -477,7 +477,9 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
             .bind(query.offset)
             .fetch_all(&self.pool)
             .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to list provider accounts: {error}")))?;
+            .map_err(|error| {
+                CommerceServiceError::storage(format!("failed to list provider accounts: {error}"))
+            })?;
             let total_items = sqlite_total_count(&rows);
             let items = rows
                 .iter()
@@ -582,7 +584,9 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
             .bind(query.offset)
             .fetch_all(&self.pool)
             .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to list channels: {error}")))?;
+            .map_err(|error| {
+                CommerceServiceError::storage(format!("failed to list channels: {error}"))
+            })?;
             let total_items = sqlite_total_count(&rows);
             let items = rows
                 .iter()
@@ -839,7 +843,8 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
     ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult> {
         Box::pin(async move {
             use sdkwork_payment_repository_sqlx::{
-                replay_stored_webhook_event_sqlite, StoredWebhookReplayResult, WebhookStoredReplayScope,
+                replay_stored_webhook_event_sqlite, StoredWebhookReplayResult,
+                WebhookStoredReplayScope,
             };
 
             let replay_scope = WebhookStoredReplayScope {
@@ -1394,7 +1399,8 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
     ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult> {
         Box::pin(async move {
             use sdkwork_payment_repository_sqlx::{
-                replay_stored_webhook_event_postgres, StoredWebhookReplayResult, WebhookStoredReplayScope,
+                replay_stored_webhook_event_postgres, StoredWebhookReplayResult,
+                WebhookStoredReplayScope,
             };
 
             let replay_scope = WebhookStoredReplayScope {
@@ -1494,48 +1500,48 @@ pub fn build_backend_payment_admin_router(
     store: Arc<dyn CommerceBackendPaymentAdminStore>,
 ) -> Router {
     Router::new()
-            .route(
-                "/backend/v3/api/payments/methods",
-                get(list_methods).post(create_method),
-            )
-            .route(
-                "/backend/v3/api/payments/methods/{methodKey}",
-                patch(update_method),
-            )
-            .route(
-                "/backend/v3/api/payments/provider_accounts",
-                get(list_provider_accounts).post(create_provider_account),
-            )
-            .route(
-                "/backend/v3/api/payments/provider_accounts/{providerAccountId}",
-                patch(update_provider_account),
-            )
-            .route(
-                "/backend/v3/api/payments/channels",
-                get(list_channels).post(create_channel),
-            )
-            .route(
-                "/backend/v3/api/payments/route_rules",
-                get(list_route_rules).post(create_route_rule),
-            )
-            .route(
-                "/backend/v3/api/payments/route_rules/{routeRuleId}",
-                patch(update_route_rule).delete(delete_route_rule),
-            )
-            .route("/backend/v3/api/payments/attempts", get(list_attempts))
-            .route(
-                "/backend/v3/api/payments/webhook_events",
-                get(list_webhook_events),
-            )
-            .route(
-                "/backend/v3/api/payments/webhook_events/{eventId}/replays",
-                post(replay_webhook_event),
-            )
-            .route(
-                "/backend/v3/api/payments/reconciliation_runs",
-                get(list_reconciliation_runs).post(create_reconciliation_run),
-            )
-            .with_state(BackendPaymentAdminState { store })
+        .route(
+            "/backend/v3/api/payments/methods",
+            get(list_methods).post(create_method),
+        )
+        .route(
+            "/backend/v3/api/payments/methods/{methodKey}",
+            patch(update_method),
+        )
+        .route(
+            "/backend/v3/api/payments/provider_accounts",
+            get(list_provider_accounts).post(create_provider_account),
+        )
+        .route(
+            "/backend/v3/api/payments/provider_accounts/{providerAccountId}",
+            patch(update_provider_account),
+        )
+        .route(
+            "/backend/v3/api/payments/channels",
+            get(list_channels).post(create_channel),
+        )
+        .route(
+            "/backend/v3/api/payments/route_rules",
+            get(list_route_rules).post(create_route_rule),
+        )
+        .route(
+            "/backend/v3/api/payments/route_rules/{routeRuleId}",
+            patch(update_route_rule).delete(delete_route_rule),
+        )
+        .route("/backend/v3/api/payments/attempts", get(list_attempts))
+        .route(
+            "/backend/v3/api/payments/webhook_events",
+            get(list_webhook_events),
+        )
+        .route(
+            "/backend/v3/api/payments/webhook_events/{eventId}/replays",
+            post(replay_webhook_event),
+        )
+        .route(
+            "/backend/v3/api/payments/reconciliation_runs",
+            get(list_reconciliation_runs).post(create_reconciliation_run),
+        )
+        .with_state(BackendPaymentAdminState { store })
 }
 
 async fn list_methods(
@@ -1563,7 +1569,9 @@ async fn list_methods(
             let items: Vec<_> = page.items.into_iter().map(map_method).collect();
             success_list(ctx, items, page.total_items, page_params)
         }
-        Err(error) => backend_payment_error_response(ctx, "payment method list is unavailable", error),
+        Err(error) => {
+            backend_payment_error_response(ctx, "payment method list is unavailable", error)
+        }
     }
 }
 
@@ -1683,9 +1691,11 @@ async fn list_provider_accounts(
     };
     match state.store.list_provider_accounts(query).await {
         Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
-        Err(error) => {
-            backend_payment_error_response(ctx, "payment provider account list is unavailable", error)
-        }
+        Err(error) => backend_payment_error_response(
+            ctx,
+            "payment provider account list is unavailable",
+            error,
+        ),
     }
 }
 
@@ -1827,7 +1837,9 @@ async fn list_channels(
     };
     match state.store.list_channels(query).await {
         Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
-        Err(error) => backend_payment_error_response(ctx, "payment channel list is unavailable", error),
+        Err(error) => {
+            backend_payment_error_response(ctx, "payment channel list is unavailable", error)
+        }
     }
 }
 
@@ -1950,7 +1962,15 @@ async fn update_route_rule(
     Json(body): Json<UpsertRouteRuleBody>,
 ) -> Response {
     let ctx = request_context.as_ref().map(|Extension(value)| value);
-    upsert_route_rule_inner(state, runtime_context, ctx, headers, Some(route_rule_id), body).await
+    upsert_route_rule_inner(
+        state,
+        runtime_context,
+        ctx,
+        headers,
+        Some(route_rule_id),
+        body,
+    )
+    .await
 }
 
 async fn upsert_route_rule_inner(
@@ -2015,7 +2035,9 @@ async fn upsert_route_rule_inner(
                 .and_then(|value| value.as_str())
                 .map(str::to_owned),
         ),
-        Err(error) => backend_payment_error_response(ctx, "payment route rule upsert failed", error),
+        Err(error) => {
+            backend_payment_error_response(ctx, "payment route rule upsert failed", error)
+        }
     }
 }
 
@@ -2036,7 +2058,9 @@ async fn delete_route_rule(
     };
     match state.store.delete_route_rule(scope, route_rule_id).await {
         Ok(()) => success_command_accepted(ctx, None),
-        Err(error) => backend_payment_error_response(ctx, "payment route rule delete failed", error),
+        Err(error) => {
+            backend_payment_error_response(ctx, "payment route rule delete failed", error)
+        }
     }
 }
 
@@ -2062,7 +2086,9 @@ async fn list_attempts(
     };
     match state.store.list_attempts(query).await {
         Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
-        Err(error) => backend_payment_error_response(ctx, "payment attempt list is unavailable", error),
+        Err(error) => {
+            backend_payment_error_response(ctx, "payment attempt list is unavailable", error)
+        }
     }
 }
 
@@ -2158,9 +2184,11 @@ async fn list_reconciliation_runs(
     };
     match state.store.list_reconciliation_runs(query).await {
         Ok(page) => success_list(ctx, page.items, page.total_items, page_params),
-        Err(error) => {
-            backend_payment_error_response(ctx, "payment reconciliation run list is unavailable", error)
-        }
+        Err(error) => backend_payment_error_response(
+            ctx,
+            "payment reconciliation run list is unavailable",
+            error,
+        ),
     }
 }
 
@@ -2209,17 +2237,14 @@ async fn create_reconciliation_run(
             Ok(value) => value,
             Err(response) => return response,
         };
-    let period_start = match body
-        .period_start
-        .or(body.statement_date)
-        .and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_owned())
-            }
-        }) {
+    let period_start = match body.period_start.or(body.statement_date).and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    }) {
         Some(value) => value,
         None => return validation(ctx, "periodStart is required"),
     };
@@ -2278,10 +2303,7 @@ fn backend_payment_error_response(
     map_service_error(ctx, error)
 }
 
-fn unauthorized_response(
-    ctx: Option<&WebRequestContext>,
-    message: impl Into<String>,
-) -> Response {
+fn unauthorized_response(ctx: Option<&WebRequestContext>, message: impl Into<String>) -> Response {
     unauthorized(ctx, message)
 }
 

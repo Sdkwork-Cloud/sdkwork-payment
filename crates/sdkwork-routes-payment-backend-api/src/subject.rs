@@ -35,9 +35,7 @@ pub(crate) fn backend_runtime_subject_from_extension(
     Ok(subject)
 }
 
-fn app_runtime_subject_from_iam(
-    context: &IamAppContext,
-) -> Result<AppRuntimeSubject, String> {
+fn app_runtime_subject_from_iam(context: &IamAppContext) -> Result<AppRuntimeSubject, String> {
     let tenant_id = required_context_text(&context.tenant_id, "tenant_id")?;
     let organization_id = context
         .organization_id

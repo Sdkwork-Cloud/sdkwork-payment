@@ -1,9 +1,9 @@
-use std::path::PathBuf;
-use std::sync::Arc;
 use sdkwork_database_config::DatabaseConfig;
 use sdkwork_database_lifecycle::{lifecycle_options_from_env, LifecycleOrchestrator};
 use sdkwork_database_spi::{DatabaseAssetProvider, DatabaseManifest, DefaultDatabaseModule};
 use sdkwork_database_sqlx::{create_pool_from_config, DatabasePool};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 pub struct PaymentDatabaseHost {
     pool: DatabasePool,

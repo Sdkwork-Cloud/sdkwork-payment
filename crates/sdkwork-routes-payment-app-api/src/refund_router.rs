@@ -9,12 +9,10 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
+use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{
     create_provider_refund, provider_registry_for_account, PaymentProviderRegistry,
     ProviderAccountBinding, ProviderCredentialBundle,
-};
-use sdkwork_payment_service::{
-    CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,
 };
 use sdkwork_payment_repository_sqlx::{
     load_active_provider_account_postgres, load_active_provider_account_sqlite,
@@ -22,9 +20,11 @@ use sdkwork_payment_repository_sqlx::{
     load_payment_attempt_provider_context_by_id_sqlite, PaymentProviderAccountRecord,
     PostgresCommerceRefundStore, SqliteCommerceRefundStore,
 };
-use sdkwork_iam_context_service::IamAppContext;
-use sdkwork_web_core::WebRequestContext;
+use sdkwork_payment_service::{
+    CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,
+};
 use sdkwork_utils_rust::OffsetListPageParams;
+use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
@@ -74,9 +74,7 @@ struct CreateRefundBody {
 #[derive(Debug, Deserialize)]
 struct RefundListParams {
     status: Option<String>,
-    #[serde(rename = "page")]
     page: Option<i64>,
-    #[serde(rename = "pageSize", alias = "page_size")]
     page_size: Option<i64>,
 }
 
@@ -173,19 +171,16 @@ async fn submit_provider_refund(
     reason_code: Option<String>,
 ) -> Result<(), CommerceServiceError> {
     let Some(ctx) =
-        load_payment_attempt_provider_context_by_id_sqlite(pool, &refund.payment_attempt_id).await?
+        load_payment_attempt_provider_context_by_id_sqlite(pool, &refund.payment_attempt_id)
+            .await?
     else {
         return Err(CommerceServiceError::not_found(
             "payment attempt provider context was not found for refund submission",
         ));
     };
-    let account = load_active_provider_account_sqlite(
-        pool,
-        tenant_id,
-        organization_id,
-        &ctx.provider_code,
-    )
-    .await?;
+    let account =
+        load_active_provider_account_sqlite(pool, tenant_id, organization_id, &ctx.provider_code)
+            .await?;
     let registry = provider_registry_for_account(
         credentials,
         account.map(|record| provider_account_binding(&record)),
@@ -212,23 +207,17 @@ async fn submit_provider_refund_postgres(
     refund: &RefundView,
     reason_code: Option<String>,
 ) -> Result<(), CommerceServiceError> {
-    let Some(ctx) = load_payment_attempt_provider_context_by_id_postgres(
-        pool,
-        &refund.payment_attempt_id,
-    )
-    .await?
+    let Some(ctx) =
+        load_payment_attempt_provider_context_by_id_postgres(pool, &refund.payment_attempt_id)
+            .await?
     else {
         return Err(CommerceServiceError::not_found(
             "payment attempt provider context was not found for refund submission",
         ));
     };
-    let account = load_active_provider_account_postgres(
-        pool,
-        tenant_id,
-        organization_id,
-        &ctx.provider_code,
-    )
-    .await?;
+    let account =
+        load_active_provider_account_postgres(pool, tenant_id, organization_id, &ctx.provider_code)
+            .await?;
     let registry = provider_registry_for_account(
         credentials,
         account.map(|record| provider_account_binding(&record)),
@@ -446,9 +435,9 @@ pub fn app_refund_router_with_postgres_pool(
 
 pub fn build_app_refund_router(store: Arc<dyn CommerceRefundStore>) -> Router {
     Router::new()
-            .route("/app/v3/api/refunds", post(create_refund).get(list_refunds))
-            .route("/app/v3/api/refunds/{refundId}", get(retrieve_refund))
-            .with_state(AppRefundState { store })
+        .route("/app/v3/api/refunds", post(create_refund).get(list_refunds))
+        .route("/app/v3/api/refunds/{refundId}", get(retrieve_refund))
+        .with_state(AppRefundState { store })
 }
 
 async fn create_refund(

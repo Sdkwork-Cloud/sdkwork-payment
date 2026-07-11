@@ -81,7 +81,9 @@ pub async fn replay_stored_webhook_event_sqlite(
 
     let retries: i64 = row.try_get("retries").unwrap_or(0);
     if retries >= WEBHOOK_STORED_REPLAY_MAX_RETRIES {
-        return Ok(StoredWebhookReplayResult::LimitExceeded { current_retries: retries });
+        return Ok(StoredWebhookReplayResult::LimitExceeded {
+            current_retries: retries,
+        });
     }
 
     let internal_id = string_cell(&row, "id");
@@ -103,7 +105,8 @@ pub async fn replay_stored_webhook_event_sqlite(
 
     let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
         if let Some(out_trade_no) = out_trade_no.as_deref() {
-            load_payment_webhook_attempt_context_by_out_trade_no_sqlite(&mut tx, out_trade_no).await?
+            load_payment_webhook_attempt_context_by_out_trade_no_sqlite(&mut tx, out_trade_no)
+                .await?
         } else {
             None
         }
@@ -173,7 +176,9 @@ pub async fn replay_stored_webhook_event_postgres(
 
     let retries: i64 = row.try_get("retries").unwrap_or(0);
     if retries >= WEBHOOK_STORED_REPLAY_MAX_RETRIES {
-        return Ok(StoredWebhookReplayResult::LimitExceeded { current_retries: retries });
+        return Ok(StoredWebhookReplayResult::LimitExceeded {
+            current_retries: retries,
+        });
     }
 
     let internal_id = string_cell(&row, "id");
@@ -183,19 +188,21 @@ pub async fn replay_stored_webhook_event_postgres(
         .map_err(|error| CommerceServiceError::storage(format!("webhook payload: {error}")))?;
     let (out_trade_no, payment_status) = parse_stored_webhook_payload(&payload)?;
 
-    let (_, applied_status) = crate::postgres_webhook_ingestion::apply_webhook_payment_status_postgres(
-        &mut tx,
-        &provider_code,
-        out_trade_no.as_deref(),
-        payment_status.as_deref(),
-        &now,
-    )
-    .await?;
+    let (_, applied_status) =
+        crate::postgres_webhook_ingestion::apply_webhook_payment_status_postgres(
+            &mut tx,
+            &provider_code,
+            out_trade_no.as_deref(),
+            payment_status.as_deref(),
+            &now,
+        )
+        .await?;
     ensure_replay_target_applied(&out_trade_no, &payment_status, &applied_status)?;
 
     let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
         if let Some(out_trade_no) = out_trade_no.as_deref() {
-            load_payment_webhook_attempt_context_by_out_trade_no_postgres(&mut tx, out_trade_no).await?
+            load_payment_webhook_attempt_context_by_out_trade_no_postgres(&mut tx, out_trade_no)
+                .await?
         } else {
             None
         }
@@ -282,7 +289,9 @@ fn ensure_replay_target_applied(
     Ok(())
 }
 
-fn parse_stored_webhook_payload(payload: &str) -> Result<(Option<String>, Option<String>), CommerceServiceError> {
+fn parse_stored_webhook_payload(
+    payload: &str,
+) -> Result<(Option<String>, Option<String>), CommerceServiceError> {
     let parsed: Value = serde_json::from_str(payload).map_err(|error| {
         CommerceServiceError::storage(format!("webhook payload json invalid: {error}"))
     })?;

@@ -3,8 +3,8 @@ use serde_json::Value;
 use sqlx::{Pool, Row, Sqlite};
 
 use crate::payment_attempt_context::{
-    load_attempt_by_out_trade_no_sqlite, load_payment_webhook_attempt_context_by_out_trade_no_sqlite,
-    PaymentWebhookAttemptContext,
+    load_attempt_by_out_trade_no_sqlite,
+    load_payment_webhook_attempt_context_by_out_trade_no_sqlite, PaymentWebhookAttemptContext,
 };
 use crate::shared::{current_timestamp_string, stable_storage_id, store_error};
 use crate::webhook_status::map_provider_payment_status;
@@ -101,9 +101,16 @@ pub async fn ingest_provider_webhook_sqlite(
 
     let out_trade_no = command.out_trade_no.as_deref().unwrap_or("").trim();
     if out_trade_no.is_empty() {
-        if let Some(tenant_id) = command.tenant_id.as_deref().filter(|value| !value.is_empty()) {
+        if let Some(tenant_id) = command
+            .tenant_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
             let mut tx = pool.begin().await.map_err(|error| {
-                store_error("failed to begin unmatched webhook ingestion transaction", error)
+                store_error(
+                    "failed to begin unmatched webhook ingestion transaction",
+                    error,
+                )
             })?;
             persist_webhook_event_sqlite(
                 &mut tx,
@@ -117,16 +124,20 @@ pub async fn ingest_provider_webhook_sqlite(
             )
             .await?;
             tx.commit().await.map_err(|error| {
-                store_error("failed to commit unmatched webhook ingestion transaction", error)
+                store_error(
+                    "failed to commit unmatched webhook ingestion transaction",
+                    error,
+                )
             })?;
             return Ok(empty_ingest_outcome(event_id, false));
         }
         return Ok(empty_ingest_outcome(event_id, false));
     }
 
-    let mut tx = pool.begin().await.map_err(|error| {
-        store_error("failed to begin webhook ingestion transaction", error)
-    })?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| store_error("failed to begin webhook ingestion transaction", error))?;
 
     let (tenant_id, _) = match load_attempt_by_out_trade_no_sqlite(&mut tx, out_trade_no).await? {
         Some(context) => context,
@@ -170,14 +181,15 @@ pub async fn ingest_provider_webhook_sqlite(
         .await?;
 
         let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
-            load_payment_webhook_attempt_context_by_out_trade_no_sqlite(&mut tx, out_trade_no).await?
+            load_payment_webhook_attempt_context_by_out_trade_no_sqlite(&mut tx, out_trade_no)
+                .await?
         } else {
             None
         };
 
-        tx.commit().await.map_err(|error| {
-            store_error("failed to commit webhook idempotency replay", error)
-        })?;
+        tx.commit()
+            .await
+            .map_err(|error| store_error("failed to commit webhook idempotency replay", error))?;
         return Ok(IngestProviderWebhookOutcome {
             webhook_event_id: event_id,
             replayed: true,
@@ -344,7 +356,7 @@ mod sqlite_webhook_ingestion_tests {
             r#"
             INSERT INTO commerce_order_amount_breakdown
                 (id, tenant_id, order_id, allocation_type, payable_amount, discount_amount, created_at)
-            VALUES ('breakdown-rch-1', '100001', 'order-rch-1', 'order_total', '9.90', '0.00', ?)
+            VALUES ('breakdown-rch-1', '100001', 'order-rch-1', 'order_total', '990', '0', ?)
             "#,
         )
         .bind(now)
@@ -379,7 +391,10 @@ mod sqlite_webhook_ingestion_tests {
             "idem-pay-1",
         )
         .expect("pay command");
-        let outcome = payments.pay_owner_order(pay).await.expect("pay owner order");
+        let outcome = payments
+            .pay_owner_order(pay)
+            .await
+            .expect("pay owner order");
         outcome.out_trade_no
     }
 

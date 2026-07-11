@@ -1,58 +1,71 @@
 # Payment Executor Spec
 
-Status: active  
-Owner: SDKWork maintainers  
-Capability: `commerce.payment`  
-Updated: 2026-07-06
+Status: active
+Owner: SDKWork maintainers
+Capability: `commerce.payment`
+Updated: 2026-07-08
 
 Authority: Payment PRD Non-Goals, `sdkwork-specs/API_SPEC.md`
 
 ## 1. Purpose
 
-**sdkwork-payment** executes payment collection and refunds against an **existing** `orderId`. It does not own commerce order headers or recharge package catalog.
+`sdkwork-payment` executes provider payment collection and provider refunds against an existing `orderId`. It does not own commerce order headers, recharge package catalog, account ledger effects, refund business approval, or withdrawal business approval.
 
-## 2. Single responsibility
+Provider payout is a future executor boundary owned by payment. It is not a current payment API and must stay fail-closed in order until a concrete provider payout executor contract is published.
+
+## 2. Single Responsibility
 
 | Owns | Does not own |
 | --- | --- |
 | `commerce_payment_intent` | `commerce_order` insert/update lifecycle |
 | `commerce_payment_attempt` | `commerce_recharge_package` |
-| Provider accounts, channels | Recharge order creation |
-| Refund records & provider refund calls | Account ledger |
+| Provider accounts and channels | Recharge order creation |
+| Refund records and provider refund calls | Account ledger |
+| Future provider payout executor contract boundary | Withdrawal request approval or account hold settlement |
 | Reconciliation runs | Unified order list UI |
-| Webhook event persistence (via port) | PSP webhook HTTP routes (owned by order) |
+| Webhook event persistence through a port | PSP webhook HTTP routes owned by order |
 
-## 3. Required inputs
+## 3. Required Inputs
 
-All write operations **must** reference Order:
+All write operations must reference order-owned evidence:
 
-- `payments.intents.create` → `orderId` required
-- `refunds.create` → `orderId` required
-- Owner-order pay side-effects → via Order `orders.pay` orchestration
+- `payments.intents.create` -> `orderId` required.
+- `refunds.create` -> `orderId` required.
+- Owner-order pay side effects -> via order `orders.payments.create` orchestration.
+- Future provider payout execution -> via an order-owned withdrawal request and a future payment executor contract.
 
-## 4. Webhook port (order-owned HTTP)
+## 4. Webhook Port
 
-PSP notify URLs target **sdkwork-order** (`POST /app/v3/api/orders/payments/webhooks/{providerCode}`). Payment exposes **repository ports only**:
+PSP notify URLs target `sdkwork-order`:
 
 ```text
-Order webhook handler → verify/normalize (payment-providers lib)
-                     → ingest_provider_webhook (payment repository)
-                     → order in-process settlement saga
+POST /app/v3/api/orders/payments/webhooks/{providerCode}
 ```
 
-Legacy `POST /app/v3/api/payments/webhooks/{providerCode}` returns **410 Gone**.
+Payment exposes repository ports only:
 
-Backend admin `webhook_events` replay re-applies stored payment attempt status only (not order fulfillment). Use order `payment_confirmations` for settlement recovery.
+```text
+Order webhook handler
+  -> verify/normalize through payment-providers
+  -> ingest_provider_webhook through payment repository
+  -> order in-process settlement saga
+```
 
-**Forbidden:** Payment routes calling order HTTP, `settle_owner_order_after_payment_success`, or account adjustments.
+Legacy `POST /app/v3/api/payments/webhooks/{providerCode}` returns `410 Gone`.
 
-## 5. Provider credentials
+Backend admin `webhook_events` replay re-applies stored payment attempt status only. It does not run order fulfillment. Use order `payment_confirmations` for settlement recovery.
 
-- Deployment defaults: env vars (`STRIPE_*`, `ALIPAY_*`, `WECHAT_PAY_*`, `ORDER_PAYMENT_WEBHOOK_BASE_URL`).
-- Notify URL pattern: `{base}/app/v3/api/orders/payments/webhooks/{providerCode}` (order gateway owns HTTP).
-- Tenant overrides: `commerce_payment_provider_account.secret_ref` stores env var **names** resolved at runtime for pay, close, refund, and webhook verify (Stripe/Alipay route via `out_trade_no` or Alipay `app_id`; WeChat Pay uses deployment env until `out_trade_no` routing is available pre-decrypt).
+Forbidden: payment routes calling order HTTP, `settle_owner_order_after_payment_success`, or account adjustments.
 
-## 6. API prefixes
+## 5. Provider Credentials
+
+- Deployment defaults: env vars such as `STRIPE_*`, `ALIPAY_*`, `WECHAT_PAY_*`, and `ORDER_PAYMENT_WEBHOOK_BASE_URL`.
+- Notify URL pattern: `{base}/app/v3/api/orders/payments/webhooks/{providerCode}`; order gateway owns HTTP.
+- Tenant overrides: `commerce_payment_provider_account.secret_ref` stores env var names resolved at runtime for pay, close, refund, and webhook verify.
+- Stripe and Alipay route through `out_trade_no` or Alipay `app_id`.
+- WeChat Pay uses deployment env until `out_trade_no` routing is available before decrypt.
+
+## 6. API Prefixes
 
 | Prefix | Role |
 | --- | --- |
@@ -60,39 +73,58 @@ Backend admin `webhook_events` replay re-applies stored payment attempt status o
 | `/app/v3/api/refunds` | Refund create/list/retrieve |
 | `/backend/v3/api/payments` | Admin: providers, channels, webhooks, reconcile |
 
-Points recharge (`/app/v3/api/recharges/*`) is owned by **sdkwork-order** only. Payment must not expose recharge HTTP routes, proxy, or service contract operations.
+Points recharge (`/app/v3/api/recharges/*`) is owned by `sdkwork-order` only. Payment must not expose recharge HTTP routes, proxy recharge calls, or publish recharge service contract operations.
 
 ## 7. Dependencies
 
 | Direction | Allowed |
 | --- | --- |
-| Payment → Order (crate / package dependency) | **No** |
-| Payment → `commerce_order` (read-only SQL FK validation) | Yes (repository-local snapshots only) |
-| Payment → Account | **No** (direct) |
-| Order → Payment (in-process ports, `OwnerOrderPaymentStore`) | Yes |
+| Payment -> Order crate/package dependency | No |
+| Payment -> `commerce_order` read-only SQL validation | Yes, repository-local snapshots only |
+| Payment -> Account | No |
+| Order -> Payment in-process ports, including `OwnerOrderPaymentStore` | Yes |
 
-Payment **must not** depend on `sdkwork-order` Rust crates. Order lifecycle types consumed across capabilities (`PayOwnerOrderCommand`, `OwnerOrderPaymentConfirmationPort`, …) are defined in `sdkwork-payment-service` and re-exported by `sdkwork-order-service` for order routers only.
+Payment must not depend on `sdkwork-order` Rust crates. Order lifecycle types consumed across capabilities, such as `PayOwnerOrderCommand` and `OwnerOrderPaymentConfirmationPort`, are defined in `sdkwork-payment-service` and re-exported by `sdkwork-order-service` for order routers only.
 
 Machine contract: [commerce-dependency-boundary.spec.json](./commerce-dependency-boundary.spec.json).
 
 ## 8. SDK
 
-- `@sdkwork/payment-app-sdk`: `payments.*`, `refunds.*` only
-- Recharge (`recharges.*`) lives on the order SDK (`@sdkwork/order-app-sdk` or commerce order surface)
+- `@sdkwork/payment-app-sdk`: `payments.*` and `refunds.*` only.
+- Recharge (`recharges.*`) lives on the order SDK (`@sdkwork/order-app-sdk` or an approved composed order surface).
+- Withdrawal request creation lives on the order SDK (`withdrawals.requests.*`). Payment must not expose wallet withdrawal request APIs.
 
-## 10. Write response envelopes
+## 9. Write Response Envelopes
 
-All payment/refund **mutating** app-api and backend-api routes return `SdkWorkApiResponse` command payloads (`data.accepted`, optional `resourceId` / `status`) per `API_SPEC.md` §16. Read routes return `data.item` or `data.items` + `pageInfo`.
+All payment/refund mutating app-api and backend-api routes return `SdkWorkApiResponse` command payloads:
 
-App reconcile (`POST /payments/reconciliations`) is a lookup command that returns the latest payment record as `data.item` (no PSP status repair inline).
+```json
+{
+  "code": 0,
+  "data": {
+    "accepted": true,
+    "resourceId": "optional-resource-id",
+    "status": "optional-status"
+  },
+  "traceId": "server-trace-id"
+}
+```
 
-## 11. PSP enrichment and persistence
+Read routes return `data.item` or `data.items` plus `data.pageInfo`.
 
-After repository persists intent/attempt, `enrich_owner_order_payment_*` calls the configured PSP and merges `providerTransactionId` / `providerStatus` into attempt `callback_payload` for later close/cancel. `GET /payments/checkout/{paymentId}` re-enriches pending attempts for cashier/QR parameters.
+App reconcile (`POST /payments/reconciliations`) is a lookup command that returns the latest payment record as `data.item`. It performs no inline PSP status repair.
 
-## 12. Verification
+## 10. PSP Enrichment And Persistence
 
-- Payment tests: intent requires valid orderId
-- No test inserts `commerce_order` in payment crate (after migration)
+After the repository persists intent/attempt, `enrich_owner_order_payment_*` calls the configured PSP and merges `providerTransactionId` / `providerStatus` into attempt `callback_payload` for later close/cancel.
+
+`GET /payments/checkout/{paymentId}` re-enriches pending attempts for cashier and QR parameters.
+
+## 11. Verification
+
+- Payment tests: intent requires a valid `orderId`.
+- No production code inserts `commerce_order` in payment crates.
+- No payment crate or package depends on account.
+- No payment app-api exposes recharge or wallet withdrawal request routes.
 
 Track phases in [commerce-boundary.spec.json](./commerce-boundary.spec.json). Webhook boundary: [commerce-payment-webhook.spec.json](./commerce-payment-webhook.spec.json).

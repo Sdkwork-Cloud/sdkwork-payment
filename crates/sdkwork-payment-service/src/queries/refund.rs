@@ -27,6 +27,7 @@ pub struct RefundListPage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreateOwnerRefundCommand {
     pub amount: Option<String>,
+    pub currency_code: String,
     pub idempotency_key: String,
     pub order_id: String,
     pub organization_id: Option<String>,
@@ -109,14 +110,46 @@ impl CreateOwnerRefundCommand {
         request_no: &str,
         idempotency_key: &str,
     ) -> Result<Self, CommerceServiceError> {
+        Self::new_with_currency(
+            tenant_id,
+            organization_id,
+            owner_user_id,
+            order_id,
+            payment_attempt_id,
+            amount,
+            Some("CNY"),
+            reason_code,
+            request_no,
+            idempotency_key,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_currency(
+        tenant_id: &str,
+        organization_id: Option<&str>,
+        owner_user_id: &str,
+        order_id: &str,
+        payment_attempt_id: Option<&str>,
+        amount: Option<&str>,
+        currency_code: Option<&str>,
+        reason_code: Option<&str>,
+        request_no: &str,
+        idempotency_key: &str,
+    ) -> Result<Self, CommerceServiceError> {
         crate::validation::require_non_empty("tenant_id", tenant_id)?;
         crate::validation::require_non_empty("owner_user_id", owner_user_id)?;
         crate::validation::require_non_empty("order_id", order_id)?;
         crate::validation::require_non_empty("request_no", request_no)?;
         crate::validation::require_non_empty("idempotency_key", idempotency_key)?;
+        let currency_code = currency_code
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("CNY");
 
         Ok(Self {
             amount: optional_text(amount),
+            currency_code: currency_code.to_ascii_uppercase(),
             idempotency_key: idempotency_key.trim().to_string(),
             order_id: order_id.trim().to_string(),
             organization_id: optional_text(organization_id),

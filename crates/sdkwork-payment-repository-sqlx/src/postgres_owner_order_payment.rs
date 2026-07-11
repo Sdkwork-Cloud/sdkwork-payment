@@ -1,11 +1,9 @@
-use sdkwork_contract_service::{
-    CommerceMoney, CommercePaymentStatus, CommerceServiceError,
-};
+use sdkwork_contract_service::{CommerceMoney, CommercePaymentStatus, CommerceServiceError};
 use sdkwork_payment_service::{
     CancelOrderPaymentsCommand, ConfirmOwnerOrderPaymentOutcome, PayOwnerOrderCommand,
     PayOwnerOrderOutcome,
 };
-use sqlx::{Postgres, PgPool, Row, Transaction};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::order_reference::order_status_is_payable;
@@ -33,11 +31,12 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         let now = current_command_timestamp();
         // C1/C2 修复：取消操作必须在单事务内执行，且只能取消未终结状态的支付意图/尝试，
         // 严禁覆盖 succeeded/refunded/closed 等终态，避免"已收款但订单显示已取消"的资金事故。
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| store_error("failed to begin cancel owner order payment transaction", error))?;
+        let mut tx = self.pool.begin().await.map_err(|error| {
+            store_error(
+                "failed to begin cancel owner order payment transaction",
+                error,
+            )
+        })?;
 
         let affected_intent = sqlx::query(
             r#"
@@ -78,7 +77,10 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .map_err(|error| store_error("failed to close order payment attempts", error))?;
 
         tx.commit().await.map_err(|error| {
-            store_error("failed to commit cancel owner order payment transaction", error)
+            store_error(
+                "failed to commit cancel owner order payment transaction",
+                error,
+            )
         })?;
 
         // 事务提交后校验是否存在已成功但未取消的支付意图，若有则上报冲突，
@@ -169,17 +171,27 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             ));
         }
 
-        if let Some(existing) =
-            load_owner_payment_outcome_by_idempotency_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
+        if let Some(existing) = load_owner_payment_outcome_by_idempotency_in_tx(
+            &mut tx,
+            &command,
+            &order_sn,
+            order_subject.as_deref(),
+        )
+        .await?
         {
-            tx.commit()
-                .await
-                .map_err(|error| store_error("failed to commit idempotent owner payment replay", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit idempotent owner payment replay", error)
+            })?;
             return Ok(existing);
         }
 
-        if let Some(existing) =
-            load_reusable_owner_payment_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
+        if let Some(existing) = load_reusable_owner_payment_in_tx(
+            &mut tx,
+            &command,
+            &order_sn,
+            order_subject.as_deref(),
+        )
+        .await?
         {
             tx.commit()
                 .await
@@ -201,7 +213,11 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             &command.order_id,
             &command.idempotency_key,
         ]);
-        let out_trade_no = format!("OT-{}-{}", order_sn, &command.idempotency_key[..command.idempotency_key.len().min(24)]);
+        let out_trade_no = format!(
+            "OT-{}-{}",
+            order_sn,
+            &command.idempotency_key[..command.idempotency_key.len().min(24)]
+        );
 
         sqlx::query(
             r#"
@@ -232,12 +248,17 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .await
         .map_err(|error| store_error("failed to insert owner order payment intent", error))?;
 
-        if let Some(existing) =
-            load_owner_payment_outcome_by_idempotency_in_tx(&mut tx, &command, &order_sn, order_subject.as_deref()).await?
+        if let Some(existing) = load_owner_payment_outcome_by_idempotency_in_tx(
+            &mut tx,
+            &command,
+            &order_sn,
+            order_subject.as_deref(),
+        )
+        .await?
         {
-            tx.commit()
-                .await
-                .map_err(|error| store_error("failed to commit idempotent owner payment replay", error))?;
+            tx.commit().await.map_err(|error| {
+                store_error("failed to commit idempotent owner payment replay", error)
+            })?;
             return Ok(existing);
         }
 
@@ -306,7 +327,10 @@ impl PostgresCommerceOwnerOrderPaymentStore {
     ) -> Result<ConfirmOwnerOrderPaymentOutcome, CommerceServiceError> {
         let paid_at = current_command_timestamp();
         let mut tx = self.pool.begin().await.map_err(|error| {
-            store_error("failed to begin owner order payment confirmation transaction", error)
+            store_error(
+                "failed to begin owner order payment confirmation transaction",
+                error,
+            )
         })?;
 
         let attempt_row = sqlx::query(
@@ -338,7 +362,10 @@ impl PostgresCommerceOwnerOrderPaymentStore {
 
         let attempt_status = string_cell(&attempt_row, "status");
         if !payment_attempt_is_terminal_success(&attempt_status) {
-            crate::shared::ensure_payment_status_transition(&attempt_status, CommercePaymentStatus::Succeeded.as_str())?;
+            crate::shared::ensure_payment_status_transition(
+                &attempt_status,
+                CommercePaymentStatus::Succeeded.as_str(),
+            )?;
         }
         if payment_attempt_is_terminal_success(&attempt_status) {
             tx.commit().await.map_err(|error| {
@@ -400,7 +427,10 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .map_err(|error| store_error("failed to mark owner payment attempt succeeded", error))?;
 
         tx.commit().await.map_err(|error| {
-            store_error("failed to commit owner order payment confirmation transaction", error)
+            store_error(
+                "failed to commit owner order payment confirmation transaction",
+                error,
+            )
         })?;
 
         Ok(ConfirmOwnerOrderPaymentOutcome {
@@ -412,7 +442,6 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             replayed: false,
         })
     }
-
 }
 
 struct OwnerPaymentMethod {

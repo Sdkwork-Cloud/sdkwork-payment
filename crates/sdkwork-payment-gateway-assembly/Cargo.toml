@@ -13,7 +13,7 @@ path = "src/lib.rs"
 axum.workspace = true
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
 sdkwork_payment_service_host.workspace = true
-sdkwork_routes_payment_app_api = { package = "sdkwork-routes-payment-app-api", path = "../sdkwork-routes-payment-app-api" }
-sdkwork_routes_payment_backend_api = { package = "sdkwork-routes-payment-backend-api", path = "../sdkwork-routes-payment-backend-api" }
 sdkwork-web-bootstrap.workspace = true
 sdkwork-web-core.workspace = true
+sdkwork_routes_payment_app_api.workspace = true
+sdkwork_routes_payment_backend_api.workspace = true

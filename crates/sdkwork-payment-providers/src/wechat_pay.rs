@@ -69,16 +69,14 @@ pub struct WeChatPayRsaCrypto {
 }
 
 impl WeChatPayRsaCrypto {
-    pub fn new(
-        merchant_private_key_pem: &str,
-        api_v3_key: &str,
-    ) -> ProviderResult<Self> {
-        let private_key = RsaPrivateKey::from_pkcs8_pem(merchant_private_key_pem).map_err(|error| {
-            ProviderError::invalid_request(
-                PaymentAdapterOperation::CreatePaymentIntent,
-                format!("invalid WeChat Pay merchant private key: {error}"),
-            )
-        })?;
+    pub fn new(merchant_private_key_pem: &str, api_v3_key: &str) -> ProviderResult<Self> {
+        let private_key =
+            RsaPrivateKey::from_pkcs8_pem(merchant_private_key_pem).map_err(|error| {
+                ProviderError::invalid_request(
+                    PaymentAdapterOperation::CreatePaymentIntent,
+                    format!("invalid WeChat Pay merchant private key: {error}"),
+                )
+            })?;
         if api_v3_key.len() != 32 {
             return Err(ProviderError::invalid_request(
                 PaymentAdapterOperation::VerifyWebhook,
@@ -101,12 +99,13 @@ impl WeChatPayRsaCrypto {
         payload: &str,
         signature: &str,
     ) -> ProviderResult<bool> {
-        let public_key = RsaPublicKey::from_public_key_pem(platform_public_key_pem).map_err(|error| {
-            ProviderError::invalid_request(
-                PaymentAdapterOperation::VerifyWebhook,
-                format!("invalid WeChat Pay platform public key: {error}"),
-            )
-        })?;
+        let public_key =
+            RsaPublicKey::from_public_key_pem(platform_public_key_pem).map_err(|error| {
+                ProviderError::invalid_request(
+                    PaymentAdapterOperation::VerifyWebhook,
+                    format!("invalid WeChat Pay platform public key: {error}"),
+                )
+            })?;
         let decoded = BASE64.decode(signature).map_err(|error| {
             ProviderError::invalid_request(
                 PaymentAdapterOperation::VerifyWebhook,
@@ -120,9 +119,7 @@ impl WeChatPayRsaCrypto {
             )
         })?;
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-        Ok(verifying_key
-            .verify(payload.as_bytes(), &signature)
-            .is_ok())
+        Ok(verifying_key.verify(payload.as_bytes(), &signature).is_ok())
     }
 
     pub fn decrypt_resource(
@@ -175,7 +172,10 @@ pub struct WeChatPayApiClient {
 }
 
 impl WeChatPayApiClient {
-    pub fn new(config: WeChatPayProviderConfig, crypto: Arc<WeChatPayRsaCrypto>) -> ProviderResult<Self> {
+    pub fn new(
+        config: WeChatPayProviderConfig,
+        crypto: Arc<WeChatPayRsaCrypto>,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             config,
             crypto,
@@ -478,14 +478,14 @@ impl PaymentProviderAdapter for WeChatPayProviderAdapter {
                     resource.get("nonce").and_then(Value::as_str),
                     resource.get("ciphertext").and_then(Value::as_str),
                 ) {
+                    let plaintext = crypto.decrypt_resource(associated_data, nonce, ciphertext)?;
                     let plaintext =
-                        crypto.decrypt_resource(associated_data, nonce, ciphertext)?;
-                    let plaintext = serde_json::from_slice::<Value>(&plaintext).map_err(|error| {
-                        ProviderError::invalid_response(
-                            PaymentAdapterOperation::NormalizeWebhook,
-                            format!("WeChat Pay decrypted resource is invalid JSON: {error}"),
-                        )
-                    })?;
+                        serde_json::from_slice::<Value>(&plaintext).map_err(|error| {
+                            ProviderError::invalid_response(
+                                PaymentAdapterOperation::NormalizeWebhook,
+                                format!("WeChat Pay decrypted resource is invalid JSON: {error}"),
+                            )
+                        })?;
                     out_trade_no = plaintext
                         .get("out_trade_no")
                         .and_then(Value::as_str)

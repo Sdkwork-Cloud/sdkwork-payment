@@ -1,7 +1,7 @@
-pub mod providers;
 pub mod commands;
 pub mod domain;
 pub mod ports;
+pub mod providers;
 pub mod queries;
 pub mod service;
 pub mod validation;

@@ -8,24 +8,23 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
+use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{PaymentProviderRegistry, ProviderCredentialBundle};
+use sdkwork_payment_repository_sqlx::{
+    enrich_owner_payment_attempt_postgres, enrich_owner_payment_attempt_sqlite,
+    PostgresCommercePaymentIntentStore, SqliteCommercePaymentIntentStore,
+};
 use sdkwork_payment_service::{
     CancelOwnerPaymentIntentCommand, CreateOwnerPaymentAttemptCommand,
     CreateOwnerPaymentAttemptOutcome, CreateOwnerPaymentIntentCommand, PaymentIntentDetailQuery,
     PaymentIntentView,
 };
-use sdkwork_payment_repository_sqlx::{
-    enrich_owner_payment_attempt_postgres, enrich_owner_payment_attempt_sqlite,
-    PostgresCommercePaymentIntentStore, SqliteCommercePaymentIntentStore,
-};
-use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
 use crate::api_response::{
-    map_service_error, not_found, success_command_accepted, success_item, unauthorized,
-    validation,
+    map_service_error, not_found, success_command_accepted, success_item, unauthorized, validation,
 };
 use crate::command_headers::{validate_app_write_payload, write_payload_with_route_param};
 use crate::subject::app_runtime_subject_from_extension;
@@ -293,20 +292,20 @@ pub fn app_payment_intent_router_with_postgres_pool(
 
 pub fn build_app_payment_intent_router(store: Arc<dyn CommercePaymentIntentStore>) -> Router {
     Router::new()
-            .route("/app/v3/api/payments/intents", post(create_payment_intent))
-            .route(
-                "/app/v3/api/payments/intents/{paymentIntentId}",
-                get(retrieve_payment_intent),
-            )
-            .route(
-                "/app/v3/api/payments/intents/{paymentIntentId}/cancel",
-                post(cancel_payment_intent),
-            )
-            .route(
-                "/app/v3/api/payments/intents/{paymentIntentId}/attempts",
-                post(create_payment_attempt),
-            )
-            .with_state(AppPaymentIntentState { store })
+        .route("/app/v3/api/payments/intents", post(create_payment_intent))
+        .route(
+            "/app/v3/api/payments/intents/{paymentIntentId}",
+            get(retrieve_payment_intent),
+        )
+        .route(
+            "/app/v3/api/payments/intents/{paymentIntentId}/cancel",
+            post(cancel_payment_intent),
+        )
+        .route(
+            "/app/v3/api/payments/intents/{paymentIntentId}/attempts",
+            post(create_payment_attempt),
+        )
+        .with_state(AppPaymentIntentState { store })
 }
 
 async fn create_payment_intent(
@@ -395,8 +394,11 @@ async fn cancel_payment_intent(
         Ok(subject) => subject,
         Err(message) => return unauthorized(ctx, message),
     };
-    let payload =
-        write_payload_with_route_param("paymentIntentId", &payment_intent_id, &serde_json::json!({}));
+    let payload = write_payload_with_route_param(
+        "paymentIntentId",
+        &payment_intent_id,
+        &serde_json::json!({}),
+    );
     let _write_headers = match validate_app_write_payload(
         &headers,
         "payments.intents.cancel",

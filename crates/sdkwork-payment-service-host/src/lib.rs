@@ -7,7 +7,9 @@ pub struct PaymentServiceHost {
 
 impl PaymentServiceHost {
     pub async fn new() -> Self {
-        Self::from_env().await.expect("payment service host bootstrap failed")
+        Self::from_env()
+            .await
+            .expect("payment service host bootstrap failed")
     }
 
     pub async fn from_env() -> Result<Self, String> {

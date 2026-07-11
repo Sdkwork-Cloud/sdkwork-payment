@@ -1,10 +1,11 @@
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
-use sdkwork_payment_service::{
-    validate_payment_wire_transition, validate_refund_wire_transition, wire_product_types_from_scene_codes,
-    PaymentIntentDraft, PaymentProviderCommand, PaymentProviderPort, PaymentProviderPortRequirement,
-    PaymentStatus, PaymentTransition, RefundStatus, RefundTransition, SandboxPaymentProvider,
-};
 use sdkwork_payment_service::CreatePaymentIntentCommand;
+use sdkwork_payment_service::{
+    validate_payment_wire_transition, validate_refund_wire_transition,
+    wire_product_types_from_scene_codes, PaymentIntentDraft, PaymentProviderCommand,
+    PaymentProviderPort, PaymentProviderPortRequirement, PaymentStatus, PaymentTransition,
+    RefundStatus, RefundTransition, SandboxPaymentProvider,
+};
 
 #[test]
 fn creates_payment_intent_with_method_provider_and_order_reference() {
@@ -13,7 +14,7 @@ fn creates_payment_intent_with_method_provider_and_order_reference() {
         "order-1",
         "wechat_pay",
         "wechat_pay",
-        CommerceMoney::new("19.90").unwrap(),
+        CommerceMoney::new("1990").unwrap(),
         "idem-1",
     )
     .unwrap();
@@ -21,7 +22,7 @@ fn creates_payment_intent_with_method_provider_and_order_reference() {
     assert_eq!(intent.order_id, "order-1");
     assert_eq!(intent.payment_method, "wechat_pay");
     assert_eq!(intent.provider_code, "wechat_pay");
-    assert_eq!(intent.amount.as_str(), "19.90");
+    assert_eq!(intent.amount.as_str(), "1990");
 }
 
 #[test]
@@ -112,10 +113,7 @@ fn validates_refund_wire_transitions() {
 
 #[test]
 fn maps_scene_codes_to_product_types() {
-    let types = wire_product_types_from_scene_codes(&[
-        "web".to_string(),
-        "app".to_string(),
-    ]);
+    let types = wire_product_types_from_scene_codes(&["web".to_string(), "app".to_string()]);
     let codes: Vec<_> = types.iter().map(|(code, _)| code.as_str()).collect();
     assert!(codes.contains(&"pc"));
     assert!(codes.contains(&"app"));
@@ -129,7 +127,7 @@ fn sandbox_provider_creates_payment_intent_draft() {
         order_id: "order-1".to_string(),
         payment_method: "wechat_pay".to_string(),
         provider_code: "wechat_pay".to_string(),
-        amount: CommerceMoney::new("9.90").unwrap(),
+        amount: CommerceMoney::new("990").unwrap(),
         idempotency_key: "idem-1".to_string(),
     };
     let draft = PaymentProviderPort::create_payment_intent(&provider, &command).unwrap();

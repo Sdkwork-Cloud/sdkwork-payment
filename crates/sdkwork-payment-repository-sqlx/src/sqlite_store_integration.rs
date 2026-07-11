@@ -29,7 +29,7 @@ async fn seed_paid_order_with_attempt(pool: &sqlx::SqlitePool) {
         r#"
         INSERT INTO commerce_order_amount_breakdown
             (id, tenant_id, order_id, allocation_type, payable_amount, discount_amount, created_at)
-        VALUES ('breakdown-1', '100001', 'order-1', 'order_total', '10.00', '0.00', ?)
+        VALUES ('breakdown-1', '100001', 'order-1', 'order_total', '1000', '0', ?)
         "#,
     )
     .bind(now)
@@ -42,7 +42,7 @@ async fn seed_paid_order_with_attempt(pool: &sqlx::SqlitePool) {
         INSERT INTO commerce_payment_intent
             (id, tenant_id, owner_user_id, order_id, payment_intent_no, amount, status,
              idempotency_key, created_at, updated_at)
-        VALUES ('pi-1', '100001', 'user-1', 'order-1', 'PI-1', '10.00', 'succeeded',
+        VALUES ('pi-1', '100001', 'user-1', 'order-1', 'PI-1', '1000', 'succeeded',
                 'pi-idem-1', ?, ?)
         "#,
     )
@@ -57,7 +57,7 @@ async fn seed_paid_order_with_attempt(pool: &sqlx::SqlitePool) {
         INSERT INTO commerce_payment_attempt
             (id, tenant_id, owner_user_id, payment_intent_id, order_id, amount, status,
              paid_at, idempotency_key, created_at, updated_at)
-        VALUES ('pa-1', '100001', 'user-1', 'pi-1', 'order-1', '10.00', 'succeeded',
+        VALUES ('pa-1', '100001', 'user-1', 'pi-1', 'order-1', '1000', 'succeeded',
                 ?, 'pa-idem-1', ?, ?)
         "#,
     )
@@ -81,7 +81,7 @@ async fn refund_create_is_idempotent_by_idempotency_key() {
         "user-1",
         "order-1",
         Some("pa-1"),
-        Some("5.00"),
+        Some("500"),
         Some("buyer_request"),
         "req-refund-1",
         "idem-refund-1",
@@ -92,7 +92,10 @@ async fn refund_create_is_idempotent_by_idempotency_key() {
         .create_owner_refund(command.clone())
         .await
         .expect("first refund");
-    let second = store.create_owner_refund(command).await.expect("replay refund");
+    let second = store
+        .create_owner_refund(command)
+        .await
+        .expect("replay refund");
 
     assert_eq!(first.refund_id, second.refund_id);
     assert_eq!(first.refund_no, second.refund_no);
@@ -111,7 +114,7 @@ async fn refund_list_uses_sql_pagination() {
             "user-1",
             "order-1",
             Some("pa-1"),
-            Some("1.00"),
+            Some("100"),
             None,
             &format!("req-refund-{index}"),
             &format!("idem-refund-{index}"),
@@ -142,7 +145,7 @@ async fn cancel_payment_intent_rejects_invalid_transition() {
         INSERT INTO commerce_payment_intent
             (id, tenant_id, owner_user_id, order_id, payment_intent_no, amount, status,
              idempotency_key, created_at, updated_at)
-        VALUES ('pi-succeeded', '100001', 'user-1', 'order-1', 'PI-S', '10.00', 'succeeded',
+        VALUES ('pi-succeeded', '100001', 'user-1', 'order-1', 'PI-S', '1000', 'succeeded',
                 'pi-idem-s', ?, ?)
         "#,
     )
@@ -153,13 +156,8 @@ async fn cancel_payment_intent_rejects_invalid_transition() {
     .expect("seed succeeded intent");
 
     let store = SqliteCommercePaymentIntentStore::new(pool);
-    let command = CancelOwnerPaymentIntentCommand::new(
-        "100001",
-        None,
-        "user-1",
-        "pi-succeeded",
-    )
-    .expect("command");
+    let command = CancelOwnerPaymentIntentCommand::new("100001", None, "user-1", "pi-succeeded")
+        .expect("command");
 
     let error = store
         .cancel_owner_payment_intent(command)
@@ -177,7 +175,7 @@ async fn cancel_pending_payment_intent_succeeds() {
         INSERT INTO commerce_payment_intent
             (id, tenant_id, owner_user_id, order_id, payment_intent_no, amount, status,
              idempotency_key, created_at, updated_at)
-        VALUES ('pi-pending', '100001', 'user-1', 'order-1', 'PI-P', '10.00', 'pending',
+        VALUES ('pi-pending', '100001', 'user-1', 'order-1', 'PI-P', '1000', 'pending',
                 'pi-idem-p', ?, ?)
         "#,
     )
@@ -188,13 +186,8 @@ async fn cancel_pending_payment_intent_succeeds() {
     .expect("seed pending intent");
 
     let store = SqliteCommercePaymentIntentStore::new(pool.clone());
-    let command = CancelOwnerPaymentIntentCommand::new(
-        "100001",
-        None,
-        "user-1",
-        "pi-pending",
-    )
-    .expect("command");
+    let command = CancelOwnerPaymentIntentCommand::new("100001", None, "user-1", "pi-pending")
+        .expect("command");
 
     let view = store
         .cancel_owner_payment_intent(command)
