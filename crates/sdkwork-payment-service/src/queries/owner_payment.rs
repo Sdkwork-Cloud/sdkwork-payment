@@ -38,6 +38,19 @@ pub struct PayOwnerOrderCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PayOwnerOrderCommandInput {
+    pub tenant_id: String,
+    pub organization_id: Option<String>,
+    pub owner_user_id: String,
+    pub order_id: String,
+    pub payment_method: String,
+    pub payment_scene: Option<String>,
+    pub payment_attempt_callback_payload: Option<String>,
+    pub request_no: String,
+    pub idempotency_key: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PayOwnerOrderOutcome {
     pub amount: CommerceMoney,
     pub order_id: String,
@@ -77,59 +90,27 @@ impl OrderPaymentReferenceQuery {
 }
 
 impl PayOwnerOrderCommand {
-    pub fn new(
-        tenant_id: &str,
-        organization_id: Option<&str>,
-        owner_user_id: &str,
-        order_id: &str,
-        payment_method: &str,
-        payment_scene: Option<String>,
-        request_no: &str,
-        idempotency_key: &str,
-    ) -> Result<Self, CommerceServiceError> {
-        Self::with_payment_attempt_callback_payload(
-            tenant_id,
-            organization_id,
-            owner_user_id,
-            order_id,
-            payment_method,
-            payment_scene,
-            None,
-            request_no,
-            idempotency_key,
-        )
-    }
-
-    pub fn with_payment_attempt_callback_payload(
-        tenant_id: &str,
-        organization_id: Option<&str>,
-        owner_user_id: &str,
-        order_id: &str,
-        payment_method: &str,
-        payment_scene: Option<String>,
-        payment_attempt_callback_payload: Option<String>,
-        request_no: &str,
-        idempotency_key: &str,
-    ) -> Result<Self, CommerceServiceError> {
-        crate::validation::require_non_empty("tenant_id", tenant_id)?;
-        crate::validation::require_non_empty("owner_user_id", owner_user_id)?;
-        crate::validation::require_non_empty("order_id", order_id)?;
-        crate::validation::require_non_empty("payment_method", payment_method)?;
-        crate::validation::require_non_empty("request_no", request_no)?;
-        crate::validation::require_non_empty("idempotency_key", idempotency_key)?;
+    pub fn new(input: PayOwnerOrderCommandInput) -> Result<Self, CommerceServiceError> {
+        crate::validation::require_non_empty("tenant_id", &input.tenant_id)?;
+        crate::validation::require_non_empty("owner_user_id", &input.owner_user_id)?;
+        crate::validation::require_non_empty("order_id", &input.order_id)?;
+        crate::validation::require_non_empty("payment_method", &input.payment_method)?;
+        crate::validation::require_non_empty("request_no", &input.request_no)?;
+        crate::validation::require_non_empty("idempotency_key", &input.idempotency_key)?;
 
         Ok(Self {
-            order_id: order_id.trim().to_string(),
-            organization_id: optional_text(organization_id),
-            owner_user_id: owner_user_id.trim().to_string(),
-            payment_method: payment_method.trim().to_ascii_lowercase(),
-            payment_scene: payment_scene
+            order_id: input.order_id.trim().to_string(),
+            organization_id: optional_text(input.organization_id.as_deref()),
+            owner_user_id: input.owner_user_id.trim().to_string(),
+            payment_method: input.payment_method.trim().to_ascii_lowercase(),
+            payment_scene: input
+                .payment_scene
                 .map(|value| value.trim().to_ascii_lowercase())
                 .filter(|value| !value.is_empty()),
-            payment_attempt_callback_payload,
-            tenant_id: tenant_id.trim().to_string(),
-            idempotency_key: idempotency_key.trim().to_string(),
-            request_no: request_no.trim().to_string(),
+            payment_attempt_callback_payload: input.payment_attempt_callback_payload,
+            tenant_id: input.tenant_id.trim().to_string(),
+            idempotency_key: input.idempotency_key.trim().to_string(),
+            request_no: input.request_no.trim().to_string(),
         })
     }
 }
@@ -159,4 +140,52 @@ fn optional_text(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PayOwnerOrderCommand, PayOwnerOrderCommandInput};
+
+    #[test]
+    fn pay_owner_order_input_preserves_validation_and_normalization() {
+        let command = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
+            tenant_id: " tenant-1 ".to_owned(),
+            organization_id: Some(" organization-1 ".to_owned()),
+            owner_user_id: " user-1 ".to_owned(),
+            order_id: " order-1 ".to_owned(),
+            payment_method: " WeChat_Pay ".to_owned(),
+            payment_scene: Some(" Mini_Program ".to_owned()),
+            payment_attempt_callback_payload: Some("{\"source\":\"test\"}".to_owned()),
+            request_no: " request-1 ".to_owned(),
+            idempotency_key: " idempotency-1 ".to_owned(),
+        })
+        .expect("pay owner order command");
+
+        assert_eq!(command.tenant_id, "tenant-1");
+        assert_eq!(command.organization_id.as_deref(), Some("organization-1"));
+        assert_eq!(command.owner_user_id, "user-1");
+        assert_eq!(command.order_id, "order-1");
+        assert_eq!(command.payment_method, "wechat_pay");
+        assert_eq!(command.payment_scene.as_deref(), Some("mini_program"));
+        assert_eq!(
+            command.payment_attempt_callback_payload.as_deref(),
+            Some("{\"source\":\"test\"}")
+        );
+        assert_eq!(command.request_no, "request-1");
+        assert_eq!(command.idempotency_key, "idempotency-1");
+
+        let error = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
+            tenant_id: " ".to_owned(),
+            organization_id: None,
+            owner_user_id: "user-1".to_owned(),
+            order_id: "order-1".to_owned(),
+            payment_method: "wechat_pay".to_owned(),
+            payment_scene: None,
+            payment_attempt_callback_payload: None,
+            request_no: "request-1".to_owned(),
+            idempotency_key: "idempotency-1".to_owned(),
+        })
+        .expect_err("blank tenant must be rejected");
+        assert_eq!(error.code(), "validation");
+    }
 }

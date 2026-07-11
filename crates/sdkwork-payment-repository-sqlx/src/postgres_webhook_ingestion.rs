@@ -3,7 +3,7 @@ use sqlx::{Pool, Postgres, Row};
 
 use crate::payment_attempt_context::{
     load_attempt_by_out_trade_no_postgres,
-    load_payment_webhook_attempt_context_by_out_trade_no_postgres,
+    load_payment_webhook_attempt_context_by_id_postgres,
 };
 use crate::shared::{current_timestamp_string, stable_storage_id, store_error};
 use crate::sqlite_webhook_ingestion::{
@@ -49,7 +49,7 @@ pub async fn ingest_provider_webhook_postgres(
                 r#"
                 INSERT INTO commerce_payment_webhook_event
                     (id, tenant_id, event_id, event_type, provider_code, payload, status, received_at, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, 'unmatched', $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, 'unmatched', $7::timestamptz, $8::timestamptz, $9::timestamptz)
                 ON CONFLICT (tenant_id, event_id) DO NOTHING
                 "#,
             )
@@ -81,7 +81,15 @@ pub async fn ingest_provider_webhook_postgres(
         .await
         .map_err(|error| store_error("failed to begin webhook ingestion transaction", error))?;
 
-    let (tenant_id, _) = match load_attempt_by_out_trade_no_postgres(&mut tx, out_trade_no).await? {
+    let (tenant_id, _) = match load_attempt_by_out_trade_no_postgres(
+        &mut tx,
+        &command.provider_code,
+        out_trade_no,
+        command.tenant_id.as_deref(),
+        command.organization_id.as_deref(),
+    )
+    .await?
+    {
         Some(context) => context,
         None => {
             tx.commit().await.map_err(|error| {
@@ -95,7 +103,7 @@ pub async fn ingest_provider_webhook_postgres(
         r#"
         INSERT INTO commerce_payment_webhook_event
             (id, tenant_id, event_id, event_type, provider_code, payload, status, received_at, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $7, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7::timestamptz, $7::timestamptz, $7::timestamptz)
         ON CONFLICT (tenant_id, event_id) DO NOTHING
         "#,
     )
@@ -116,13 +124,24 @@ pub async fn ingest_provider_webhook_postgres(
             &command.provider_code,
             command.out_trade_no.as_deref(),
             command.payment_status.as_deref(),
+            command.tenant_id.as_deref(),
+            command.organization_id.as_deref(),
             &now,
         )
         .await?;
 
         let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
-            load_payment_webhook_attempt_context_by_out_trade_no_postgres(&mut tx, out_trade_no)
-                .await?
+            match payment_attempt_id.as_deref() {
+                Some(payment_attempt_id) => load_payment_webhook_attempt_context_by_id_postgres(
+                    &mut tx,
+                    payment_attempt_id,
+                    &command.provider_code,
+                    command.tenant_id.as_deref(),
+                    command.organization_id.as_deref(),
+                )
+                .await?,
+                None => None,
+            }
         } else {
             None
         };
@@ -144,12 +163,24 @@ pub async fn ingest_provider_webhook_postgres(
         &command.provider_code,
         command.out_trade_no.as_deref(),
         command.payment_status.as_deref(),
+        command.tenant_id.as_deref(),
+        command.organization_id.as_deref(),
         &now,
     )
     .await?;
 
     let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
-        load_payment_webhook_attempt_context_by_out_trade_no_postgres(&mut tx, out_trade_no).await?
+        match payment_attempt_id.as_deref() {
+            Some(payment_attempt_id) => load_payment_webhook_attempt_context_by_id_postgres(
+                &mut tx,
+                payment_attempt_id,
+                &command.provider_code,
+                command.tenant_id.as_deref(),
+                command.organization_id.as_deref(),
+            )
+            .await?,
+            None => None,
+        }
     } else {
         None
     };
@@ -157,7 +188,7 @@ pub async fn ingest_provider_webhook_postgres(
     sqlx::query(
         r#"
         UPDATE commerce_payment_webhook_event
-        SET status = 'processed', processed_at = $1, updated_at = $1
+        SET status = 'processed', processed_at = $1::timestamptz, updated_at = $1::timestamptz
         WHERE id = CAST($2 AS TEXT)
         "#,
     )
@@ -185,6 +216,8 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
     provider_code: &str,
     out_trade_no: Option<&str>,
     payment_status: Option<&str>,
+    tenant_id: Option<&str>,
+    organization_id: Option<&str>,
     now: &str,
 ) -> Result<(Option<String>, Option<String>), CommerceServiceError> {
     let Some(out_trade_no) = out_trade_no.filter(|value| !value.trim().is_empty()) else {
@@ -197,22 +230,35 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
         return Ok((None, None));
     };
 
-    let row = sqlx::query(
+    let rows = sqlx::query(
         r#"
         SELECT id, status
         FROM commerce_payment_attempt
-        WHERE out_trade_no = CAST($1 AS TEXT)
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
+        WHERE provider_code = CAST($1 AS TEXT)
+          AND out_trade_no = CAST($2 AS TEXT)
+          AND ($3::text IS NULL OR tenant_id = CAST($3 AS TEXT))
+          AND ($4::text IS NULL OR organization_id = CAST($4 AS TEXT))
+          AND deleted_at IS NULL
+        ORDER BY id
+        LIMIT 2
         "#,
     )
+    .bind(provider_code)
     .bind(out_trade_no)
-    .fetch_optional(&mut **tx)
+    .bind(tenant_id)
+    .bind(organization_id)
+    .fetch_all(&mut **tx)
     .await
     .map_err(|error| store_error("failed to load payment attempt for webhook", error))?;
 
-    let Some(row) = row else {
-        return Ok((None, None));
+    let row = match rows.as_slice() {
+        [] => return Ok((None, None)),
+        [_first, _second, ..] => {
+            return Err(CommerceServiceError::conflict(
+                "multiple payment attempts match webhook identity",
+            ));
+        }
+        [row] => row,
     };
 
     let attempt_id: String = row
@@ -231,13 +277,25 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
     sqlx::query(
         r#"
         UPDATE commerce_payment_attempt
-        SET status = $1, updated_at = $2, paid_at = CASE WHEN $1 = 'succeeded' THEN $2 ELSE paid_at END
+        SET status = $1,
+            updated_at = $2::timestamptz,
+            paid_at = CASE
+                WHEN $1 = 'succeeded' THEN COALESCE(paid_at, $2::timestamptz)
+                ELSE paid_at
+            END
         WHERE id = CAST($3 AS TEXT)
+          AND provider_code = CAST($4 AS TEXT)
+          AND ($5::text IS NULL OR tenant_id = CAST($5 AS TEXT))
+          AND ($6::text IS NULL OR organization_id = CAST($6 AS TEXT))
+          AND deleted_at IS NULL
         "#,
     )
     .bind(target_status)
     .bind(now)
     .bind(&attempt_id)
+    .bind(provider_code)
+    .bind(tenant_id)
+    .bind(organization_id)
     .execute(&mut **tx)
     .await
     .map_err(|error| store_error("failed to update payment attempt from webhook", error))?;
@@ -245,10 +303,11 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
     sqlx::query(
         r#"
         UPDATE commerce_payment_intent pi
-        SET status = $1, updated_at = $2
+        SET status = $1, updated_at = $2::timestamptz
         WHERE pi.id = (
             SELECT payment_intent_id FROM commerce_payment_attempt WHERE id = CAST($3 AS TEXT)
         )
+          AND pi.deleted_at IS NULL
           AND LOWER(COALESCE(pi.status, '')) IN ('created', 'pending', 'processing', 'refunding')
         "#,
     )

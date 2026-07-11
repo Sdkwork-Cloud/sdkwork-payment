@@ -4,8 +4,8 @@ use sdkwork_payment_service::{
 };
 
 use crate::{
-    test_sqlite_pool::payment_store_e2e_sqlite_memory_pool, SqliteCommercePaymentIntentStore,
-    SqliteCommerceRefundStore,
+    test_sqlite_pool::payment_store_e2e_sqlite_memory_pool, SqliteCommerceOwnerOrderPaymentStore,
+    SqliteCommercePaymentIntentStore, SqliteCommerceRefundStore,
 };
 
 async fn seed_paid_order_with_attempt(pool: &sqlx::SqlitePool) {
@@ -67,6 +67,94 @@ async fn seed_paid_order_with_attempt(pool: &sqlx::SqlitePool) {
     .execute(pool)
     .await
     .expect("seed attempt");
+}
+
+async fn seed_owner_order_payment_confirmation(
+    pool: &sqlx::SqlitePool,
+    attempt_status: &str,
+    paid_at: Option<&str>,
+) {
+    let now = "2026-07-12T00:00:00Z";
+    sqlx::query(
+        r#"
+        INSERT INTO commerce_payment_intent
+            (id, tenant_id, owner_user_id, order_id, payment_intent_no, amount, status,
+             idempotency_key, created_at, updated_at)
+        VALUES ('pi-confirm', 'tenant-confirm', 'user-confirm', 'order-confirm', 'PI-CONFIRM',
+                '8800', ?, 'pi-confirm-idem', ?, ?)
+        "#,
+    )
+    .bind(if attempt_status == "succeeded" {
+        "succeeded"
+    } else {
+        "pending"
+    })
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("seed confirmation intent");
+
+    sqlx::query(
+        r#"
+        INSERT INTO commerce_payment_attempt
+            (id, tenant_id, owner_user_id, payment_intent_id, order_id, amount, status,
+             paid_at, idempotency_key, created_at, updated_at)
+        VALUES ('pa-confirm', 'tenant-confirm', 'user-confirm', 'pi-confirm', 'order-confirm',
+                '8800', ?, ?, 'pa-confirm-idem', ?, ?)
+        "#,
+    )
+    .bind(attempt_status)
+    .bind(paid_at)
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("seed confirmation attempt");
+}
+
+#[tokio::test]
+async fn owner_order_confirmation_replay_returns_original_paid_at() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    let original_paid_at = "2026-07-11T23:59:58Z";
+    seed_owner_order_payment_confirmation(&pool, "succeeded", Some(original_paid_at)).await;
+
+    let outcome = SqliteCommerceOwnerOrderPaymentStore::new(pool)
+        .confirm_owner_order_payment("tenant-confirm", None, "user-confirm", "order-confirm")
+        .await
+        .expect("replayed confirmation");
+
+    assert!(outcome.replayed);
+    assert_eq!(outcome.paid_at, original_paid_at);
+}
+
+#[tokio::test]
+async fn concurrent_owner_order_confirmations_report_exactly_one_first_write() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_owner_order_payment_confirmation(&pool, "pending", None).await;
+    let store = SqliteCommerceOwnerOrderPaymentStore::new(pool.clone());
+
+    let (first, second) = tokio::join!(
+        store.confirm_owner_order_payment("tenant-confirm", None, "user-confirm", "order-confirm",),
+        store.confirm_owner_order_payment("tenant-confirm", None, "user-confirm", "order-confirm",)
+    );
+    let first = first.expect("first concurrent confirmation");
+    let second = second.expect("second concurrent confirmation");
+
+    assert_eq!(
+        usize::from(!first.replayed) + usize::from(!second.replayed),
+        1
+    );
+    assert_eq!(first.paid_at, second.paid_at);
+
+    let persisted: (String, Option<String>) = sqlx::query_as(
+        "SELECT status, paid_at FROM commerce_payment_attempt WHERE id = 'pa-confirm'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("persisted confirmation attempt");
+    assert_eq!(persisted.0, "succeeded");
+    assert_eq!(persisted.1.as_deref(), Some(first.paid_at.as_str()));
 }
 
 #[tokio::test]

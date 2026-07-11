@@ -9,7 +9,7 @@ pub use intent::{
 };
 pub use owner_payment::{
     CancelOrderPaymentsCommand, OrderPaymentReferenceQuery, OrderPaymentReferenceSnapshot,
-    PayOwnerOrderCommand, PayOwnerOrderOutcome,
+    PayOwnerOrderCommand, PayOwnerOrderCommandInput, PayOwnerOrderOutcome,
 };
 pub use refund::{
     CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,

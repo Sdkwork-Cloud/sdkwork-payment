@@ -27,7 +27,7 @@ pub use owner_order_checkout::{
     enrich_owner_order_payment_postgres, enrich_owner_order_payment_sqlite,
     enrich_owner_payment_attempt_postgres, enrich_owner_payment_attempt_sqlite,
     enrich_payment_record_checkout_postgres, enrich_payment_record_checkout_sqlite,
-    provider_account_binding,
+    provider_account_binding, OwnerOrderPaymentEnrichmentContext,
 };
 pub use payment_attempt_context::{
     load_payment_attempt_provider_context_by_id_postgres,

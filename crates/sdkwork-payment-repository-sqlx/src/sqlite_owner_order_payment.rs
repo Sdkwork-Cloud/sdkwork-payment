@@ -1,14 +1,17 @@
 use sdkwork_contract_service::{CommerceMoney, CommercePaymentStatus, CommerceServiceError};
 use sdkwork_payment_service::{
     CancelOrderPaymentsCommand, ConfirmOwnerOrderPaymentOutcome, PayOwnerOrderCommand,
-    PayOwnerOrderOutcome,
+    PayOwnerOrderOutcome, OrderPaymentSettlementAttempt,
 };
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::order_reference::order_status_is_payable;
 use crate::owner_payment_params::owner_order_payment_params;
-use crate::shared::{payment_attempt_is_terminal_success, stable_storage_id};
+use crate::shared::{
+    current_timestamp_string, ensure_confirmation_intent_update,
+    payment_attempt_is_terminal_success, required_persisted_paid_at,
+    resolve_confirmation_attempt_replayed, stable_storage_id,
+};
 
 #[derive(Debug, Clone)]
 pub struct SqliteCommerceOwnerOrderPaymentStore {
@@ -24,7 +27,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         &self,
         command: CancelOrderPaymentsCommand,
     ) -> Result<(), CommerceServiceError> {
-        let now = current_command_timestamp();
+        let now = current_timestamp_string();
         // C1/C2 修复：取消操作必须在单事务内执行，且只能取消未终结状态的支付意图/尝试，
         // 严禁覆盖 succeeded/refunded/closed 等终态，避免"已收款但订单显示已取消"的资金事故。
         let mut tx = self
@@ -38,19 +41,85 @@ impl SqliteCommerceOwnerOrderPaymentStore {
                 )
             })?;
 
+        sqlx::query(
+            r#"
+            SELECT id
+            FROM commerce_order
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
+            "#,
+        )
+        .bind(&command.tenant_id)
+        .bind(&command.organization_id)
+        .bind(&command.organization_id)
+        .bind(&command.owner_user_id)
+        .bind(&command.order_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to lock owner order for payment cancellation", error))?;
+
+        sqlx::query(
+            r#"
+            SELECT id
+            FROM commerce_payment_intent
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
+            ORDER BY id
+            "#,
+        )
+        .bind(&command.tenant_id)
+        .bind(&command.organization_id)
+        .bind(&command.organization_id)
+        .bind(&command.owner_user_id)
+        .bind(&command.order_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to lock owner payment intents", error))?;
+
+        sqlx::query(
+            r#"
+            SELECT id
+            FROM commerce_payment_attempt
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
+            ORDER BY id
+            "#,
+        )
+        .bind(&command.tenant_id)
+        .bind(&command.organization_id)
+        .bind(&command.organization_id)
+        .bind(&command.owner_user_id)
+        .bind(&command.order_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to lock owner payment attempts", error))?;
+
         let affected_intent = sqlx::query(
             r#"
             UPDATE commerce_payment_intent
             SET status = ?, updated_at = ?
             WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
               AND owner_user_id = CAST(? AS TEXT)
               AND order_id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
               AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
             "#,
         )
         .bind(CommercePaymentStatus::Canceled.as_str())
         .bind(&now)
         .bind(&command.tenant_id)
+        .bind(&command.organization_id)
+        .bind(&command.organization_id)
         .bind(&command.owner_user_id)
         .bind(&command.order_id)
         .execute(&mut *tx)
@@ -62,14 +131,18 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             UPDATE commerce_payment_attempt
             SET status = ?, updated_at = ?
             WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
               AND owner_user_id = CAST(? AS TEXT)
               AND order_id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
               AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
             "#,
         )
         .bind(CommercePaymentStatus::Canceled.as_str())
         .bind(&now)
         .bind(&command.tenant_id)
+        .bind(&command.organization_id)
+        .bind(&command.organization_id)
         .bind(&command.owner_user_id)
         .bind(&command.order_id)
         .execute(&mut *tx)
@@ -90,13 +163,17 @@ impl SqliteCommerceOwnerOrderPaymentStore {
                 SELECT 1
                 FROM commerce_payment_intent
                 WHERE tenant_id = CAST(? AS TEXT)
+                  AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
                   AND owner_user_id = CAST(? AS TEXT)
                   AND order_id = CAST(? AS TEXT)
+                  AND deleted_at IS NULL
                   AND LOWER(COALESCE(status, '')) NOT IN ('created', 'pending', 'processing', 'canceled')
                 LIMIT 1
                 "#,
             )
             .bind(&command.tenant_id)
+            .bind(&command.organization_id)
+            .bind(&command.organization_id)
             .bind(&command.owner_user_id)
             .bind(&command.order_id)
             .fetch_optional(&self.pool)
@@ -202,7 +279,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         }
 
         let method = load_owner_payment_method(&mut tx, &command).await?;
-        let now = current_command_timestamp();
+        let now = current_timestamp_string();
         let payment_intent_id = stable_storage_id(&[
             "pi",
             &command.tenant_id,
@@ -322,12 +399,21 @@ impl SqliteCommerceOwnerOrderPaymentStore {
 
     pub async fn confirm_owner_order_payment(
         &self,
-        tenant_id: &str,
-        organization_id: Option<&str>,
-        owner_user_id: &str,
-        order_id: &str,
+        settlement: &OrderPaymentSettlementAttempt,
     ) -> Result<ConfirmOwnerOrderPaymentOutcome, CommerceServiceError> {
-        let paid_at = current_command_timestamp();
+        let confirmation_paid_at = current_timestamp_string();
+        let tenant_id = settlement.tenant_id.as_str();
+        let organization_id = settlement.organization_id.as_deref();
+        let owner_user_id = settlement.owner_user_id.as_str();
+        let order_id = settlement.order_id.as_str();
+        let payment_attempt_id = settlement
+            .payment_attempt_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty());
+        let out_trade_no = settlement
+            .out_trade_no
+            .as_deref()
+            .filter(|value| !value.trim().is_empty());
         let mut tx = self
             .pool
             .begin_with("BEGIN IMMEDIATE")
@@ -339,16 +425,15 @@ impl SqliteCommerceOwnerOrderPaymentStore {
                 )
             })?;
 
-        let attempt_row = sqlx::query(
+        let order_row = sqlx::query(
             r#"
-            SELECT id, status
-            FROM commerce_payment_attempt
+            SELECT id
+            FROM commerce_order
             WHERE tenant_id = CAST(? AS TEXT)
               AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
               AND owner_user_id = CAST(? AS TEXT)
-              AND order_id = CAST(? AS TEXT)
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
+              AND id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
             "#,
         )
         .bind(tenant_id)
@@ -358,22 +443,162 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .bind(order_id)
         .fetch_optional(&mut *tx)
         .await
+        .map_err(|error| store_error("failed to lock owner order for payment confirmation", error))?;
+        if order_row.is_none() {
+            return Err(CommerceServiceError::not_found(
+                "owner order was not found for payment confirmation",
+            ));
+        }
+
+        let candidate_rows = sqlx::query(
+            r#"
+            SELECT id, payment_intent_id, status, paid_at, out_trade_no
+            FROM commerce_payment_attempt
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND (? IS NULL OR id = CAST(? AS TEXT))
+              AND (? IS NULL OR out_trade_no = CAST(? AS TEXT))
+              AND deleted_at IS NULL
+            ORDER BY id
+            LIMIT 2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(owner_user_id)
+        .bind(order_id)
+        .bind(payment_attempt_id)
+        .bind(payment_attempt_id)
+        .bind(out_trade_no)
+        .bind(out_trade_no)
+        .fetch_all(&mut *tx)
+        .await
         .map_err(|error| store_error("failed to load owner order payment attempt", error))?;
 
-        let Some(attempt_row) = attempt_row else {
-            return Err(CommerceServiceError::not_found(
-                "owner order payment attempt was not found",
-            ));
+        let candidate_row = match candidate_rows.as_slice() {
+            [] => {
+                return Err(CommerceServiceError::not_found(
+                    "owner order payment attempt was not found",
+                ));
+            }
+            [_first, _second, ..] => {
+                return Err(CommerceServiceError::conflict(
+                    "multiple payment attempts match manual confirmation",
+                ));
+            }
+            [row] => row,
         };
 
-        let attempt_status = string_cell(&attempt_row, "status");
-        if !payment_attempt_is_terminal_success(&attempt_status) {
+        let attempt_id = string_cell(candidate_row, "id");
+        let payment_intent_id = string_cell(candidate_row, "payment_intent_id");
+
+        let intent_row = sqlx::query(
+            r#"
+            SELECT id, status
+            FROM commerce_payment_intent
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(owner_user_id)
+        .bind(order_id)
+        .bind(&payment_intent_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to lock owner payment intent", error))?
+        .ok_or_else(|| {
+            CommerceServiceError::storage(
+                "owner payment attempt references a missing or deleted payment intent",
+            )
+        })?;
+        let intent_status = string_cell(&intent_row, "status");
+
+        let locked_attempt = sqlx::query(
+            r#"
+            SELECT id, payment_intent_id, status, paid_at, out_trade_no
+            FROM commerce_payment_attempt
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND id = CAST(? AS TEXT)
+              AND payment_intent_id = CAST(? AS TEXT)
+              AND (? IS NULL OR out_trade_no = CAST(? AS TEXT))
+              AND deleted_at IS NULL
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(owner_user_id)
+        .bind(order_id)
+        .bind(&attempt_id)
+        .bind(&payment_intent_id)
+        .bind(out_trade_no)
+        .bind(out_trade_no)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to lock owner payment attempt", error))?
+        .ok_or_else(|| {
+            CommerceServiceError::storage(
+                "owner payment attempt changed identity during confirmation",
+            )
+        })?;
+        let attempt_status = string_cell(&locked_attempt, "status");
+
+        let intent_update = if payment_attempt_is_terminal_success(&intent_status) {
+            None
+        } else {
             crate::shared::ensure_payment_status_transition(
-                &attempt_status,
+                &intent_status,
                 CommercePaymentStatus::Succeeded.as_str(),
             )?;
-        }
+            Some(
+                sqlx::query(
+            r#"
+            UPDATE commerce_payment_intent
+            SET status = ?, updated_at = ?
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
+              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
+            "#,
+        )
+        .bind(CommercePaymentStatus::Succeeded.as_str())
+        .bind(&confirmation_paid_at)
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(owner_user_id)
+        .bind(order_id)
+        .bind(&payment_intent_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to mark owner payment intent succeeded", error))?,
+            )
+        };
+        ensure_confirmation_intent_update(
+            intent_update
+                .as_ref()
+                .map_or(0, sqlx::sqlite::SqliteQueryResult::rows_affected),
+            Some(intent_status.as_str()),
+        )?;
+
         if payment_attempt_is_terminal_success(&attempt_status) {
+            let paid_at = required_persisted_paid_at(&string_cell(&locked_attempt, "paid_at"))?;
             tx.commit().await.map_err(|error| {
                 store_error("failed to commit idempotent payment confirmation", error)
             })?;
@@ -387,50 +612,82 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             });
         }
 
-        sqlx::query(
-            r#"
-            UPDATE commerce_payment_intent
-            SET status = ?, updated_at = ?
-            WHERE tenant_id = CAST(? AS TEXT)
-              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
-              AND owner_user_id = CAST(? AS TEXT)
-              AND order_id = CAST(? AS TEXT)
-              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
-            "#,
-        )
-        .bind(CommercePaymentStatus::Succeeded.as_str())
-        .bind(&paid_at)
-        .bind(tenant_id)
-        .bind(organization_id)
-        .bind(organization_id)
-        .bind(owner_user_id)
-        .bind(order_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| store_error("failed to mark owner payment intent succeeded", error))?;
+        crate::shared::ensure_payment_status_transition(
+            &attempt_status,
+            CommercePaymentStatus::Succeeded.as_str(),
+        )?;
 
-        sqlx::query(
+        let attempt_update = sqlx::query(
             r#"
             UPDATE commerce_payment_attempt
-            SET status = ?, paid_at = ?, updated_at = ?
+            SET status = ?, paid_at = COALESCE(NULLIF(paid_at, ''), ?), updated_at = ?
             WHERE tenant_id = CAST(? AS TEXT)
               AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
               AND owner_user_id = CAST(? AS TEXT)
               AND order_id = CAST(? AS TEXT)
+              AND id = CAST(? AS TEXT)
+              AND payment_intent_id = CAST(? AS TEXT)
+              AND (? IS NULL OR out_trade_no = CAST(? AS TEXT))
+              AND deleted_at IS NULL
               AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
             "#,
         )
         .bind(CommercePaymentStatus::Succeeded.as_str())
-        .bind(&paid_at)
-        .bind(&paid_at)
+        .bind(&confirmation_paid_at)
+        .bind(&confirmation_paid_at)
         .bind(tenant_id)
         .bind(organization_id)
         .bind(organization_id)
         .bind(owner_user_id)
         .bind(order_id)
+        .bind(&attempt_id)
+        .bind(&payment_intent_id)
+        .bind(out_trade_no)
+        .bind(out_trade_no)
         .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to mark owner payment attempt succeeded", error))?;
+
+        let persisted_attempt = sqlx::query(
+            r#"
+            SELECT status, paid_at
+            FROM commerce_payment_attempt
+            WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND order_id = CAST(? AS TEXT)
+              AND id = CAST(? AS TEXT)
+              AND payment_intent_id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(owner_user_id)
+        .bind(order_id)
+        .bind(&attempt_id)
+        .bind(&payment_intent_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| {
+            store_error("failed to verify owner payment attempt confirmation", error)
+        })?;
+
+        let persisted_attempt_status = persisted_attempt
+            .as_ref()
+            .map(|row| string_cell(row, "status"));
+        let replayed = resolve_confirmation_attempt_replayed(
+            attempt_update.rows_affected(),
+            persisted_attempt_status.as_deref(),
+        )?;
+        let paid_at = required_persisted_paid_at(
+            &persisted_attempt
+                .as_ref()
+                .map(|row| string_cell(row, "paid_at"))
+                .unwrap_or_default(),
+        )?;
 
         tx.commit().await.map_err(|error| {
             store_error(
@@ -445,7 +702,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             owner_user_id: owner_user_id.to_owned(),
             order_id: order_id.to_owned(),
             paid_at,
-            replayed: false,
+            replayed,
         })
     }
 }
@@ -453,14 +710,6 @@ impl SqliteCommerceOwnerOrderPaymentStore {
 struct OwnerPaymentMethod {
     method_key: String,
     provider_code: String,
-}
-
-fn current_command_timestamp() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0);
-    format!("{seconds}")
 }
 
 async fn load_owner_payment_method(

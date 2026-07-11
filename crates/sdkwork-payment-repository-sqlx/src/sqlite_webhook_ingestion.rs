@@ -4,7 +4,7 @@ use sqlx::{Pool, Row, Sqlite};
 
 use crate::payment_attempt_context::{
     load_attempt_by_out_trade_no_sqlite,
-    load_payment_webhook_attempt_context_by_out_trade_no_sqlite, PaymentWebhookAttemptContext,
+    load_payment_webhook_attempt_context_by_id_sqlite, PaymentWebhookAttemptContext,
 };
 use crate::shared::{current_timestamp_string, stable_storage_id, store_error};
 use crate::webhook_status::map_provider_payment_status;
@@ -48,7 +48,6 @@ async fn persist_webhook_event_sqlite(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     internal_id: &str,
     tenant_id: &str,
-    _organization_id: Option<&str>,
     command: &IngestProviderWebhookCommand,
     payload_json: &str,
     status: &str,
@@ -116,7 +115,6 @@ pub async fn ingest_provider_webhook_sqlite(
                 &mut tx,
                 &event_id,
                 tenant_id,
-                command.organization_id.as_deref(),
                 &command,
                 &payload_json,
                 "unmatched",
@@ -139,7 +137,15 @@ pub async fn ingest_provider_webhook_sqlite(
         .await
         .map_err(|error| store_error("failed to begin webhook ingestion transaction", error))?;
 
-    let (tenant_id, _) = match load_attempt_by_out_trade_no_sqlite(&mut tx, out_trade_no).await? {
+    let (tenant_id, _) = match load_attempt_by_out_trade_no_sqlite(
+        &mut tx,
+        &command.provider_code,
+        out_trade_no,
+        command.tenant_id.as_deref(),
+        command.organization_id.as_deref(),
+    )
+    .await?
+    {
         Some(context) => context,
         None => {
             tx.commit().await.map_err(|error| {
@@ -176,13 +182,24 @@ pub async fn ingest_provider_webhook_sqlite(
             &command.provider_code,
             command.out_trade_no.as_deref(),
             command.payment_status.as_deref(),
+            command.tenant_id.as_deref(),
+            command.organization_id.as_deref(),
             &now,
         )
         .await?;
 
         let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
-            load_payment_webhook_attempt_context_by_out_trade_no_sqlite(&mut tx, out_trade_no)
-                .await?
+            match payment_attempt_id.as_deref() {
+                Some(payment_attempt_id) => load_payment_webhook_attempt_context_by_id_sqlite(
+                    &mut tx,
+                    payment_attempt_id,
+                    &command.provider_code,
+                    command.tenant_id.as_deref(),
+                    command.organization_id.as_deref(),
+                )
+                .await?,
+                None => None,
+            }
         } else {
             None
         };
@@ -204,12 +221,24 @@ pub async fn ingest_provider_webhook_sqlite(
         &command.provider_code,
         command.out_trade_no.as_deref(),
         command.payment_status.as_deref(),
+        command.tenant_id.as_deref(),
+        command.organization_id.as_deref(),
         &now,
     )
     .await?;
 
     let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
-        load_payment_webhook_attempt_context_by_out_trade_no_sqlite(&mut tx, out_trade_no).await?
+        match payment_attempt_id.as_deref() {
+            Some(payment_attempt_id) => load_payment_webhook_attempt_context_by_id_sqlite(
+                &mut tx,
+                payment_attempt_id,
+                &command.provider_code,
+                command.tenant_id.as_deref(),
+                command.organization_id.as_deref(),
+            )
+            .await?,
+            None => None,
+        }
     } else {
         None
     };
@@ -246,6 +275,8 @@ pub(crate) async fn apply_webhook_payment_status_sqlite(
     provider_code: &str,
     out_trade_no: Option<&str>,
     payment_status: Option<&str>,
+    tenant_id: Option<&str>,
+    organization_id: Option<&str>,
     now: &str,
 ) -> Result<(Option<String>, Option<String>), CommerceServiceError> {
     let Some(out_trade_no) = out_trade_no.filter(|value| !value.trim().is_empty()) else {
@@ -258,22 +289,37 @@ pub(crate) async fn apply_webhook_payment_status_sqlite(
         return Ok((None, None));
     };
 
-    let row = sqlx::query(
+    let rows = sqlx::query(
         r#"
         SELECT id, status
         FROM commerce_payment_attempt
-        WHERE out_trade_no = CAST(? AS TEXT)
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
+        WHERE provider_code = CAST(? AS TEXT)
+          AND out_trade_no = CAST(? AS TEXT)
+          AND (? IS NULL OR tenant_id = CAST(? AS TEXT))
+          AND (? IS NULL OR organization_id = CAST(? AS TEXT))
+          AND deleted_at IS NULL
+        ORDER BY id
+        LIMIT 2
         "#,
     )
+    .bind(provider_code)
     .bind(out_trade_no)
-    .fetch_optional(&mut **tx)
+    .bind(tenant_id)
+    .bind(tenant_id)
+    .bind(organization_id)
+    .bind(organization_id)
+    .fetch_all(&mut **tx)
     .await
     .map_err(|error| store_error("failed to load payment attempt for webhook", error))?;
 
-    let Some(row) = row else {
-        return Ok((None, None));
+    let row = match rows.as_slice() {
+        [] => return Ok((None, None)),
+        [_first, _second, ..] => {
+            return Err(CommerceServiceError::conflict(
+                "multiple payment attempts match webhook identity",
+            ));
+        }
+        [row] => row,
     };
 
     let attempt_id: String = row
@@ -292,8 +338,15 @@ pub(crate) async fn apply_webhook_payment_status_sqlite(
     sqlx::query(
         r#"
         UPDATE commerce_payment_attempt
-        SET status = ?, updated_at = ?, paid_at = CASE WHEN ? = 'succeeded' THEN ? ELSE paid_at END
+        SET status = ?, updated_at = ?, paid_at = CASE
+            WHEN ? = 'succeeded' THEN COALESCE(NULLIF(paid_at, ''), ?)
+            ELSE paid_at
+        END
         WHERE id = CAST(? AS TEXT)
+          AND provider_code = CAST(? AS TEXT)
+          AND (? IS NULL OR tenant_id = CAST(? AS TEXT))
+          AND (? IS NULL OR organization_id = CAST(? AS TEXT))
+          AND deleted_at IS NULL
         "#,
     )
     .bind(target_status)
@@ -301,6 +354,11 @@ pub(crate) async fn apply_webhook_payment_status_sqlite(
     .bind(target_status)
     .bind(now)
     .bind(&attempt_id)
+    .bind(provider_code)
+    .bind(tenant_id)
+    .bind(tenant_id)
+    .bind(organization_id)
+    .bind(organization_id)
     .execute(&mut **tx)
     .await
     .map_err(|error| store_error("failed to update payment attempt from webhook", error))?;
@@ -310,14 +368,26 @@ pub(crate) async fn apply_webhook_payment_status_sqlite(
         UPDATE commerce_payment_intent
         SET status = ?, updated_at = ?
         WHERE id = (
-            SELECT payment_intent_id FROM commerce_payment_attempt WHERE id = CAST(? AS TEXT)
+            SELECT payment_intent_id
+            FROM commerce_payment_attempt
+            WHERE id = CAST(? AS TEXT)
+              AND provider_code = CAST(? AS TEXT)
+              AND (? IS NULL OR tenant_id = CAST(? AS TEXT))
+              AND (? IS NULL OR organization_id = CAST(? AS TEXT))
+              AND deleted_at IS NULL
         )
+          AND deleted_at IS NULL
           AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing', 'refunding')
         "#,
     )
     .bind(target_status)
     .bind(now)
     .bind(&attempt_id)
+    .bind(provider_code)
+    .bind(tenant_id)
+    .bind(tenant_id)
+    .bind(organization_id)
+    .bind(organization_id)
     .execute(&mut **tx)
     .await
     .map_err(|error| store_error("failed to update payment intent from webhook", error))?;
@@ -327,7 +397,7 @@ pub(crate) async fn apply_webhook_payment_status_sqlite(
 
 #[cfg(test)]
 mod sqlite_webhook_ingestion_tests {
-    use sdkwork_payment_service::PayOwnerOrderCommand;
+    use sdkwork_payment_service::{PayOwnerOrderCommand, PayOwnerOrderCommandInput};
     use serde_json::json;
 
     use crate::{
@@ -380,16 +450,17 @@ mod sqlite_webhook_ingestion_tests {
         .expect("seed payment method");
 
         let payments = SqliteCommerceOwnerOrderPaymentStore::new(pool.clone());
-        let pay = PayOwnerOrderCommand::new(
-            "100001",
-            None,
-            "user-1",
-            "order-rch-1",
-            "wechat_pay",
-            None,
-            "req-pay-1",
-            "idem-pay-1",
-        )
+        let pay = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
+            tenant_id: "100001".to_owned(),
+            organization_id: None,
+            owner_user_id: "user-1".to_owned(),
+            order_id: "order-rch-1".to_owned(),
+            payment_method: "wechat_pay".to_owned(),
+            payment_scene: None,
+            payment_attempt_callback_payload: None,
+            request_no: "req-pay-1".to_owned(),
+            idempotency_key: "idem-pay-1".to_owned(),
+        })
         .expect("pay command");
         let outcome = payments
             .pay_owner_order(pay)

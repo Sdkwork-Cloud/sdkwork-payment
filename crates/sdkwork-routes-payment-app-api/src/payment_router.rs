@@ -18,17 +18,17 @@ use sdkwork_payment_repository_sqlx::{
     enrich_payment_record_checkout_postgres, enrich_payment_record_checkout_sqlite,
     load_active_provider_account_postgres, load_active_provider_account_sqlite,
     load_payment_attempt_provider_context_postgres, load_payment_attempt_provider_context_sqlite,
-    provider_account_binding, PostgresCommerceOwnerOrderPaymentStore,
-    PostgresCommercePaymentMethodStore, PostgresCommercePaymentRecordStore,
-    SqliteCommerceOwnerOrderPaymentStore, SqliteCommercePaymentMethodStore,
-    SqliteCommercePaymentRecordStore,
+    provider_account_binding, OwnerOrderPaymentEnrichmentContext,
+    PostgresCommerceOwnerOrderPaymentStore, PostgresCommercePaymentMethodStore,
+    PostgresCommercePaymentRecordStore, SqliteCommerceOwnerOrderPaymentStore,
+    SqliteCommercePaymentMethodStore, SqliteCommercePaymentRecordStore,
 };
 use sdkwork_payment_service::{
     scene_code_filter_from_client_type, ClosePaymentRecordCommand, PayOwnerOrderCommand,
-    PayOwnerOrderOutcome, PaymentMethodItem, PaymentMethodListPage, PaymentMethodListQuery,
-    PaymentRecordDetailQuery, PaymentRecordItem, PaymentRecordListPage, PaymentRecordListQuery,
-    PaymentRecordOrderListPage, PaymentRecordOrderListQuery, PaymentRecordOutTradeNoQuery,
-    PaymentRecordStatistics, PaymentRecordStatisticsQuery,
+    PayOwnerOrderCommandInput, PayOwnerOrderOutcome, PaymentMethodItem, PaymentMethodListPage,
+    PaymentMethodListQuery, PaymentRecordDetailQuery, PaymentRecordItem, PaymentRecordListPage,
+    PaymentRecordListQuery, PaymentRecordOrderListPage, PaymentRecordOrderListQuery,
+    PaymentRecordOutTradeNoQuery, PaymentRecordStatistics, PaymentRecordStatisticsQuery,
 };
 use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
@@ -471,13 +471,15 @@ impl OwnerOrderPaymentSource for ProviderEnrichedSqlitePayments {
             let outcome = self.inner.pay_owner_order(command).await?;
             enrich_owner_order_payment_sqlite(
                 &pool,
-                &registry,
-                &credentials,
-                &tenant_id,
-                organization_id.as_deref(),
-                &order_id,
-                &idempotency_key,
-                payment_scene.as_deref(),
+                OwnerOrderPaymentEnrichmentContext {
+                    deployment_registry: &registry,
+                    credentials: &credentials,
+                    tenant_id: &tenant_id,
+                    organization_id: organization_id.as_deref(),
+                    order_id: &order_id,
+                    idempotency_key: &idempotency_key,
+                    payment_scene: payment_scene.as_deref(),
+                },
                 outcome,
             )
             .await
@@ -502,13 +504,15 @@ impl OwnerOrderPaymentSource for ProviderEnrichedPostgresPayments {
             let outcome = self.inner.pay_owner_order(command).await?;
             enrich_owner_order_payment_postgres(
                 &pool,
-                &registry,
-                &credentials,
-                &tenant_id,
-                organization_id.as_deref(),
-                &order_id,
-                &idempotency_key,
-                payment_scene.as_deref(),
+                OwnerOrderPaymentEnrichmentContext {
+                    deployment_registry: &registry,
+                    credentials: &credentials,
+                    tenant_id: &tenant_id,
+                    organization_id: organization_id.as_deref(),
+                    order_id: &order_id,
+                    idempotency_key: &idempotency_key,
+                    payment_scene: payment_scene.as_deref(),
+                },
                 outcome,
             )
             .await
@@ -1362,16 +1366,17 @@ async fn create_payment(
         body.client_ip.as_deref(),
         body.payment_provider.as_deref(),
     );
-    let command = match PayOwnerOrderCommand::new(
-        &subject.tenant_id,
-        subject.organization_id.as_deref(),
-        &subject.user_id,
-        &body.order_id,
-        &payment_method,
+    let command = match PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
+        tenant_id: subject.tenant_id.clone(),
+        organization_id: subject.organization_id.clone(),
+        owner_user_id: subject.user_id.clone(),
+        order_id: body.order_id.clone(),
+        payment_method,
         payment_scene,
-        &write_headers.request_no,
-        &write_headers.idempotency_key,
-    ) {
+        payment_attempt_callback_payload: None,
+        request_no: write_headers.request_no.clone(),
+        idempotency_key: write_headers.idempotency_key.clone(),
+    }) {
         Ok(command) => command,
         Err(error) => return validation(ctx, error.message()),
     };

@@ -12,7 +12,8 @@ use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{PaymentProviderRegistry, ProviderCredentialBundle};
 use sdkwork_payment_repository_sqlx::{
     enrich_owner_payment_attempt_postgres, enrich_owner_payment_attempt_sqlite,
-    PostgresCommercePaymentIntentStore, SqliteCommercePaymentIntentStore,
+    OwnerOrderPaymentEnrichmentContext, PostgresCommercePaymentIntentStore,
+    SqliteCommercePaymentIntentStore,
 };
 use sdkwork_payment_service::{
     CancelOwnerPaymentIntentCommand, CreateOwnerPaymentAttemptCommand,
@@ -195,13 +196,15 @@ impl CommercePaymentIntentStore for ProviderEnrichedSqlitePaymentIntents {
             let order_id = outcome.order_id.clone();
             enrich_owner_payment_attempt_sqlite(
                 &pool,
-                &registry,
-                &credentials,
-                &tenant_id,
-                organization_id.as_deref(),
-                &order_id,
-                &idempotency_key,
-                None,
+                OwnerOrderPaymentEnrichmentContext {
+                    deployment_registry: &registry,
+                    credentials: &credentials,
+                    tenant_id: &tenant_id,
+                    organization_id: organization_id.as_deref(),
+                    order_id: &order_id,
+                    idempotency_key: &idempotency_key,
+                    payment_scene: None,
+                },
                 outcome,
             )
             .await
@@ -250,13 +253,15 @@ impl CommercePaymentIntentStore for ProviderEnrichedPostgresPaymentIntents {
             let order_id = outcome.order_id.clone();
             enrich_owner_payment_attempt_postgres(
                 &pool,
-                &registry,
-                &credentials,
-                &tenant_id,
-                organization_id.as_deref(),
-                &order_id,
-                &idempotency_key,
-                None,
+                OwnerOrderPaymentEnrichmentContext {
+                    deployment_registry: &registry,
+                    credentials: &credentials,
+                    tenant_id: &tenant_id,
+                    organization_id: organization_id.as_deref(),
+                    order_id: &order_id,
+                    idempotency_key: &idempotency_key,
+                    payment_scene: None,
+                },
                 outcome,
             )
             .await

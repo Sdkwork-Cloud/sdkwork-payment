@@ -36,6 +36,17 @@ use crate::payment_attempt_context::{
     persist_attempt_enrichment_postgres, persist_attempt_enrichment_sqlite,
 };
 
+#[derive(Clone, Copy)]
+pub struct OwnerOrderPaymentEnrichmentContext<'a> {
+    pub deployment_registry: &'a PaymentProviderRegistry,
+    pub credentials: &'a ProviderCredentialBundle,
+    pub tenant_id: &'a str,
+    pub organization_id: Option<&'a str>,
+    pub order_id: &'a str,
+    pub idempotency_key: &'a str,
+    pub payment_scene: Option<&'a str>,
+}
+
 pub fn payment_record_is_checkout_eligible(status: &str) -> bool {
     matches!(
         status.trim().to_ascii_lowercase().as_str(),
@@ -66,13 +77,15 @@ pub async fn enrich_payment_record_checkout_sqlite(
     let idempotency_key = ctx.idempotency_key.clone();
     let enriched = enrich_owner_order_payment_sqlite(
         pool,
-        deployment_registry,
-        credentials,
-        tenant_id,
-        organization_id,
-        &record.order_id,
-        &idempotency_key,
-        None,
+        OwnerOrderPaymentEnrichmentContext {
+            deployment_registry,
+            credentials,
+            tenant_id,
+            organization_id,
+            order_id: &record.order_id,
+            idempotency_key: &idempotency_key,
+            payment_scene: None,
+        },
         outcome,
     )
     .await?;
@@ -104,13 +117,15 @@ pub async fn enrich_payment_record_checkout_postgres(
     let idempotency_key = ctx.idempotency_key.clone();
     let enriched = enrich_owner_order_payment_postgres(
         pool,
-        deployment_registry,
-        credentials,
-        tenant_id,
-        organization_id,
-        &record.order_id,
-        &idempotency_key,
-        None,
+        OwnerOrderPaymentEnrichmentContext {
+            deployment_registry,
+            credentials,
+            tenant_id,
+            organization_id,
+            order_id: &record.order_id,
+            idempotency_key: &idempotency_key,
+            payment_scene: None,
+        },
         outcome,
     )
     .await?;
@@ -149,13 +164,7 @@ fn payment_record_to_pay_outcome(
 
 pub async fn enrich_owner_order_payment_sqlite(
     pool: &Pool<Sqlite>,
-    deployment_registry: &PaymentProviderRegistry,
-    credentials: &ProviderCredentialBundle,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    order_id: &str,
-    idempotency_key: &str,
-    payment_scene: Option<&str>,
+    context: OwnerOrderPaymentEnrichmentContext<'_>,
     outcome: PayOwnerOrderOutcome,
 ) -> Result<PayOwnerOrderOutcome, CommerceServiceError> {
     let provider_code = outcome
@@ -163,24 +172,23 @@ pub async fn enrich_owner_order_payment_sqlite(
         .get("providerCode")
         .cloned()
         .unwrap_or_else(|| "sandbox".to_owned());
-    let account =
-        load_active_provider_account_sqlite(pool, tenant_id, organization_id, &provider_code)
-            .await?;
+    let account = load_active_provider_account_sqlite(
+        pool,
+        context.tenant_id,
+        context.organization_id,
+        &provider_code,
+    )
+    .await?;
     let enriched = enrich_owner_order_payment_outcome(
-        deployment_registry,
-        credentials,
+        &context,
         account.as_ref().map(provider_account_binding),
-        tenant_id,
-        order_id,
-        idempotency_key,
-        payment_scene,
         &provider_code,
         outcome,
     )
     .await?;
     persist_attempt_enrichment_sqlite(
         pool,
-        tenant_id,
+        context.tenant_id,
         &enriched.payment_id,
         &enriched.payment_params,
     )
@@ -190,13 +198,7 @@ pub async fn enrich_owner_order_payment_sqlite(
 
 pub async fn enrich_owner_order_payment_postgres(
     pool: &PgPool,
-    deployment_registry: &PaymentProviderRegistry,
-    credentials: &ProviderCredentialBundle,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    order_id: &str,
-    idempotency_key: &str,
-    payment_scene: Option<&str>,
+    context: OwnerOrderPaymentEnrichmentContext<'_>,
     outcome: PayOwnerOrderOutcome,
 ) -> Result<PayOwnerOrderOutcome, CommerceServiceError> {
     let provider_code = outcome
@@ -204,24 +206,23 @@ pub async fn enrich_owner_order_payment_postgres(
         .get("providerCode")
         .cloned()
         .unwrap_or_else(|| "sandbox".to_owned());
-    let account =
-        load_active_provider_account_postgres(pool, tenant_id, organization_id, &provider_code)
-            .await?;
+    let account = load_active_provider_account_postgres(
+        pool,
+        context.tenant_id,
+        context.organization_id,
+        &provider_code,
+    )
+    .await?;
     let enriched = enrich_owner_order_payment_outcome(
-        deployment_registry,
-        credentials,
+        &context,
         account.as_ref().map(provider_account_binding),
-        tenant_id,
-        order_id,
-        idempotency_key,
-        payment_scene,
         &provider_code,
         outcome,
     )
     .await?;
     persist_attempt_enrichment_postgres(
         pool,
-        tenant_id,
+        context.tenant_id,
         &enriched.payment_id,
         &enriched.payment_params,
     )
@@ -231,28 +232,11 @@ pub async fn enrich_owner_order_payment_postgres(
 
 pub async fn enrich_owner_payment_attempt_sqlite(
     pool: &Pool<Sqlite>,
-    deployment_registry: &PaymentProviderRegistry,
-    credentials: &ProviderCredentialBundle,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    order_id: &str,
-    idempotency_key: &str,
-    payment_scene: Option<&str>,
+    context: OwnerOrderPaymentEnrichmentContext<'_>,
     outcome: CreateOwnerPaymentAttemptOutcome,
 ) -> Result<CreateOwnerPaymentAttemptOutcome, CommerceServiceError> {
     let pay_outcome = attempt_outcome_to_pay_outcome(&outcome);
-    let enriched = enrich_owner_order_payment_sqlite(
-        pool,
-        deployment_registry,
-        credentials,
-        tenant_id,
-        organization_id,
-        order_id,
-        idempotency_key,
-        payment_scene,
-        pay_outcome,
-    )
-    .await?;
+    let enriched = enrich_owner_order_payment_sqlite(pool, context, pay_outcome).await?;
     Ok(merge_attempt_payment_params(
         outcome,
         enriched.payment_params,
@@ -261,28 +245,11 @@ pub async fn enrich_owner_payment_attempt_sqlite(
 
 pub async fn enrich_owner_payment_attempt_postgres(
     pool: &PgPool,
-    deployment_registry: &PaymentProviderRegistry,
-    credentials: &ProviderCredentialBundle,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    order_id: &str,
-    idempotency_key: &str,
-    payment_scene: Option<&str>,
+    context: OwnerOrderPaymentEnrichmentContext<'_>,
     outcome: CreateOwnerPaymentAttemptOutcome,
 ) -> Result<CreateOwnerPaymentAttemptOutcome, CommerceServiceError> {
     let pay_outcome = attempt_outcome_to_pay_outcome(&outcome);
-    let enriched = enrich_owner_order_payment_postgres(
-        pool,
-        deployment_registry,
-        credentials,
-        tenant_id,
-        organization_id,
-        order_id,
-        idempotency_key,
-        payment_scene,
-        pay_outcome,
-    )
-    .await?;
+    let enriched = enrich_owner_order_payment_postgres(pool, context, pay_outcome).await?;
     Ok(merge_attempt_payment_params(
         outcome,
         enriched.payment_params,
@@ -316,29 +283,26 @@ fn merge_attempt_payment_params(
 }
 
 async fn enrich_owner_order_payment_outcome(
-    deployment_registry: &PaymentProviderRegistry,
-    credentials: &ProviderCredentialBundle,
+    context: &OwnerOrderPaymentEnrichmentContext<'_>,
     account: Option<ProviderAccountBinding>,
-    tenant_id: &str,
-    order_id: &str,
-    idempotency_key: &str,
-    payment_scene: Option<&str>,
     provider_code: &str,
     outcome: PayOwnerOrderOutcome,
 ) -> Result<PayOwnerOrderOutcome, CommerceServiceError> {
     let registry = match account {
-        Some(binding) => provider_registry_for_account(credentials, Some(binding)),
-        None => deployment_registry.clone(),
+        Some(binding) => provider_registry_for_account(context.credentials, Some(binding)),
+        None => context.deployment_registry.clone(),
     };
-    let notify_url = credentials.provider_notify_url(&normalize_provider_code(provider_code));
+    let notify_url = context
+        .credentials
+        .provider_notify_url(&normalize_provider_code(provider_code));
     let context = CheckoutContext {
         provider_code: provider_code.to_owned(),
         currency_code: "CNY".to_owned(),
-        tenant_id: tenant_id.to_owned(),
-        order_id: order_id.to_owned(),
-        idempotency_key: idempotency_key.to_owned(),
+        tenant_id: context.tenant_id.to_owned(),
+        order_id: context.order_id.to_owned(),
+        idempotency_key: context.idempotency_key.to_owned(),
         notify_url,
-        payment_scene: payment_scene.map(str::to_owned),
+        payment_scene: context.payment_scene.map(str::to_owned),
     };
     enrich_pay_owner_order_outcome(&registry, &context, outcome).await
 }

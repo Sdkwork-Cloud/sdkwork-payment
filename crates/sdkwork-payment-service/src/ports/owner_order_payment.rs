@@ -23,15 +23,17 @@ pub struct OrderPaymentSettlementAttempt {
     pub organization_id: Option<String>,
     pub owner_user_id: String,
     pub order_id: String,
+    /// Exact payment attempt selected by webhook identity resolution.
+    /// Manual confirmation may leave this unset, in which case the
+    /// repository must resolve a single unambiguous candidate.
+    pub payment_attempt_id: Option<String>,
+    pub out_trade_no: Option<String>,
 }
 
 pub trait OwnerOrderPaymentConfirmationPort: Send + Sync {
     fn confirm_owner_order_payment<'a>(
         &'a self,
-        tenant_id: &'a str,
-        organization_id: Option<&'a str>,
-        owner_user_id: &'a str,
-        order_id: &'a str,
+        attempt: &'a OrderPaymentSettlementAttempt,
     ) -> OwnerOrderPaymentConfirmationFuture<'a, ConfirmOwnerOrderPaymentOutcome>;
 }
 

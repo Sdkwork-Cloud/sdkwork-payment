@@ -8,6 +8,7 @@ use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use sdkwork_payment_service::{
     validate_payment_wire_transition, validate_refund_wire_transition, CreateOwnerRefundCommand,
 };
+use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::postgres::PgRow;
 use sqlx::sqlite::SqliteRow;
 use sqlx::Row;
@@ -17,6 +18,76 @@ pub(crate) fn payment_attempt_is_terminal_success(status: &str) -> bool {
         status.trim().to_ascii_lowercase().as_str(),
         "succeeded" | "success" | "paid"
     )
+}
+
+pub(crate) fn required_persisted_paid_at(paid_at: &str) -> Result<String, CommerceServiceError> {
+    let paid_at = paid_at.trim();
+    if paid_at.is_empty() {
+        return Err(CommerceServiceError::storage(
+            "succeeded payment attempt is missing persisted paid_at",
+        ));
+    }
+    DateTime::parse_from_rfc3339(paid_at)
+        .map(|_| paid_at.to_owned())
+        .map_err(|_| {
+            CommerceServiceError::storage(
+                "succeeded payment attempt has a non-RFC3339 persisted paid_at",
+            )
+        })
+}
+
+pub(crate) fn ensure_confirmation_intent_update(
+    rows_affected: u64,
+    persisted_status: Option<&str>,
+) -> Result<(), CommerceServiceError> {
+    match rows_affected {
+        1 => Ok(()),
+        0 => {
+            let Some(status) = persisted_status else {
+                return Err(CommerceServiceError::storage(
+                    "owner payment intent disappeared during confirmation",
+                ));
+            };
+            if payment_attempt_is_terminal_success(status) {
+                return Ok(());
+            }
+            ensure_payment_status_transition(status, "succeeded")?;
+            Err(CommerceServiceError::storage(
+                "owner payment intent was not updated despite a transitionable status",
+            ))
+        }
+        count => Err(CommerceServiceError::storage(format!(
+            "owner payment intent confirmation updated {count} rows; expected at most one"
+        ))),
+    }
+}
+
+pub(crate) fn resolve_confirmation_attempt_replayed(
+    rows_affected: u64,
+    persisted_status: Option<&str>,
+) -> Result<bool, CommerceServiceError> {
+    let Some(status) = persisted_status else {
+        return Err(CommerceServiceError::storage(
+            "owner payment attempt disappeared during confirmation",
+        ));
+    };
+
+    match rows_affected {
+        1 if payment_attempt_is_terminal_success(status) => Ok(false),
+        0 if payment_attempt_is_terminal_success(status) => Ok(true),
+        0 => {
+            ensure_payment_status_transition(status, "succeeded")?;
+            Err(CommerceServiceError::storage(
+                "owner payment attempt was not updated despite a transitionable status",
+            ))
+        }
+        1 => Err(CommerceServiceError::storage(
+            "owner payment attempt update did not persist succeeded status",
+        )),
+        count => Err(CommerceServiceError::storage(format!(
+            "owner payment attempt confirmation updated {count} rows; expected at most one"
+        ))),
+    }
 }
 
 pub(crate) fn ensure_payment_status_transition(
@@ -63,17 +134,9 @@ pub(crate) fn stable_storage_id(parts: &[&str]) -> String {
         .join("-")
 }
 
-/// Return the current Unix timestamp as a string.
-///
-/// Uses `SystemTime` to avoid pulling in a heavy datetime dependency.
-/// Returns `"0"` if the system clock is before `UNIX_EPOCH`.
+/// Return the current UTC timestamp in the wire/storage RFC3339 format.
 pub(crate) fn current_timestamp_string() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    format!("{seconds}")
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 /// Parse a money string into integer smallest currency units.
@@ -154,5 +217,38 @@ impl StringCellRow for PgRow {
             .ok()
             .flatten()
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ensure_confirmation_intent_update, required_persisted_paid_at,
+        resolve_confirmation_attempt_replayed,
+    };
+
+    #[test]
+    fn confirmation_replay_requires_and_preserves_persisted_paid_at() {
+        assert_eq!(
+            required_persisted_paid_at("2026-07-12T01:02:03Z").expect("persisted paid_at"),
+            "2026-07-12T01:02:03Z"
+        );
+        assert!(required_persisted_paid_at(" ").is_err());
+    }
+
+    #[test]
+    fn confirmation_update_counts_distinguish_first_write_from_replay() {
+        assert!(!resolve_confirmation_attempt_replayed(1, Some("succeeded"))
+            .expect("first confirmation"));
+        assert!(
+            resolve_confirmation_attempt_replayed(0, Some("succeeded")).expect("concurrent replay")
+        );
+        assert!(resolve_confirmation_attempt_replayed(0, Some("pending")).is_err());
+        assert!(resolve_confirmation_attempt_replayed(2, Some("succeeded")).is_err());
+
+        ensure_confirmation_intent_update(1, None).expect("updated intent");
+        ensure_confirmation_intent_update(0, Some("succeeded")).expect("intent replay");
+        assert!(ensure_confirmation_intent_update(0, Some("pending")).is_err());
+        assert!(ensure_confirmation_intent_update(0, None).is_err());
     }
 }
