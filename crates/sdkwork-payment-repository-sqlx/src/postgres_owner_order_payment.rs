@@ -1,7 +1,7 @@
 use sdkwork_contract_service::{CommerceMoney, CommercePaymentStatus, CommerceServiceError};
 use sdkwork_payment_service::{
-    CancelOrderPaymentsCommand, ConfirmOwnerOrderPaymentOutcome, PayOwnerOrderCommand,
-    PayOwnerOrderOutcome, OrderPaymentSettlementAttempt,
+    CancelOrderPaymentsCommand, ConfirmOwnerOrderPaymentOutcome, OrderPaymentSettlementAttempt,
+    PayOwnerOrderCommand, PayOwnerOrderOutcome,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
@@ -20,7 +20,6 @@ WHERE tenant_id = CAST($1 AS TEXT)
   AND ((organization_id = CAST($2 AS TEXT)) OR (organization_id IS NULL AND $3::text IS NULL))
   AND owner_user_id = CAST($4 AS TEXT)
   AND id = CAST($5 AS TEXT)
-  AND deleted_at IS NULL
 FOR UPDATE
 "#;
 
@@ -87,8 +86,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         command: CancelOrderPaymentsCommand,
     ) -> Result<(), CommerceServiceError> {
         let now = current_timestamp_string();
-        // C1/C2 修复：取消操作必须在单事务内执行，且只能取消未终结状态的支付意图/尝试，
-        // 严禁覆盖 succeeded/refunded/closed 等终态，避免"已收款但订单显示已取消"的资金事故。
+        // Lock order, intents, and attempts in a stable order before canceling.
         let mut tx = self.pool.begin().await.map_err(|error| {
             store_error(
                 "failed to begin cancel owner order payment transaction",
@@ -96,7 +94,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             )
         })?;
 
-        sqlx::query(
+        let order_row = sqlx::query(
             r#"
             SELECT id
             FROM commerce_order
@@ -104,7 +102,6 @@ impl PostgresCommerceOwnerOrderPaymentStore {
               AND ((organization_id = CAST($2 AS TEXT)) OR (organization_id IS NULL AND $3::text IS NULL))
               AND owner_user_id = CAST($4 AS TEXT)
               AND id = CAST($5 AS TEXT)
-              AND deleted_at IS NULL
             FOR UPDATE
             "#,
         )
@@ -116,6 +113,11 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .fetch_optional(&mut *tx)
         .await
         .map_err(|error| store_error("failed to lock owner order for payment cancellation", error))?;
+        if order_row.is_none() {
+            return Err(CommerceServiceError::not_found(
+                "owner order was not found for payment cancellation",
+            ));
+        }
 
         sqlx::query(
             r#"
@@ -214,8 +216,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             )
         })?;
 
-        // 事务提交后校验是否存在已成功但未取消的支付意图，若有则上报冲突，
-        // 避免调用方误以为取消成功而实际仍存在有效支付。
+        // Report a terminal payment instead of silently treating cancellation as successful.
         if affected_intent.rows_affected() == 0 {
             let existing = sqlx::query(
                 r#"
@@ -485,7 +486,9 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             .bind(order_id)
             .fetch_optional(&mut *tx)
             .await
-            .map_err(|error| store_error("failed to lock owner order for payment confirmation", error))?;
+            .map_err(|error| {
+                store_error("failed to lock owner order for payment confirmation", error)
+            })?;
         if order_row.is_none() {
             return Err(CommerceServiceError::not_found(
                 "owner order was not found for payment confirmation",
@@ -885,15 +888,44 @@ fn optional_string_cell(row: &sqlx::postgres::PgRow, column: &str) -> Option<Str
 
 #[cfg(test)]
 mod tests {
-    use super::LOAD_OWNER_PAYMENT_ATTEMPT_FOR_CONFIRMATION;
+    use super::{
+        FIND_OWNER_PAYMENT_ATTEMPT_CANDIDATES, LOAD_OWNER_ORDER_FOR_CONFIRMATION,
+        LOAD_OWNER_PAYMENT_ATTEMPT_FOR_CONFIRMATION, LOAD_OWNER_PAYMENT_INTENT_FOR_CONFIRMATION,
+    };
 
     #[test]
-    fn confirmation_attempt_lock_query_locks_the_latest_attempt() {
-        let query = LOAD_OWNER_PAYMENT_ATTEMPT_FOR_CONFIRMATION
+    fn confirmation_queries_lock_order_then_exact_intent_and_attempt() {
+        let order_query = LOAD_OWNER_ORDER_FOR_CONFIRMATION
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
-        assert!(query.contains("SELECT id, payment_intent_id, status, paid_at"));
-        assert!(query.ends_with("LIMIT 1 FOR UPDATE"));
+        let intent_query = LOAD_OWNER_PAYMENT_INTENT_FOR_CONFIRMATION
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let attempt_query = LOAD_OWNER_PAYMENT_ATTEMPT_FOR_CONFIRMATION
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(order_query.ends_with("FOR UPDATE"));
+        assert!(intent_query.contains("deleted_at IS NULL"));
+        assert!(intent_query.ends_with("FOR UPDATE"));
+        assert!(attempt_query.contains("payment_intent_id = CAST($7 AS TEXT)"));
+        assert!(attempt_query.contains("deleted_at IS NULL"));
+        assert!(attempt_query.contains("AT TIME ZONE 'UTC'"));
+        assert!(attempt_query.ends_with("FOR UPDATE"));
+    }
+
+    #[test]
+    fn manual_confirmation_candidate_query_rejects_ambiguous_attempts() {
+        let query = FIND_OWNER_PAYMENT_ATTEMPT_CANDIDATES
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(query.contains("($6::text IS NULL OR id = CAST($6 AS TEXT))"));
+        assert!(query.contains("($7::text IS NULL OR out_trade_no = CAST($7 AS TEXT))"));
+        assert!(query.contains("deleted_at IS NULL"));
+        assert!(query.ends_with("ORDER BY id LIMIT 2"));
     }
 }

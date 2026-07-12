@@ -57,7 +57,7 @@ Errors use HTTP 4xx/5xx `application/problem+json` (`SdkWorkProblemDetail`) with
 - Close: `POST /payments/{paymentId}/close` marks attempt/intent `canceled` in the database first, then best-effort PSP cancel (Stripe uses `providerTransactionId` from attempt `callback_payload` when present).
 - Refund: `POST /refunds` persists the refund row, then submits `create_refund` to the PSP with up to three transient retries; terminal PSP failure marks the refund `failed` in DB and returns an error response.
 - Checkout polling: `GET /payments/checkout/{paymentId}` re-enriches pending attempts via PSP for cashier/QR parameters.
-- Webhook ingest: order gateway passes `tenantId` scope; events without resolvable `outTradeNo` are persisted as `unmatched` when tenant scope is provided. Intent status updates are guarded to non-terminal states.
+- Webhook ingest: Payment resolves the attempt by `provider_code` plus `outTradeNo`, applies tenant and organization scope when available, and fails closed when the identity matches more than one attempt. The resolved payment attempt id is carried into Order settlement. Events without resolvable `outTradeNo` are persisted as `unmatched` only when tenant scope is available.
 - Sandbox: when `provider_code` is `sandbox` or PSP credentials are absent, local cashier URLs from `sdkwork-utils-rust` are used without external HTTP.
 
 ### Provider and async processing
@@ -87,6 +87,8 @@ List/search endpoints push `page` / `page_size` to SQL `LIMIT`/`OFFSET` with `CO
 ### Idempotency and transactions
 
 - Owner-order pay: `PayOwnerOrderCommand` carries `idempotency_key` + `request_no`; repository replays by `(tenant_id, order_id, idempotency_key)` and uses deterministic intent/attempt IDs.
+- Webhook and confirmation settlement lock records in `order -> payment_intent -> payment_attempt` order. Webhooks confirm the exact resolved attempt; order-only manual confirmation is accepted only when one matching attempt is unambiguous.
+- Payment timestamps use UTC RFC3339 at service boundaries. PostgreSQL stores and reads `TIMESTAMPTZ`; SQLite stores the same RFC3339 representation as text. Confirmation replay returns the first persisted non-empty `paid_at`.
 - Refunds: idempotency replay + transactional refund-sum guard under `BEGIN IMMEDIATE` (SQLite) / `FOR UPDATE` (PostgreSQL).
 - Close / cancel / reconcile: command headers enforced at handler; close is idempotent when record already terminal.
 - Domain wire transitions (`validate_payment_wire_transition` / `validate_refund_wire_transition`) enforced on cancel, close, refund create, and owner-order payment confirmation.

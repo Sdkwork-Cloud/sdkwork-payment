@@ -83,6 +83,7 @@ pub async fn persist_attempt_enrichment_sqlite(
         SET callback_payload = ?, updated_at = ?
         WHERE id = CAST(? AS TEXT)
           AND tenant_id = CAST(? AS TEXT)
+          AND deleted_at IS NULL
         "#,
     )
     .bind(&merged)
@@ -128,9 +129,10 @@ pub async fn persist_attempt_enrichment_postgres(
     sqlx::query(
         r#"
         UPDATE commerce_payment_attempt
-        SET callback_payload = $1, updated_at = $2
+        SET callback_payload = $1, updated_at = $2::timestamptz
         WHERE id = CAST($3 AS TEXT)
           AND tenant_id = CAST($4 AS TEXT)
+          AND deleted_at IS NULL
         "#,
     )
     .bind(&merged)
@@ -304,6 +306,19 @@ pub struct PaymentWebhookAttemptContext {
     pub order_id: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PaymentWebhookAttemptIdentity {
+    pub payment_attempt_id: String,
+    pub payment_intent_id: String,
+    pub provider_code: String,
+    pub out_trade_no: String,
+    pub attempt_status: String,
+    pub tenant_id: String,
+    pub organization_id: Option<String>,
+    pub owner_user_id: String,
+    pub order_id: String,
+}
+
 pub(crate) async fn load_payment_webhook_attempt_context_by_id_sqlite(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     payment_attempt_id: &str,
@@ -317,14 +332,13 @@ pub(crate) async fn load_payment_webhook_attempt_context_by_id_sqlite(
         FROM commerce_payment_attempt
         WHERE id = CAST(? AS TEXT)
           AND provider_code = CAST(? AS TEXT)
-          AND (? IS NULL OR tenant_id = CAST(? AS TEXT))
-          AND (? IS NULL OR organization_id = CAST(? AS TEXT))
+          AND tenant_id = CAST(? AS TEXT)
+          AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
           AND deleted_at IS NULL
         "#,
     )
     .bind(payment_attempt_id)
     .bind(provider_code)
-    .bind(tenant_id)
     .bind(tenant_id)
     .bind(organization_id)
     .bind(organization_id)
@@ -355,8 +369,8 @@ pub(crate) async fn load_payment_webhook_attempt_context_by_id_postgres(
         FROM commerce_payment_attempt
         WHERE id = CAST($1 AS TEXT)
           AND provider_code = CAST($2 AS TEXT)
-          AND ($3::text IS NULL OR tenant_id = CAST($3 AS TEXT))
-          AND ($4::text IS NULL OR organization_id = CAST($4 AS TEXT))
+          AND tenant_id = CAST($3 AS TEXT)
+          AND ((organization_id = CAST($4 AS TEXT)) OR (organization_id IS NULL AND $4::text IS NULL))
           AND deleted_at IS NULL
         "#,
     )
@@ -384,15 +398,17 @@ pub(crate) async fn load_attempt_by_out_trade_no_sqlite(
     out_trade_no: &str,
     tenant_id: Option<&str>,
     organization_id: Option<&str>,
-) -> Result<Option<(String, String)>, CommerceServiceError> {
+) -> Result<Option<PaymentWebhookAttemptIdentity>, CommerceServiceError> {
     let rows = sqlx::query(
         r#"
-        SELECT id, tenant_id
+        SELECT id, payment_intent_id, provider_code, out_trade_no, status, tenant_id,
+               organization_id, owner_user_id, order_id
         FROM commerce_payment_attempt
         WHERE provider_code = CAST(? AS TEXT)
           AND out_trade_no = CAST(? AS TEXT)
           AND (? IS NULL OR tenant_id = CAST(? AS TEXT))
-          AND (? IS NULL OR organization_id = CAST(? AS TEXT))
+          AND (? IS NULL OR organization_id = CAST(? AS TEXT)
+               OR (organization_id IS NULL AND ? IS NULL))
           AND deleted_at IS NULL
         ORDER BY id
         LIMIT 2
@@ -400,6 +416,7 @@ pub(crate) async fn load_attempt_by_out_trade_no_sqlite(
     )
     .bind(provider_code)
     .bind(out_trade_no)
+    .bind(tenant_id)
     .bind(tenant_id)
     .bind(tenant_id)
     .bind(organization_id)
@@ -413,7 +430,7 @@ pub(crate) async fn load_attempt_by_out_trade_no_sqlite(
         [_first, _second, ..] => Err(CommerceServiceError::conflict(
             "multiple payment attempts match webhook identity",
         )),
-        [row] => Ok(Some((string_cell(row, "tenant_id"), string_cell(row, "id")))),
+        [row] => Ok(Some(map_webhook_attempt_identity(row))),
     }
 }
 
@@ -423,15 +440,17 @@ pub(crate) async fn load_attempt_by_out_trade_no_postgres(
     out_trade_no: &str,
     tenant_id: Option<&str>,
     organization_id: Option<&str>,
-) -> Result<Option<(String, String)>, CommerceServiceError> {
+) -> Result<Option<PaymentWebhookAttemptIdentity>, CommerceServiceError> {
     let rows = sqlx::query(
         r#"
-        SELECT id, tenant_id
+        SELECT id, payment_intent_id, provider_code, out_trade_no, status, tenant_id,
+               organization_id, owner_user_id, order_id
         FROM commerce_payment_attempt
         WHERE provider_code = CAST($1 AS TEXT)
           AND out_trade_no = CAST($2 AS TEXT)
           AND ($3::text IS NULL OR tenant_id = CAST($3 AS TEXT))
-          AND ($4::text IS NULL OR organization_id = CAST($4 AS TEXT))
+          AND ($3::text IS NULL OR organization_id = CAST($4 AS TEXT)
+               OR (organization_id IS NULL AND $4::text IS NULL))
           AND deleted_at IS NULL
         ORDER BY id
         LIMIT 2
@@ -450,7 +469,24 @@ pub(crate) async fn load_attempt_by_out_trade_no_postgres(
         [_first, _second, ..] => Err(CommerceServiceError::conflict(
             "multiple payment attempts match webhook identity",
         )),
-        [row] => Ok(Some((string_cell(row, "tenant_id"), string_cell(row, "id")))),
+        [row] => Ok(Some(map_webhook_attempt_identity(row))),
+    }
+}
+
+fn map_webhook_attempt_identity<R: crate::shared::StringCellRow>(
+    row: &R,
+) -> PaymentWebhookAttemptIdentity {
+    let organization_id = string_cell(row, "organization_id");
+    PaymentWebhookAttemptIdentity {
+        payment_attempt_id: string_cell(row, "id"),
+        payment_intent_id: string_cell(row, "payment_intent_id"),
+        provider_code: string_cell(row, "provider_code"),
+        out_trade_no: string_cell(row, "out_trade_no"),
+        attempt_status: string_cell(row, "status"),
+        tenant_id: string_cell(row, "tenant_id"),
+        organization_id: (!organization_id.is_empty()).then_some(organization_id),
+        owner_user_id: string_cell(row, "owner_user_id"),
+        order_id: string_cell(row, "order_id"),
     }
 }
 
@@ -463,18 +499,21 @@ pub struct WebhookAttemptContext {
 
 pub async fn load_webhook_attempt_context_by_out_trade_no_sqlite(
     pool: &Pool<Sqlite>,
+    provider_code: &str,
     out_trade_no: &str,
 ) -> Result<Option<WebhookAttemptContext>, CommerceServiceError> {
     let rows = sqlx::query(
         r#"
         SELECT tenant_id, organization_id, provider_code
         FROM commerce_payment_attempt
-        WHERE out_trade_no = CAST(? AS TEXT)
+        WHERE provider_code = CAST(? AS TEXT)
+          AND out_trade_no = CAST(? AS TEXT)
           AND deleted_at IS NULL
         ORDER BY id
         LIMIT 2
         "#,
     )
+    .bind(provider_code)
     .bind(out_trade_no)
     .fetch_all(pool)
     .await
@@ -495,18 +534,21 @@ pub async fn load_webhook_attempt_context_by_out_trade_no_sqlite(
 
 pub async fn load_webhook_attempt_context_by_out_trade_no_postgres(
     pool: &Pool<Postgres>,
+    provider_code: &str,
     out_trade_no: &str,
 ) -> Result<Option<WebhookAttemptContext>, CommerceServiceError> {
     let rows = sqlx::query(
         r#"
         SELECT tenant_id, organization_id, provider_code
         FROM commerce_payment_attempt
-        WHERE out_trade_no = CAST($1 AS TEXT)
+        WHERE provider_code = CAST($1 AS TEXT)
+          AND out_trade_no = CAST($2 AS TEXT)
           AND deleted_at IS NULL
         ORDER BY id
         LIMIT 2
         "#,
     )
+    .bind(provider_code)
     .bind(out_trade_no)
     .fetch_all(pool)
     .await

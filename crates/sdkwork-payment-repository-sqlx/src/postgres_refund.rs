@@ -105,7 +105,7 @@ impl PostgresCommerceRefundStore {
                  amount, currency_code, status, refund_reason_code, requested_by_type,
                  requested_by, request_no, idempotency_key, created_at, updated_at)
             VALUES
-                ($1, $2, $3, $4, $5, $6, $7, $8, 'submitted', $9, 'buyer', $10, $11, $12, $13, $14)
+                ($1, $2, $3, $4, $5, $6, $7, $8, 'submitted', $9, 'buyer', $10, $11, $12, $13::timestamptz, $14::timestamptz)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -285,7 +285,7 @@ impl PostgresCommerceRefundStore {
         sqlx::query(
             r#"
             UPDATE commerce_refund
-            SET status = 'failed', updated_at = $1
+            SET status = 'failed', updated_at = $1::timestamptz
             WHERE tenant_id = CAST($2 AS TEXT)
               AND id = CAST($3 AS TEXT)
               AND status = 'submitted'
@@ -456,7 +456,7 @@ async fn insert_refund_event(
             (id, tenant_id, organization_id, event_no, refund_id, event_type,
              from_status, to_status, actor_type, actor_id, request_id, idempotency_key, created_at)
         VALUES
-            ($1, $2, $3, $4, $5, $6, NULL, $7, 'buyer', NULL, $8, $9, $10)
+            ($1, $2, $3, $4, $5, $6, NULL, $7, 'buyer', NULL, $8, $9, $10::timestamptz)
        "#,
     )
     .bind(&event_id)

@@ -77,7 +77,7 @@ impl PostgresCommercePaymentIntentStore {
                  payment_method, provider_code, amount, currency_code, status, request_no,
                  idempotency_key, created_at, updated_at)
             VALUES
-                ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'CNY', $10, $11, $12, $13, $14)
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'CNY', $10, $11, $12, $13::timestamptz, $14::timestamptz)
             ON CONFLICT (id) DO NOTHING
            "#,
         )
@@ -193,7 +193,7 @@ impl PostgresCommercePaymentIntentStore {
         sqlx::query(
             r#"
             UPDATE commerce_payment_intent
-            SET status = $1, updated_at = $2
+            SET status = $1, updated_at = $2::timestamptz
             WHERE tenant_id = CAST($3 AS TEXT)
               AND owner_user_id = CAST($4 AS TEXT)
               AND id = CAST($5 AS TEXT)
@@ -211,7 +211,7 @@ impl PostgresCommercePaymentIntentStore {
         sqlx::query(
             r#"
             UPDATE commerce_payment_attempt
-            SET status = $1, updated_at = $2
+            SET status = $1, updated_at = $2::timestamptz
             WHERE tenant_id = CAST($3 AS TEXT)
               AND owner_user_id = CAST($4 AS TEXT)
               AND payment_intent_id = CAST($5 AS TEXT)
@@ -303,7 +303,7 @@ impl PostgresCommercePaymentIntentStore {
                  payment_method, provider_code, out_trade_no, amount, currency_code, status,
                  callback_payload, created_at, paid_at, updated_at)
             VALUES
-                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, '{}', $13, NULL, $14)
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, '{}', $13::timestamptz, NULL, $14::timestamptz)
             ON CONFLICT (id) DO NOTHING
            "#,
         )
@@ -358,7 +358,7 @@ impl PostgresCommercePaymentIntentStore {
         sqlx::query(
             r#"
             UPDATE commerce_payment_intent
-            SET status = $1, updated_at = $2
+            SET status = $1, updated_at = $2::timestamptz
             WHERE tenant_id = CAST($3 AS TEXT)
               AND owner_user_id = CAST($4 AS TEXT)
               AND id = CAST($5 AS TEXT)
@@ -578,12 +578,7 @@ fn store_error(message: &str, error: impl std::fmt::Display) -> CommerceServiceE
 }
 
 fn current_timestamp_string() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    format!("{seconds}")
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn optional_string_cell(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {

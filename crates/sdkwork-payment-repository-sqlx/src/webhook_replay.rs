@@ -4,7 +4,6 @@
 //! Order settlement after success remains on the order gateway (`payment_confirmations`).
 
 use sdkwork_contract_service::CommerceServiceError;
-use serde_json::Value;
 use sqlx::{Pool, Postgres, Row, Sqlite};
 
 use crate::payment_attempt_context::{
@@ -13,6 +12,10 @@ use crate::payment_attempt_context::{
 };
 use crate::shared::{current_timestamp_string, store_error, string_cell, StringCellRow};
 use crate::sqlite_webhook_ingestion::apply_webhook_payment_status_sqlite;
+use crate::webhook_event_payload::{
+    parse_stored_webhook_payload, validate_stored_webhook_scope, WEBHOOK_EVENT_STATUS_PROCESSED,
+    WEBHOOK_MATCH_STATE_UNMATCHED,
+};
 
 pub const WEBHOOK_STORED_REPLAY_MAX_RETRIES: i64 = 5;
 
@@ -49,7 +52,7 @@ pub struct WebhookEventRow {
 pub async fn replay_stored_webhook_event_sqlite(
     pool: &Pool<Sqlite>,
     scope: WebhookStoredReplayScope,
-    provider_event_id: String,
+    provider_scoped_event_id: String,
 ) -> Result<StoredWebhookReplayResult, CommerceServiceError> {
     let now = current_timestamp_string();
     let mut tx = pool
@@ -59,9 +62,7 @@ pub async fn replay_stored_webhook_event_sqlite(
 
     let row = sqlx::query(
         r#"
-        SELECT id, event_id, provider_code, event_type, status,
-               to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS received_at,
-               to_char(processed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS processed_at,
+        SELECT id, event_id, provider_code, event_type, status, received_at, processed_at,
                retries, payload
         FROM commerce_payment_webhook_event
         WHERE event_id = CAST(? AS TEXT)
@@ -69,7 +70,7 @@ pub async fn replay_stored_webhook_event_sqlite(
           AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
         "#,
     )
-    .bind(&provider_event_id)
+    .bind(&provider_scoped_event_id)
     .bind(&scope.tenant_id)
     .bind(scope.organization_id.as_deref())
     .bind(scope.organization_id.as_deref())
@@ -89,37 +90,47 @@ pub async fn replay_stored_webhook_event_sqlite(
     }
 
     let internal_id = string_cell(&row, "id");
+    let stored_event_id = string_cell(&row, "event_id");
     let provider_code = string_cell(&row, "provider_code");
     let payload: String = row
         .try_get("payload")
         .map_err(|error| CommerceServiceError::storage(format!("webhook payload: {error}")))?;
-    let (out_trade_no, payment_status) = parse_stored_webhook_payload(&payload)?;
-
-    let (payment_attempt_id, applied_status) = apply_webhook_payment_status_sqlite(
-        &mut tx,
+    let stored = parse_stored_webhook_payload(&payload)?;
+    validate_stored_webhook_scope(
+        &stored,
+        &stored_event_id,
         &provider_code,
-        out_trade_no.as_deref(),
-        payment_status.as_deref(),
-        Some(&scope.tenant_id),
+        &scope.tenant_id,
         scope.organization_id.as_deref(),
+    )?;
+    if stored.match_state == WEBHOOK_MATCH_STATE_UNMATCHED {
+        return Err(CommerceServiceError::conflict(
+            "unmatched webhook has no exact payment attempt identity to replay",
+        ));
+    }
+    let identity = stored.attempt_identity.as_ref().ok_or_else(|| {
+        CommerceServiceError::conflict(
+            "stored webhook has no exact payment attempt identity to replay",
+        )
+    })?;
+    let applied_status = apply_webhook_payment_status_sqlite(
+        &mut tx,
+        identity,
+        stored.payment_status.as_deref(),
         &now,
     )
     .await?;
-    ensure_replay_target_applied(&out_trade_no, &payment_status, &applied_status)?;
+    ensure_replay_target_applied(&stored.payment_status, &applied_status)?;
 
     let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
-        if let Some(payment_attempt_id) = payment_attempt_id.as_deref() {
-            load_payment_webhook_attempt_context_by_id_sqlite(
-                &mut tx,
-                payment_attempt_id,
-                &provider_code,
-                Some(&scope.tenant_id),
-                scope.organization_id.as_deref(),
-            )
-            .await?
-        } else {
-            None
-        }
+        load_payment_webhook_attempt_context_by_id_sqlite(
+            &mut tx,
+            &identity.payment_attempt_id,
+            &identity.provider_code,
+            Some(&identity.tenant_id),
+            identity.organization_id.as_deref(),
+        )
+        .await?
     } else {
         None
     };
@@ -128,15 +139,19 @@ pub async fn replay_stored_webhook_event_sqlite(
     sqlx::query(
         r#"
         UPDATE commerce_payment_webhook_event
-        SET status = 'processed', processed_at = ?, updated_at = ?, retries = ?
+        SET status = ?, processed_at = ?, updated_at = ?, retries = ?, last_error = NULL
         WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT)
+          AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
         "#,
     )
+    .bind(WEBHOOK_EVENT_STATUS_PROCESSED)
     .bind(&now)
     .bind(&now)
     .bind(next_retries)
     .bind(&internal_id)
     .bind(&scope.tenant_id)
+    .bind(scope.organization_id.as_deref())
+    .bind(scope.organization_id.as_deref())
     .execute(&mut *tx)
     .await
     .map_err(|error| store_error("failed to mark webhook event replayed", error))?;
@@ -159,7 +174,7 @@ pub async fn replay_stored_webhook_event_sqlite(
 pub async fn replay_stored_webhook_event_postgres(
     pool: &Pool<Postgres>,
     scope: WebhookStoredReplayScope,
-    provider_event_id: String,
+    provider_scoped_event_id: String,
 ) -> Result<StoredWebhookReplayResult, CommerceServiceError> {
     let now = current_timestamp_string();
     let mut tx = pool
@@ -169,7 +184,9 @@ pub async fn replay_stored_webhook_event_postgres(
 
     let row = sqlx::query(
         r#"
-        SELECT id, event_id, provider_code, event_type, status, received_at, processed_at,
+        SELECT id, event_id, provider_code, event_type, status,
+               to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS received_at,
+               to_char(processed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS processed_at,
                retries, payload
         FROM commerce_payment_webhook_event
         WHERE event_id = CAST($1 AS TEXT)
@@ -178,7 +195,7 @@ pub async fn replay_stored_webhook_event_postgres(
         FOR UPDATE
         "#,
     )
-    .bind(&provider_event_id)
+    .bind(&provider_scoped_event_id)
     .bind(&scope.tenant_id)
     .bind(scope.organization_id.as_deref())
     .fetch_optional(&mut *tx)
@@ -197,38 +214,47 @@ pub async fn replay_stored_webhook_event_postgres(
     }
 
     let internal_id = string_cell(&row, "id");
+    let stored_event_id = string_cell(&row, "event_id");
     let provider_code = string_cell(&row, "provider_code");
-    let payload: String = row
+    let payload: serde_json::Value = row
         .try_get("payload")
         .map_err(|error| CommerceServiceError::storage(format!("webhook payload: {error}")))?;
-    let (out_trade_no, payment_status) = parse_stored_webhook_payload(&payload)?;
-
-    let (payment_attempt_id, applied_status) =
-        crate::postgres_webhook_ingestion::apply_webhook_payment_status_postgres(
-            &mut tx,
-            &provider_code,
-            out_trade_no.as_deref(),
-            payment_status.as_deref(),
-            Some(&scope.tenant_id),
-            scope.organization_id.as_deref(),
-            &now,
+    let stored = parse_stored_webhook_payload(&payload.to_string())?;
+    validate_stored_webhook_scope(
+        &stored,
+        &stored_event_id,
+        &provider_code,
+        &scope.tenant_id,
+        scope.organization_id.as_deref(),
+    )?;
+    if stored.match_state == WEBHOOK_MATCH_STATE_UNMATCHED {
+        return Err(CommerceServiceError::conflict(
+            "unmatched webhook has no exact payment attempt identity to replay",
+        ));
+    }
+    let identity = stored.attempt_identity.as_ref().ok_or_else(|| {
+        CommerceServiceError::conflict(
+            "stored webhook has no exact payment attempt identity to replay",
         )
-        .await?;
-    ensure_replay_target_applied(&out_trade_no, &payment_status, &applied_status)?;
+    })?;
+    let applied_status = crate::postgres_webhook_ingestion::apply_webhook_payment_status_postgres(
+        &mut tx,
+        identity,
+        stored.payment_status.as_deref(),
+        &now,
+    )
+    .await?;
+    ensure_replay_target_applied(&stored.payment_status, &applied_status)?;
 
     let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
-        if let Some(payment_attempt_id) = payment_attempt_id.as_deref() {
-            load_payment_webhook_attempt_context_by_id_postgres(
-                &mut tx,
-                payment_attempt_id,
-                &provider_code,
-                Some(&scope.tenant_id),
-                scope.organization_id.as_deref(),
-            )
-            .await?
-        } else {
-            None
-        }
+        load_payment_webhook_attempt_context_by_id_postgres(
+            &mut tx,
+            &identity.payment_attempt_id,
+            &identity.provider_code,
+            Some(&identity.tenant_id),
+            identity.organization_id.as_deref(),
+        )
+        .await?
     } else {
         None
     };
@@ -237,16 +263,18 @@ pub async fn replay_stored_webhook_event_postgres(
     sqlx::query(
         r#"
         UPDATE commerce_payment_webhook_event
-        SET status = 'processed', processed_at = $1::timestamptz,
-            updated_at = $2::timestamptz, retries = $3
+        SET status = $1, processed_at = $2::timestamptz,
+            updated_at = $2::timestamptz, retries = $3, last_error = NULL
         WHERE id = CAST($4 AS TEXT) AND tenant_id = CAST($5 AS TEXT)
+          AND ((organization_id = CAST($6 AS TEXT)) OR (organization_id IS NULL AND $6::text IS NULL))
         "#,
     )
-    .bind(&now)
+    .bind(WEBHOOK_EVENT_STATUS_PROCESSED)
     .bind(&now)
     .bind(next_retries)
     .bind(&internal_id)
     .bind(&scope.tenant_id)
+    .bind(scope.organization_id.as_deref())
     .execute(&mut *tx)
     .await
     .map_err(|error| store_error("failed to mark webhook event replayed", error))?;
@@ -300,42 +328,16 @@ fn map_webhook_event_row<R: StringCellRow>(
 }
 
 fn ensure_replay_target_applied(
-    out_trade_no: &Option<String>,
     payment_status: &Option<String>,
     applied_status: &Option<String>,
 ) -> Result<(), CommerceServiceError> {
-    let has_target = out_trade_no
+    let has_target = payment_status
         .as_ref()
-        .is_some_and(|value| !value.trim().is_empty())
-        && payment_status
-            .as_ref()
-            .is_some_and(|value| !value.trim().is_empty());
+        .is_some_and(|value| !value.trim().is_empty());
     if has_target && applied_status.is_none() {
-        return Err(CommerceServiceError::not_found(
-            "payment attempt was not found for webhook replay",
+        return Err(CommerceServiceError::conflict(
+            "stored webhook payment status cannot be applied safely",
         ));
     }
     Ok(())
-}
-
-fn parse_stored_webhook_payload(
-    payload: &str,
-) -> Result<(Option<String>, Option<String>), CommerceServiceError> {
-    let parsed: Value = serde_json::from_str(payload).map_err(|error| {
-        CommerceServiceError::storage(format!("webhook payload json invalid: {error}"))
-    })?;
-    let normalized = parsed.get("normalized");
-    let out_trade_no = normalized
-        .and_then(|value| value.get("outTradeNo"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
-    let payment_status = normalized
-        .and_then(|value| value.get("paymentStatus"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
-    Ok((out_trade_no, payment_status))
 }

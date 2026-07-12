@@ -20,6 +20,7 @@ mod sqlite_store_integration;
 pub mod sqlite_webhook_ingestion;
 #[cfg(test)]
 mod test_sqlite_pool;
+mod webhook_event_payload;
 mod webhook_replay;
 mod webhook_status;
 

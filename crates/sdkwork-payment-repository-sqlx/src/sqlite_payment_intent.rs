@@ -576,12 +576,7 @@ fn store_error(message: &str, error: impl std::fmt::Display) -> CommerceServiceE
 }
 
 fn current_timestamp_string() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    format!("{seconds}")
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn optional_string_cell(row: &sqlx::sqlite::SqliteRow, column: &str) -> Option<String> {

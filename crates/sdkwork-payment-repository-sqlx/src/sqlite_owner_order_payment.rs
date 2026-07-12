@@ -1,7 +1,7 @@
 use sdkwork_contract_service::{CommerceMoney, CommercePaymentStatus, CommerceServiceError};
 use sdkwork_payment_service::{
-    CancelOrderPaymentsCommand, ConfirmOwnerOrderPaymentOutcome, PayOwnerOrderCommand,
-    PayOwnerOrderOutcome, OrderPaymentSettlementAttempt,
+    CancelOrderPaymentsCommand, ConfirmOwnerOrderPaymentOutcome, OrderPaymentSettlementAttempt,
+    PayOwnerOrderCommand, PayOwnerOrderOutcome,
 };
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
@@ -28,8 +28,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         command: CancelOrderPaymentsCommand,
     ) -> Result<(), CommerceServiceError> {
         let now = current_timestamp_string();
-        // C1/C2 修复：取消操作必须在单事务内执行，且只能取消未终结状态的支付意图/尝试，
-        // 严禁覆盖 succeeded/refunded/closed 等终态，避免"已收款但订单显示已取消"的资金事故。
+        // Lock order, intents, and attempts in a stable order before canceling.
         let mut tx = self
             .pool
             .begin_with("BEGIN IMMEDIATE")
@@ -41,7 +40,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
                 )
             })?;
 
-        sqlx::query(
+        let order_row = sqlx::query(
             r#"
             SELECT id
             FROM commerce_order
@@ -49,7 +48,6 @@ impl SqliteCommerceOwnerOrderPaymentStore {
               AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
               AND owner_user_id = CAST(? AS TEXT)
               AND id = CAST(? AS TEXT)
-              AND deleted_at IS NULL
             "#,
         )
         .bind(&command.tenant_id)
@@ -59,7 +57,14 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .bind(&command.order_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|error| store_error("failed to lock owner order for payment cancellation", error))?;
+        .map_err(|error| {
+            store_error("failed to lock owner order for payment cancellation", error)
+        })?;
+        if order_row.is_none() {
+            return Err(CommerceServiceError::not_found(
+                "owner order was not found for payment cancellation",
+            ));
+        }
 
         sqlx::query(
             r#"
@@ -156,7 +161,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             )
         })?;
 
-        // 事务提交后校验是否存在已成功但未取消的支付意图，若有则上报冲突。
+        // Report a terminal payment instead of silently treating cancellation as successful.
         if affected_intent.rows_affected() == 0 {
             let existing = sqlx::query(
                 r#"
@@ -433,7 +438,6 @@ impl SqliteCommerceOwnerOrderPaymentStore {
               AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
               AND owner_user_id = CAST(? AS TEXT)
               AND id = CAST(? AS TEXT)
-              AND deleted_at IS NULL
             "#,
         )
         .bind(tenant_id)
@@ -443,7 +447,9 @@ impl SqliteCommerceOwnerOrderPaymentStore {
         .bind(order_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|error| store_error("failed to lock owner order for payment confirmation", error))?;
+        .map_err(|error| {
+            store_error("failed to lock owner order for payment confirmation", error)
+        })?;
         if order_row.is_none() {
             return Err(CommerceServiceError::not_found(
                 "owner order was not found for payment confirmation",
@@ -565,7 +571,7 @@ impl SqliteCommerceOwnerOrderPaymentStore {
             )?;
             Some(
                 sqlx::query(
-            r#"
+                    r#"
             UPDATE commerce_payment_intent
             SET status = ?, updated_at = ?
             WHERE tenant_id = CAST(? AS TEXT)
@@ -576,18 +582,20 @@ impl SqliteCommerceOwnerOrderPaymentStore {
               AND deleted_at IS NULL
               AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
             "#,
-        )
-        .bind(CommercePaymentStatus::Succeeded.as_str())
-        .bind(&confirmation_paid_at)
-        .bind(tenant_id)
-        .bind(organization_id)
-        .bind(organization_id)
-        .bind(owner_user_id)
-        .bind(order_id)
-        .bind(&payment_intent_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| store_error("failed to mark owner payment intent succeeded", error))?,
+                )
+                .bind(CommercePaymentStatus::Succeeded.as_str())
+                .bind(&confirmation_paid_at)
+                .bind(tenant_id)
+                .bind(organization_id)
+                .bind(organization_id)
+                .bind(owner_user_id)
+                .bind(order_id)
+                .bind(&payment_intent_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| {
+                    store_error("failed to mark owner payment intent succeeded", error)
+                })?,
             )
         };
         ensure_confirmation_intent_update(

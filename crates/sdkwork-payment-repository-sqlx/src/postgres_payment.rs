@@ -1,3 +1,4 @@
+use crate::shared::current_timestamp_string;
 use sdkwork_contract_service::{CommerceMoney, CommercePaymentStatus, CommerceServiceError};
 use sdkwork_payment_service::{
     ClosePaymentRecordCommand, PaymentRecordDetailQuery, PaymentRecordItem, PaymentRecordListPage,
@@ -132,6 +133,40 @@ FROM (
             ELSE 'pending'
         END AS record_status
     FROM commerce_order o
+"#;
+
+const CLOSE_PAYMENT_ATTEMPT: &str = r#"
+UPDATE commerce_payment_attempt
+SET status = $1, updated_at = $2::timestamptz
+WHERE tenant_id = CAST($3 AS TEXT)
+  AND owner_user_id = CAST($4 AS TEXT)
+  AND id = CAST($5 AS TEXT)
+  AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
+"#;
+
+const CLOSE_PARENT_PAYMENT_INTENT: &str = r#"
+UPDATE commerce_payment_intent
+SET status = $1, updated_at = $2::timestamptz
+WHERE tenant_id = CAST($3 AS TEXT)
+  AND owner_user_id = CAST($4 AS TEXT)
+  AND id = (
+      SELECT payment_intent_id
+      FROM commerce_payment_attempt
+      WHERE tenant_id = CAST($3 AS TEXT)
+        AND owner_user_id = CAST($4 AS TEXT)
+        AND id = CAST($5 AS TEXT)
+      LIMIT 1
+  )
+  AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
+"#;
+
+const CLOSE_PAYMENT_INTENT: &str = r#"
+UPDATE commerce_payment_intent
+SET status = $1, updated_at = $2::timestamptz
+WHERE tenant_id = CAST($3 AS TEXT)
+  AND owner_user_id = CAST($4 AS TEXT)
+  AND id = CAST($5 AS TEXT)
+  AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
 "#;
 
 #[derive(Debug, Clone)]
@@ -324,54 +359,12 @@ WHERE o.tenant_id = CAST($1 AS TEXT)
             "pending",
             CommercePaymentStatus::Canceled.as_str(),
         )?;
-        let now = format!(
-            "{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_secs())
-                .unwrap_or(0)
-        );
+        let now = current_timestamp_string();
         let mut tx = self.pool.begin().await.map_err(|error| {
             store_error("failed to begin close payment record transaction", error)
         })?;
 
-        let attempt = sqlx::query(
-            r#"
-            UPDATE commerce_payment_attempt
-            SET status = $1, updated_at = $2
-            WHERE tenant_id = CAST($3 AS TEXT)
-              AND owner_user_id = CAST($4 AS TEXT)
-              AND id = CAST($5 AS TEXT)
-              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
-            "#,
-        )
-        .bind(CommercePaymentStatus::Canceled.as_str())
-        .bind(&now)
-        .bind(&command.tenant_id)
-        .bind(&command.owner_user_id)
-        .bind(&command.payment_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| store_error("failed to close payment attempt", error))?;
-
-        if attempt.rows_affected() > 0 {
-            sqlx::query(
-                r#"
-                UPDATE commerce_payment_intent
-                SET status = $1, updated_at = $2
-                WHERE tenant_id = CAST($3 AS TEXT)
-                  AND owner_user_id = CAST($4 AS TEXT)
-                  AND id = (
-                      SELECT payment_intent_id
-                      FROM commerce_payment_attempt
-                      WHERE tenant_id = CAST($3 AS TEXT)
-                        AND owner_user_id = CAST($4 AS TEXT)
-                        AND id = CAST($5 AS TEXT)
-                      LIMIT 1
-                  )
-                  AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
-                "#,
-            )
+        let attempt = sqlx::query(CLOSE_PAYMENT_ATTEMPT)
             .bind(CommercePaymentStatus::Canceled.as_str())
             .bind(&now)
             .bind(&command.tenant_id)
@@ -379,7 +372,18 @@ WHERE o.tenant_id = CAST($1 AS TEXT)
             .bind(&command.payment_id)
             .execute(&mut *tx)
             .await
-            .map_err(|error| store_error("failed to close parent payment intent", error))?;
+            .map_err(|error| store_error("failed to close payment attempt", error))?;
+
+        if attempt.rows_affected() > 0 {
+            sqlx::query(CLOSE_PARENT_PAYMENT_INTENT)
+                .bind(CommercePaymentStatus::Canceled.as_str())
+                .bind(&now)
+                .bind(&command.tenant_id)
+                .bind(&command.owner_user_id)
+                .bind(&command.payment_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| store_error("failed to close parent payment intent", error))?;
 
             tx.commit().await.map_err(|error| {
                 store_error("failed to commit close payment record transaction", error)
@@ -387,24 +391,15 @@ WHERE o.tenant_id = CAST($1 AS TEXT)
             return Ok(());
         }
 
-        let intent = sqlx::query(
-            r#"
-            UPDATE commerce_payment_intent
-            SET status = $1, updated_at = $2
-            WHERE tenant_id = CAST($3 AS TEXT)
-              AND owner_user_id = CAST($4 AS TEXT)
-              AND id = CAST($5 AS TEXT)
-              AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
-            "#,
-        )
-        .bind(CommercePaymentStatus::Canceled.as_str())
-        .bind(&now)
-        .bind(&command.tenant_id)
-        .bind(&command.owner_user_id)
-        .bind(&command.payment_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| store_error("failed to close payment intent", error))?;
+        let intent = sqlx::query(CLOSE_PAYMENT_INTENT)
+            .bind(CommercePaymentStatus::Canceled.as_str())
+            .bind(&now)
+            .bind(&command.tenant_id)
+            .bind(&command.owner_user_id)
+            .bind(&command.payment_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error("failed to close payment intent", error))?;
 
         if intent.rows_affected() == 0 {
             return Err(CommerceServiceError::conflict(
@@ -595,4 +590,28 @@ fn is_missing_postgres_read_model(error: &sqlx::Error) -> bool {
 
 fn store_error(context: &str, error: sqlx::Error) -> CommerceServiceError {
     CommerceServiceError::storage(format!("{context}: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::DateTime;
+
+    use super::{
+        current_timestamp_string, CLOSE_PARENT_PAYMENT_INTENT, CLOSE_PAYMENT_ATTEMPT,
+        CLOSE_PAYMENT_INTENT,
+    };
+
+    #[test]
+    fn close_payment_record_uses_rfc3339_timestamptz_writes() {
+        let now = current_timestamp_string();
+        DateTime::parse_from_rfc3339(&now).expect("current timestamp must be RFC3339");
+
+        for sql in [
+            CLOSE_PAYMENT_ATTEMPT,
+            CLOSE_PARENT_PAYMENT_INTENT,
+            CLOSE_PAYMENT_INTENT,
+        ] {
+            assert!(sql.contains("updated_at = $2::timestamptz"));
+        }
+    }
 }
