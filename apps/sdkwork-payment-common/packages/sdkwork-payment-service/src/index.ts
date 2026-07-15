@@ -1,13 +1,15 @@
 import {
   APP_PAYMENT_METHOD_TREE,
+  BACKEND_PAYMENT_METHOD_TREE,
   type ClientFromMethodTree,
   type PaymentAppSdkClient,
+  type PaymentBackendSdkClient,
   type PaymentSdkMethod,
 } from "@sdkwork/payment-sdk-ports";
 import { formatCurrency as formatSdkworkCurrency } from "@sdkwork/utils";
 
 // 重新导出 SDK 客户端类型，避免消费方需要直接依赖 @sdkwork/payment-sdk-ports。
-export type { PaymentAppSdkClient } from "@sdkwork/payment-sdk-ports";
+export type { PaymentAppSdkClient, PaymentBackendSdkClient } from "@sdkwork/payment-sdk-ports";
 
 type ServiceTemplate = { readonly [key: string]: true | ServiceTemplate };
 
@@ -15,8 +17,16 @@ export type SdkworkPaymentPaymentsService = ClientFromMethodTree<
   (typeof APP_PAYMENT_METHOD_TREE)["payments"]
 >;
 
+// Backend 服务：对齐 BACKEND_PAYMENT_METHOD_TREE 的全部资源。
+// Admin UI 通过 `service.backend.*` 访问 provider accounts / sub merchants /
+// certificates / dev config / webhook events / reconciliation 等后台能力。
+export type SdkworkPaymentBackendService = ClientFromMethodTree<
+  typeof BACKEND_PAYMENT_METHOD_TREE
+>;
+
 export type SdkworkPaymentAppService = {
   payments: SdkworkPaymentPaymentsService;
+  backend?: SdkworkPaymentBackendService;
 };
 
 export type SdkworkPaymentAppServiceProvider = () => SdkworkPaymentAppService;
@@ -35,6 +45,9 @@ let sdkworkPaymentSessionTokenProvider: SdkworkPaymentSessionTokenProvider = () 
 
 export interface CreateSdkworkPaymentAppServiceInput {
   appClient: PaymentAppSdkClient;
+  // 可选 backend SDK 客户端。Admin 场景下由 bootstrap / shell 注入；
+  // 纯 C 端场景下省略，service.backend 为 undefined。
+  backendClient?: PaymentBackendSdkClient | null;
 }
 
 export interface SdkworkPaymentResponseEnvelope<T> {
@@ -90,6 +103,25 @@ export function getSdkworkPaymentService(): SdkworkPaymentAppService {
   return sdkworkPaymentAppServiceProvider();
 }
 
+// Admin 场景专用：返回 backend 服务，若未注入 backend SDK 客户端则抛出明确错误。
+export function getSdkworkPaymentBackendService(): SdkworkPaymentBackendService {
+  const service = getSdkworkPaymentService();
+  if (!service.backend) {
+    throw new Error(
+      "SDKWork payment backend service is not configured. Call configureSdkworkPaymentAppServiceProvider() with a backendClient from payment PC admin bootstrap.",
+    );
+  }
+  return service.backend;
+}
+
+export function hasSdkworkPaymentBackendService(): boolean {
+  const provider = sdkworkPaymentAppServiceProvider;
+  if (!provider) {
+    return false;
+  }
+  return Boolean(provider().backend);
+}
+
 export function getSdkworkPaymentSessionTokens(): SdkworkPaymentSessionTokens {
   const tokens = sdkworkPaymentSessionTokenProvider();
   return {
@@ -113,13 +145,25 @@ export function requireSdkworkPaymentSession(message = "Authentication required"
 export function createSdkworkPaymentAppService(
   input: CreateSdkworkPaymentAppServiceInput,
 ): SdkworkPaymentAppService {
-  return {
+  const service: SdkworkPaymentAppService = {
     payments: buildServiceTree<SdkworkPaymentPaymentsService>(
       APP_PAYMENT_METHOD_TREE.payments,
       input.appClient.commerce.payments,
       ["commerce", "payments"],
     ),
   };
+
+  // Admin 场景：注入 backend SDK 客户端后，构建 backend 服务树。
+  // 纯 C 端场景下 backendClient 为 undefined，service.backend 不存在。
+  if (input.backendClient) {
+    service.backend = buildServiceTree<SdkworkPaymentBackendService>(
+      BACKEND_PAYMENT_METHOD_TREE,
+      input.backendClient.payments,
+      ["payments"],
+    );
+  }
+
+  return service;
 }
 
 /**

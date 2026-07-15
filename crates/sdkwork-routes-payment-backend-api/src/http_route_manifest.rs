@@ -139,7 +139,7 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
-        "/backend/v3/api/payments/webhook_events/{eventId}/replays",
+        "/backend/v3/api/payments/webhook_events/{eventId}/replay",
         "payments",
         "payments.webhookEvents.replay",
     ),

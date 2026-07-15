@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.component.spec",
+  "component": {
+    "name": "@sdkwork/payment-backend-sdk",
+    "type": "typescript-sdk-family",
+    "root": "sdks/sdkwork-payment-backend-sdk",
+    "domain": "payment",
+    "capability": "backend",
+    "surface": "backend-api",
+    "languages": [
+      "typescript"
+    ],
+    "generated": true
+  },
+  "contracts": {
+    "sdkDependencies": [],
+    "dependencyApiExports": [],
+    "dependencyApiSurfaces": [],
+    "apiAuthority": "sdkwork-payment-backend-api",
+    "apiPrefix": "/backend/v3/api",
+    "authMode": "dual-token",
+    "wireProtocol": "sdkwork-v3"
+  }
+}

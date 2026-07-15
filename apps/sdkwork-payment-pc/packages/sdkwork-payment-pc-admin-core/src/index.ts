@@ -1,0 +1,120 @@
+export function listSdkworkPaymentPcAdminSdkInventory() {
+  return [
+    "@sdkwork/payment-backend-sdk",
+  ] as const;
+}
+
+export const PAYMENT_PC_ADMIN_CAPABILITY_PACKAGES = [
+  "@sdkwork/payment-pc-admin-provider",
+  "@sdkwork/payment-pc-admin-devconfig",
+  "@sdkwork/payment-pc-admin-channel",
+  "@sdkwork/payment-pc-admin-monitor",
+] as const;
+
+export type PaymentPcAdminCapabilityPackage = (typeof PAYMENT_PC_ADMIN_CAPABILITY_PACKAGES)[number];
+
+export interface PaymentPcAdminModuleRecord {
+  additionalPermissionPrefixes?: readonly string[];
+  capability: string;
+  id: string;
+  packageName: PaymentPcAdminCapabilityPackage;
+  permissionPrefix: string;
+  routeBasePath: string;
+}
+
+export function createSdkworkPaymentPcAdminModuleRegistry(): readonly PaymentPcAdminModuleRecord[] {
+  return [
+    {
+      capability: "provider",
+      id: "payment-provider",
+      packageName: "@sdkwork/payment-pc-admin-provider",
+      permissionPrefix: "commerce.payments.provider_accounts",
+      routeBasePath: "/admin/payments/providers",
+    },
+    {
+      additionalPermissionPrefixes: [
+        "commerce.payments.certificates",
+        "commerce.payments.webhook_events",
+        "commerce.payments.dev",
+        "commerce.payments.provider_accounts",
+      ],
+      capability: "devconfig",
+      id: "payment-devconfig",
+      packageName: "@sdkwork/payment-pc-admin-devconfig",
+      permissionPrefix: "commerce.payments.devconfig",
+      routeBasePath: "/admin/payments/devconfig",
+    },
+    {
+      additionalPermissionPrefixes: [
+        "commerce.payments.methods",
+        "commerce.payments.route_rules",
+      ],
+      capability: "channel",
+      id: "payment-channel",
+      packageName: "@sdkwork/payment-pc-admin-channel",
+      permissionPrefix: "commerce.payments.channels",
+      routeBasePath: "/admin/payments/channels",
+    },
+    {
+      "additionalPermissionPrefixes": [
+        "commerce.payments.intents",
+        "commerce.payments.attempts",
+        "commerce.payments.webhook_events",
+        "commerce.payments.reconciliation_runs",
+      ],
+      capability: "monitor",
+      id: "payment-monitor",
+      packageName: "@sdkwork/payment-pc-admin-monitor",
+      permissionPrefix: "commerce.payments.intents",
+      routeBasePath: "/admin/payments/monitor",
+    },
+  ] as const;
+}
+
+export {
+  SdkworkPaymentListPaginationControls,
+  type SdkworkPaymentListPaginationControlsProps,
+} from "./components/SdkworkPaymentListPaginationControls";
+
+export { AdminFieldLabel, type AdminFieldLabelProps } from "./components/AdminFieldLabel";
+
+export {
+  ConfirmDialog,
+  useConfirmDialog,
+  type ConfirmDialogProps,
+  type ConfirmDialogState,
+  type ConfirmDialogVariant,
+  type UseConfirmDialogResult,
+} from "./components/ConfirmDialog";
+
+export {
+  CopyButton,
+  SecretRefField,
+  maskSecretRef,
+  type CopyButtonProps,
+  type SecretRefFieldProps,
+} from "./components/CopyButton";
+
+export {
+  ADMIN_PROVIDER_CODES,
+  ADMIN_PROVIDER_LABEL,
+  ADMIN_PROVIDER_FORM_OPTIONS,
+  ADMIN_PROVIDER_FILTER_OPTIONS,
+  ADMIN_WEBHOOK_REPLAY_MAX_RETRIES,
+  ADMIN_PAYMENT_METHOD_KEYS,
+  adminPaymentMethodKeysForProvider,
+  adminPaymentMethodKeyOption,
+  formatAdminTimestamp,
+  formatAdminAmount,
+  formatAdminRelativeTime,
+  type AdminProviderCode,
+  type AdminPaymentMethodKeyOption,
+} from "./components/admin-constants";
+
+export {
+  asString,
+  asRequiredString,
+  asStatus,
+  asNumber,
+  asRecord,
+} from "./services/admin-coercion-helpers";

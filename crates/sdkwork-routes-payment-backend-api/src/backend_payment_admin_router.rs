@@ -1534,7 +1534,7 @@ pub fn build_backend_payment_admin_router(
             get(list_webhook_events),
         )
         .route(
-            "/backend/v3/api/payments/webhook_events/{eventId}/replays",
+            "/backend/v3/api/payments/webhook_events/{eventId}/replay",
             post(replay_webhook_event),
         )
         .route(

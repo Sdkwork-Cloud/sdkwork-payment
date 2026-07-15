@@ -50,11 +50,12 @@ export function PaymentAppShell({
   const [isConfigured, setIsConfigured] = useState(false);
 
   useEffect(() => {
-    // C20 对齐：在 Shell 挂载时注册 SDK 服务提供者与会话 token 提供者。
-    // 1. 若外部已注入 appClient（来自宿主 / federated router），优先使用；
-    //    否则不注册，由 SDK 抛出明确错误，避免静默回退到不可用状态。
-    // 2. 会话 token 通过 localStorage 读取，运行时由登录流程写入；
-    //    不再依赖 vite define 注入，避免 token 泄漏到 bundle。
+    // C20 alignment: register SDK service provider and session token provider on Shell mount.
+    // 1. If an external appClient is injected (from host / federated router), prefer it;
+    //    otherwise do not register and let the SDK throw an explicit error instead of
+    //    silently falling back to an unavailable state.
+    // 2. Session tokens are read from localStorage at runtime by the login flow;
+    //    do not rely on vite define injection to avoid leaking tokens into the bundle.
     if (appClient) {
       configureSdkworkPaymentAppServiceProvider(() =>
         createSdkworkPaymentAppService({ appClient }),

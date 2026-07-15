@@ -24,6 +24,12 @@ tables:
   - name: commerce_payment_provider_account
     write_owner: sdkwork-commerce-platform
     reference_only: true
+  - name: commerce_payment_sub_merchant
+    write_owner: sdkwork-commerce-platform
+    reference_only: true
+  - name: commerce_payment_certificate
+    write_owner: sdkwork-commerce-platform
+    reference_only: true
   - name: commerce_payment_route_rule
     write_owner: sdkwork-commerce-platform
     reference_only: true

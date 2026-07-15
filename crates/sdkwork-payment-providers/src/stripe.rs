@@ -103,6 +103,24 @@ impl PaymentProviderAdapter for StripePaymentProviderAdapter {
                     "true".to_owned(),
                 ),
             ];
+            // When a method_key is supplied (e.g., `stripe_card`,
+            // `stripe_apple_pay`, `stripe_google_pay`), pass the corresponding
+            // `payment_method_types` so Stripe restricts the PaymentIntent to
+            // the requested instrument. Apple Pay / Google Pay are supported via
+            // Stripe's `card` payment method type with wallet support enabled
+            // in the Stripe Dashboard.
+            if let Some(method_key) = request
+                .payment_scene
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                if let Some(types) = stripe_payment_method_types_for_key(method_key) {
+                    for pm_type in types {
+                        form.push(("payment_method_types[]".to_owned(), (*pm_type).to_owned()));
+                    }
+                }
+            }
             if let Some(tenant_id) = request.tenant_id {
                 form.push(("metadata[tenant_id]".to_owned(), tenant_id));
             }
@@ -484,6 +502,33 @@ fn validate_secret_key(secret_key: &str) -> ProviderResult<()> {
         ));
     }
     Ok(())
+}
+
+/// Maps a method_key to Stripe `payment_method_types[]` values.
+///
+/// Supported method_keys (mirrors `commerce_payment_method.method_key` DB rows):
+/// - `stripe_card`       → `["card"]` (credit/debit cards)
+/// - `stripe_apple_pay`  → `["card"]`  (Apple Pay is a card wallet in Stripe;
+///   requires Apple Pay enabled in Stripe Dashboard + domain verification)
+/// - `stripe_google_pay` → `["card"]`  (Google Pay is a card wallet in Stripe;
+///   requires Google Pay enabled in Stripe Dashboard)
+/// - `stripe_alipay`     → `["alipay"]`
+/// - `stripe_wechat_pay` → `["wechat_pay"]`
+///
+/// When `None` is returned (unknown method_key), Stripe falls back to
+/// `automatic_payment_methods` which surfaces all Dashboard-enabled instruments.
+///
+/// Apple Pay / Google Pay are not separate `payment_method_types` in Stripe;
+/// they are card-based wallets. The Stripe.js frontend automatically renders
+/// the Apple Pay / Google Pay button when the PaymentIntent allows `card` and
+/// the merchant has the wallet enabled in Dashboard.
+fn stripe_payment_method_types_for_key(method_key: &str) -> Option<&'static [&'static str]> {
+    match method_key {
+        "stripe_card" | "stripe_apple_pay" | "stripe_google_pay" => Some(&["card"]),
+        "stripe_alipay" => Some(&["alipay"]),
+        "stripe_wechat_pay" => Some(&["wechat_pay"]),
+        _ => None,
+    }
 }
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {

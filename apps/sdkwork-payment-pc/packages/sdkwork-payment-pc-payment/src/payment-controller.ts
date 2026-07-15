@@ -38,6 +38,7 @@ export interface SdkworkPaymentControllerState {
   pageSize: number;
   pageInfo?: SdkworkPaymentPageInfo;
   relatedPayments: SdkworkPaymentSummary[];
+  relatedPaymentsError?: string;
   selectedMethodCode: string | null;
   selectedPaymentId?: string;
   visibleRecords: SdkworkPaymentSummary[];
@@ -281,14 +282,25 @@ export function createSdkworkPaymentController(
     return dashboard;
   }
 
-  async function loadRelatedPayments(orderId: string | undefined): Promise<SdkworkPaymentSummary[]> {
+  async function loadRelatedPayments(
+    orderId: string | undefined,
+  ): Promise<SdkworkPaymentSummary[]> {
     if (!orderId) {
       return [];
     }
-
     try {
-      return await service.listOrderPayments(orderId);
-    } catch {
+      const items = await service.listOrderPayments(orderId);
+      setState({ relatedPaymentsError: undefined });
+      return items;
+    } catch (error) {
+      // Surface the failure so the UI can distinguish "no related payments"
+      // (API success, empty list) from "failed to load related payments"
+      // (network/server error). The caller's primary action (create/open/
+      // refresh) is NOT blocked — related payments are a secondary display.
+      const message =
+        error instanceof Error ? error.message : "Failed to load related payments.";
+      console.error("[sdkwork-payment] loadRelatedPayments failed:", error);
+      setState({ relatedPaymentsError: message });
       return [];
     }
   }

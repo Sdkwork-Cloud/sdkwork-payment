@@ -36,6 +36,9 @@ catalogs:
     vite-plugin-dts:
       specifier: ^4.5.4
       version: 4.5.4
+    vitest:
+      specifier: ^4.1.2
+      version: 4.1.9
 
 importers:
 
@@ -628,6 +631,167 @@ importers:
         specifier: 'catalog:'
         version: 8.1.0(@types/node@25.9.4)(jiti@2.7.0)
 
+  apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-admin-channel:
+    dependencies:
+      '@sdkwork/payment-contracts':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-contracts
+      '@sdkwork/payment-pc-admin-core':
+        specifier: workspace:*
+        version: link:../sdkwork-payment-pc-admin-core
+      '@sdkwork/payment-service':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-service
+      '@sdkwork/ui-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-ui/sdkwork-ui-pc-react
+    devDependencies:
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.14)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.4
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.4(react@19.2.4)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.1.0(@types/node@25.9.4)(jiti@2.7.0))
+
+  apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-admin-core:
+    dependencies:
+      '@sdkwork/payment-contracts':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-contracts
+      '@sdkwork/payment-sdk-ports':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-sdk-ports
+      '@sdkwork/payment-service':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-service
+      '@sdkwork/ui-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-ui/sdkwork-ui-pc-react
+      react:
+        specifier: '>=18.2.0 <20.0.0'
+        version: 19.2.4
+      react-dom:
+        specifier: '>=18.2.0 <20.0.0'
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.3
+
+  apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-admin-devconfig:
+    dependencies:
+      '@sdkwork/payment-contracts':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-contracts
+      '@sdkwork/payment-pc-admin-core':
+        specifier: workspace:*
+        version: link:../sdkwork-payment-pc-admin-core
+      '@sdkwork/payment-service':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-service
+      '@sdkwork/ui-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-ui/sdkwork-ui-pc-react
+    devDependencies:
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.14)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.4
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.4(react@19.2.4)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.1.0(@types/node@25.9.4)(jiti@2.7.0))
+
+  apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-admin-monitor:
+    dependencies:
+      '@sdkwork/payment-contracts':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-contracts
+      '@sdkwork/payment-pc-admin-core':
+        specifier: workspace:*
+        version: link:../sdkwork-payment-pc-admin-core
+      '@sdkwork/payment-service':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-service
+      '@sdkwork/ui-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-ui/sdkwork-ui-pc-react
+    devDependencies:
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.14)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.4
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.4(react@19.2.4)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.1.0(@types/node@25.9.4)(jiti@2.7.0))
+
+  apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-admin-provider:
+    dependencies:
+      '@sdkwork/payment-contracts':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-contracts
+      '@sdkwork/payment-pc-admin-core':
+        specifier: workspace:*
+        version: link:../sdkwork-payment-pc-admin-core
+      '@sdkwork/payment-service':
+        specifier: workspace:*
+        version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-service
+      '@sdkwork/ui-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-ui/sdkwork-ui-pc-react
+    devDependencies:
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.14)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.4
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.4(react@19.2.4)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.1.0(@types/node@25.9.4)(jiti@2.7.0))
+
   apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-core: {}
 
   apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-payment:
@@ -681,6 +845,12 @@ importers:
       react-dom:
         specifier: '>=18.2.0 <20.0.0'
         version: 19.2.4(react@19.2.4)
+
+  sdks/sdkwork-payment-backend-sdk/sdkwork-payment-backend-sdk-typescript:
+    dependencies:
+      '@sdkwork/sdk-common':
+        specifier: workspace:*
+        version: link:../../../../sdkwork-sdk-commons/sdkwork-sdk-common-typescript
 
 packages:
 

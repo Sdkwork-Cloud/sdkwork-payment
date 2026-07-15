@@ -1,0 +1,45 @@
+{
+  "name": "@sdkwork/payment-pc-admin-devconfig",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Payment admin dev config center: environment switching + credential testing, webhook debugger, certificate management, integration logs. Aligns with sdkwork-specs APP_SDK_INTEGRATION_SPEC.md §9.",
+  "exports": {
+    ".": {
+      "types": "./src/index.tsx",
+      "import": "./src/index.tsx",
+      "default": "./src/index.tsx"
+    }
+  },
+  "files": ["src", "README.md"],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sdkwork/payment-pc-admin-core": "workspace:*",
+    "@sdkwork/payment-service": "workspace:*",
+    "@sdkwork/payment-contracts": "workspace:*",
+    "@sdkwork/ui-pc-react": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@sdkwork/ui-pc-react": "workspace:*",
+    "react": ">=18.2.0 <20.0.0",
+    "react-dom": ">=18.2.0 <20.0.0"
+  },
+  "sdkwork": {
+    "workspace": "sdkwork-payment",
+    "architecture": "pc-admin",
+    "surface": "backend-admin",
+    "domain": "commerce",
+    "capability": "payment-devconfig",
+    "status": "standard"
+  }
+}

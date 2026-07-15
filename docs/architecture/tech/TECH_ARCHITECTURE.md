@@ -4,7 +4,7 @@ Specs: ARCHITECTURE_DECISION_SPEC.md, DOCUMENTATION_SPEC.md, API_SPEC.md, WEB_FR
 
 Status: active
 Owner: SDKWork maintainers
-Updated: 2026-07-06
+Updated: 2026-07-13
 
 ## 1. Architecture Overview
 
@@ -22,8 +22,20 @@ Updated: 2026-07-06
 | HTTP routers | `crates/sdkwork-routes-payment-app-api/`, `crates/sdkwork-routes-payment-backend-api/` |
 | Gateway assembly | `crates/sdkwork-payment-gateway-assembly/` |
 | API server | `crates/sdkwork-payment-standalone-gateway/` |
-| PC client | `apps/sdkwork-payment-pc/` |
+| PC application | `apps/sdkwork-payment-pc/` |
 | TypeScript facade | `apps/sdkwork-payment-common/packages/sdkwork-payment-service/` |
+
+### Admin console packages (`apps/sdkwork-payment-pc/packages/`)
+
+| Package | Responsibility |
+| --- | --- |
+| `sdkwork-payment-pc-admin-core` | Shared infrastructure: `AdminFieldLabel`, `ConfirmDialog`, `CopyButton`, `SdkworkPaymentListPaginationControls`, provider/filter/payment-method constants, coercion helpers, standard exports (sdk/modules/host/session) |
+| `sdkwork-payment-pc-admin-provider` | Provider account management: list/create/update/test/rotate credentials + sub-merchant CRUD (Alipay sub_appid / WeChat sub_mch_id / Stripe Connected Account) |
+| `sdkwork-payment-pc-admin-channel` | Channel and route rule management: payment methods, channels (scene_code mapping), route rules (priority-based provider selection) |
+| `sdkwork-payment-pc-admin-devconfig` | Dev config: certificate CRUD, environment switcher, webhook event integration logs + replay, webhook debugger (sandbox trigger + signature test) |
+| `sdkwork-payment-pc-admin-monitor` | Operations monitoring: payment intents, payment attempts, webhook events (with signature status + payload viewer), reconciliation runs |
+
+Each admin package follows the same controller pattern: `createSdkWorkPagedListSession` for paged server-side lists, defensive `map*` projections from `unknown` SDK payloads, and a React-friendly external store (`subscribe` / `getState`). All packages consume `SdkworkPaymentBackendService` via the port-adapter-service pattern (APP_SDK_INTEGRATION_SPEC.md §9); they never import `@sdkwork/payment-backend-sdk` directly.
 
 ## API ownership
 
@@ -151,4 +163,5 @@ node ../sdkwork-specs/tools/check-pagination.mjs --workspace .
 
 - PRD: `docs/product/prd/PRD.md`
 - Payment executor boundary: `specs/PAYMENT_EXECUTOR_SPEC.md`
+- Backend API OpenAPI contract: `apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml`
 - Commerce migration: `../sdkwork-specs/MIGRATION_SPEC.md` §8

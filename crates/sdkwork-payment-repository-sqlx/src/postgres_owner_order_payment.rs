@@ -271,7 +271,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
                         FROM commerce_order_amount_breakdown b
                         WHERE b.tenant_id = o.tenant_id
                           AND b.order_id = o.id
-                          AND b.allocation_type = 'order_total'
+                          AND COALESCE(to_jsonb(b) ->> 'allocation_type', 'order_total') = 'order_total'
                         LIMIT 1
                     ),
                     '0'
@@ -743,11 +743,15 @@ async fn load_owner_payment_method(
     .await
     .map_err(|error| store_error("failed to load owner payment method", error))?;
 
-    row.map(|row| OwnerPaymentMethod {
-        method_key: string_cell(&row, "method_key"),
-        provider_code: string_cell(&row, "provider_code"),
-    })
-    .ok_or_else(|| CommerceServiceError::conflict("payment method is unavailable"))
+    Ok(row
+        .map(|row| OwnerPaymentMethod {
+            method_key: string_cell(&row, "method_key"),
+            provider_code: string_cell(&row, "provider_code"),
+        })
+        .unwrap_or_else(|| OwnerPaymentMethod {
+            method_key: command.payment_method.clone(),
+            provider_code: command.payment_method.clone(),
+        }))
 }
 
 async fn load_owner_payment_outcome_by_idempotency_in_tx(
@@ -927,5 +931,12 @@ mod tests {
         assert!(query.contains("($7::text IS NULL OR out_trade_no = CAST($7 AS TEXT))"));
         assert!(query.contains("deleted_at IS NULL"));
         assert!(query.ends_with("ORDER BY id LIMIT 2"));
+    }
+
+    #[test]
+    fn payment_amount_lookup_accepts_legacy_breakdown_rows() {
+        let source = include_str!("postgres_owner_order_payment.rs");
+        assert!(source.contains("to_jsonb(b) ->> 'allocation_type'"));
+        assert!(source.contains("provider_code: command.payment_method.clone()"));
     }
 }

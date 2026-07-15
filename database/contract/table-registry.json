@@ -48,6 +48,24 @@
       "referenceOnly": true
     },
     {
+      "name": "commerce_payment_sub_merchant",
+      "owner": "sdkwork-payment",
+      "profile": "tenant_entity",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
+      "name": "commerce_payment_certificate",
+      "owner": "sdkwork-payment",
+      "profile": "tenant_entity",
+      "complianceLevel": "L2",
+      "engine": ["postgres", "sqlite"],
+      "migration": "commerce-initial",
+      "referenceOnly": true
+    },
+    {
       "name": "commerce_payment_route_rule",
       "owner": "sdkwork-payment",
       "profile": "tenant_entity",

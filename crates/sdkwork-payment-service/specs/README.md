@@ -10,7 +10,7 @@ Root SDKWork standards remain authoritative. Local component specs can narrow or
 | --- | --- |
 | Name | `sdkwork-payment-service` |
 | Type | `rust-crate` |
-| Root | `sdkwork-commerce (deleted)/crates/sdkwork-payment-service` |
+| Root | `sdkwork-payment/crates/sdkwork-payment-service` |
 | Domain | `commerce` |
 | Capability | `payment` |
 | Languages | `rust` |

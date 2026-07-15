@@ -2,8 +2,277 @@
   "schemaVersion": 1,
   "kind": "sdkwork.iam.module",
   "moduleId": "payment",
+  "catalogVersion": "1.0.0",
   "domain": "payment",
+  "owner": "sdkwork-payment",
+  "displayName": "Payment Module",
   "permissions": {
-    "catalog": []
+    "catalog": [
+      {
+        "code": "commerce.payments.intents.read",
+        "name": "Read payment intents",
+        "resource": "intents",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.attempts.read",
+        "name": "Read payment attempts",
+        "resource": "attempts",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.methods.read",
+        "name": "Read payment methods",
+        "resource": "methods",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.methods.create",
+        "name": "Create payment methods",
+        "resource": "methods",
+        "action": "create",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.methods.update",
+        "name": "Update payment methods",
+        "resource": "methods",
+        "action": "update",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.provider_accounts.read",
+        "name": "Read provider accounts",
+        "resource": "provider_accounts",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.provider_accounts.create",
+        "name": "Create provider accounts",
+        "resource": "provider_accounts",
+        "action": "create",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.provider_accounts.update",
+        "name": "Update provider accounts",
+        "resource": "provider_accounts",
+        "action": "update",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.provider_accounts.test",
+        "name": "Test provider account credentials",
+        "resource": "provider_accounts",
+        "action": "test",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.provider_accounts.credentials.rotate",
+        "name": "Rotate provider account credentials",
+        "resource": "provider_accounts.credentials",
+        "action": "rotate",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.channels.read",
+        "name": "Read payment channels",
+        "resource": "channels",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.channels.create",
+        "name": "Create payment channels",
+        "resource": "channels",
+        "action": "create",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.route_rules.read",
+        "name": "Read route rules",
+        "resource": "route_rules",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.route_rules.create",
+        "name": "Create route rules",
+        "resource": "route_rules",
+        "action": "create",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.route_rules.update",
+        "name": "Update route rules",
+        "resource": "route_rules",
+        "action": "update",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.route_rules.delete",
+        "name": "Delete route rules",
+        "resource": "route_rules",
+        "action": "delete",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.sub_merchants.read",
+        "name": "Read sub-merchants",
+        "resource": "sub_merchants",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.sub_merchants.create",
+        "name": "Create sub-merchants",
+        "resource": "sub_merchants",
+        "action": "create",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.sub_merchants.update",
+        "name": "Update sub-merchants",
+        "resource": "sub_merchants",
+        "action": "update",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.sub_merchants.delete",
+        "name": "Delete sub-merchants",
+        "resource": "sub_merchants",
+        "action": "delete",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.certificates.read",
+        "name": "Read certificates",
+        "resource": "certificates",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.certificates.create",
+        "name": "Create certificates",
+        "resource": "certificates",
+        "action": "create",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.certificates.delete",
+        "name": "Delete certificates",
+        "resource": "certificates",
+        "action": "delete",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.webhook_events.read",
+        "name": "Read webhook events",
+        "resource": "webhook_events",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.webhook_events.replay",
+        "name": "Replay webhook events",
+        "resource": "webhook_events",
+        "action": "replay",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.reconciliation_runs.read",
+        "name": "Read reconciliation runs",
+        "resource": "reconciliation_runs",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.reconciliation_runs.create",
+        "name": "Create reconciliation runs",
+        "resource": "reconciliation_runs",
+        "action": "create",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.dev.sandbox_trigger",
+        "name": "Trigger sandbox events",
+        "resource": "dev",
+        "action": "sandbox_trigger",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.dev.webhook_signature_test",
+        "name": "Test webhook signatures",
+        "resource": "dev",
+        "action": "webhook_signature_test",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      }
+    ],
+    "openapiAuthorities": []
+  },
+  "dependencies": {
+    "requiresModules": ["commerce"]
   }
 }

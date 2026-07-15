@@ -257,7 +257,14 @@ export function SdkworkPaymentDetailDrawer({
 
           <DetailDrawerSection description={copy.detail.historyDescription} title={copy.detail.historyTitle}>
             <div className="space-y-3">
-              {state.relatedPayments.length === 0 ? (
+              {state.relatedPaymentsError ? (
+                <div
+                  role="alert"
+                  className="rounded-md border border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] p-3 text-sm text-[var(--sdk-color-text-error)]"
+                >
+                  {state.relatedPaymentsError}
+                </div>
+              ) : state.relatedPayments.length === 0 ? (
                 <div className="text-sm text-[var(--sdk-color-text-secondary)]">
                   {copy.empty.relatedPayments}
                 </div>

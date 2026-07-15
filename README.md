@@ -4,10 +4,11 @@ repository-kind: application
 SDKWork commerce **payment** capability building-block repository (domain `commerce`).
 
 - Standards: `../sdkwork-specs/README.md`
-- Composition consumer: `../sdkwork-clawrouter/vendor/sdkwork-commerce (deleted)` (archived transitional platform snapshot)
 - Domain service: `crates/sdkwork-payment-service/`
-- Repository SQL: `crates/sdkwork-commerce (deleted)-payment-repository-sqlx/`
+- Repository SQL: `crates/sdkwork-payment-repository-sqlx/`
+- PSP adapters: `crates/sdkwork-payment-providers/`
 - HTTP API server: `crates/sdkwork-payment-standalone-gateway/`
+- PC application: `apps/sdkwork-payment-pc/` (checkout + admin console)
 
 ## Quick start
 

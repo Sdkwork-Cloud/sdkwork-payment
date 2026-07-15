@@ -210,21 +210,31 @@ impl PaymentProviderAdapter for AlipayPaymentProviderAdapter {
             let subject = metadata_string(&request.metadata, "subject")
                 .map(str::to_owned)
                 .unwrap_or_else(|| out_trade_no.clone());
-            let mut biz_content = json!({
-                "out_trade_no": out_trade_no,
-                "total_amount": minor_to_decimal_string(amount_minor),
-                "subject": subject,
-            });
-            if let Some(tenant_id) = request.tenant_id {
-                biz_content["passback_params"] = json!(format!("tenant_id={tenant_id}"));
+            let method_key = request
+                .payment_scene
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("alipay_qr");
+            let biz_content = build_alipay_biz_content(
+                &out_trade_no,
+                amount_minor,
+                &subject,
+                request.tenant_id.as_deref(),
+                normalized_optional(self.config.notify_url.clone()).as_deref(),
+                method_key,
+                &request.metadata,
+            )?;
+            let (api_method, return_field) = alipay_method_for_key(method_key);
+            let mut response = self.client.execute(api_method, biz_content).await?;
+            // For redirect-style methods (page.pay/wap.pay), the gateway returns
+            // a form HTML or URL in `body` rather than JSON fields. We surface
+            // it under a normalized key so the cashier can render accordingly.
+            if let Some(field) = return_field {
+                if let Some(redirect) = response.get(field).and_then(Value::as_str).map(str::to_owned) {
+                    response["redirect_url"] = json!(redirect);
+                }
             }
-            if let Some(notify_url) = normalized_optional(self.config.notify_url.clone()) {
-                biz_content["notify_url"] = json!(notify_url);
-            }
-            let response = self
-                .client
-                .execute("alipay.trade.precreate", biz_content)
-                .await?;
             alipay_operation_outcome(PaymentAdapterOperation::CreatePaymentIntent, response)
         })
     }
@@ -531,6 +541,89 @@ fn validate_config_secret(field: &str, value: &str) -> ProviderResult<()> {
 
 fn current_alipay_timestamp() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Builds `biz_content` for a given alipay method_key.
+///
+/// Supported method_keys (mirrors `commerce_payment_method.method_key` DB rows):
+/// - `alipay_qr`    → `alipay.trade.precreate` (当面付扫码, returns `qr_code`)
+/// - `alipay_pc`    → `alipay.trade.page.pay`  (PC 网站支付, returns form HTML)
+/// - `alipay_wap`   → `alipay.trade.wap.pay`    (手机网站支付, returns redirect URL)
+/// - `alipay_app`   → `alipay.trade.app.pay`   (App 支付, returns signed pay string)
+/// - `alipay_jsapi` → `alipay.trade.create`     (JSAPI, returns `trade_no` for JSAPI唤起)
+///
+/// `buyer_id` is required for `alipay_jsapi` (buyer's openid in alipay) and
+/// read from `metadata.buyer_id`.
+fn build_alipay_biz_content(
+    out_trade_no: &str,
+    amount_minor: i64,
+    subject: &str,
+    tenant_id: Option<&str>,
+    notify_url: Option<&str>,
+    method_key: &str,
+    metadata: &Value,
+) -> ProviderResult<Value> {
+    let mut biz_content = json!({
+        "out_trade_no": out_trade_no,
+        "total_amount": minor_to_decimal_string(amount_minor),
+        "subject": subject,
+    });
+    if let Some(tenant_id) = tenant_id {
+        biz_content["passback_params"] = json!(format!("tenant_id={tenant_id}"));
+    }
+    if let Some(notify_url) = notify_url {
+        biz_content["notify_url"] = json!(notify_url);
+    }
+    match method_key {
+        "alipay_qr" => {
+            // 当面付 precreate — returns qr_code url
+        }
+        "alipay_pc" => {
+            // PC 网站支付 — page.pay returns form HTML
+            if let Some(return_url) = metadata_string(metadata, "return_url") {
+                biz_content["return_url"] = json!(return_url);
+            }
+        }
+        "alipay_wap" => {
+            // 手机网站支付 — wap.pay returns redirect URL
+            if let Some(return_url) = metadata_string(metadata, "return_url") {
+                biz_content["return_url"] = json!(return_url);
+            }
+        }
+        "alipay_app" => {
+            // App 支付 — app.pay returns signed pay string
+        }
+        "alipay_jsapi" => {
+            // JSAPI — trade.create returns trade_no; requires buyer_openid
+            let buyer_id = metadata_string(metadata, "buyer_id").or_else(|| metadata_string(metadata, "buyer_open_id")).ok_or_else(|| {
+                ProviderError::invalid_request(
+                    PaymentAdapterOperation::CreatePaymentIntent,
+                    "alipay_jsapi requires metadata.buyer_id (buyer's openid)",
+                )
+            })?;
+            biz_content["buyer_id"] = json!(buyer_id);
+        }
+        _ => {
+            return Err(ProviderError::invalid_request(
+                PaymentAdapterOperation::CreatePaymentIntent,
+                format!("unsupported alipay method_key: {method_key}"),
+            ));
+        }
+    }
+    Ok(biz_content)
+}
+
+/// Maps a method_key to the Alipay OpenAPI method name and the response field
+/// holding the redirect URL (if any).
+fn alipay_method_for_key(method_key: &str) -> (&'static str, Option<&'static str>) {
+    match method_key {
+        "alipay_qr" => ("alipay.trade.precreate", Some("qr_code")),
+        "alipay_pc" => ("alipay.trade.page.pay", None),
+        "alipay_wap" => ("alipay.trade.wap.pay", None),
+        "alipay_app" => ("alipay.trade.app.pay", None),
+        "alipay_jsapi" => ("alipay.trade.create", None),
+        _ => ("alipay.trade.precreate", Some("qr_code")),
+    }
 }
 
 fn percent_decode(value: &str, operation: PaymentAdapterOperation) -> ProviderResult<String> {

@@ -258,6 +258,33 @@ impl WeChatPayProviderAdapter {
             platform_public_key_pem,
         })
     }
+
+    /// Builds the JSAPI/App SDK invocation parameters with RSA-SHA256
+    /// signature so the cashier can hand them directly to `wx.requestPayment`
+    /// (JSAPI) or the native App SDK.
+    ///
+    /// V3 签名串格式（per WeChat Pay V3 文档）:
+    /// ```text
+    /// {appId}\n{timeStamp}\n{nonceStr}\n{package}\n
+    /// ```
+    fn build_wechat_sdk_invoke_params(&self, prepay_id: &str) -> ProviderResult<Value> {
+        let timestamp = unix_timestamp().to_string();
+        let nonce = format!("sdkwork-pay-{timestamp}");
+        let package = format!("prepay_id={prepay_id}");
+        let sign_payload = format!(
+            "{}\n{}\n{}\n{}\n",
+            self.config.app_id, timestamp, nonce, package
+        );
+        let pay_sign = self.crypto.sign(&sign_payload)?;
+        Ok(json!({
+            "appId": self.config.app_id,
+            "timeStamp": timestamp,
+            "nonceStr": nonce,
+            "package": package,
+            "signType": "RSA",
+            "paySign": pay_sign,
+        }))
+    }
 }
 
 impl PaymentProviderAdapter for WeChatPayProviderAdapter {
@@ -292,23 +319,68 @@ impl PaymentProviderAdapter for WeChatPayProviderAdapter {
                 PaymentAdapterOperation::CreatePaymentIntent,
                 "notify_url",
             )?;
-            let response = self
-                .client
-                .post_json(
-                    "/v3/pay/transactions/native",
-                    json!({
-                        "appid": self.config.app_id,
-                        "mchid": self.config.mch_id,
-                        "description": description,
-                        "out_trade_no": out_trade_no,
-                        "notify_url": notify_url,
-                        "amount": {
-                            "total": amount_minor,
-                            "currency": "CNY",
-                        },
-                    }),
-                )
-                .await?;
+            let method_key = request
+                .payment_scene
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("wechat_native");
+            let path = wechat_pay_path_for_key(method_key);
+            let mut payload = json!({
+                "appid": self.config.app_id,
+                "mchid": self.config.mch_id,
+                "description": description,
+                "out_trade_no": out_trade_no,
+                "notify_url": notify_url,
+                "amount": {
+                    "total": amount_minor,
+                    "currency": "CNY",
+                },
+            });
+            // Method-specific request extensions
+            match method_key {
+                "wechat_jsapi" => {
+                    let openid = metadata_string(&request.metadata, "openid")
+                        .or_else(|| metadata_string(&request.metadata, "buyer_id"))
+                        .ok_or_else(|| {
+                            ProviderError::invalid_request(
+                                PaymentAdapterOperation::CreatePaymentIntent,
+                                "wechat_jsapi requires metadata.openid (payer's openid)",
+                            )
+                        })?;
+                    payload["payer"] = json!({ "openid": openid });
+                }
+                "wechat_h5" => {
+                    let client_ip = metadata_string(&request.metadata, "client_ip")
+                        .or_else(|| metadata_string(&request.metadata, "payer_client_ip"))
+                        .ok_or_else(|| {
+                            ProviderError::invalid_request(
+                                PaymentAdapterOperation::CreatePaymentIntent,
+                                "wechat_h5 requires metadata.client_ip",
+                            )
+                        })?;
+                    let scene_type = metadata_string(&request.metadata, "scene_type")
+                        .unwrap_or("Wap");
+                    payload["scene_info"] = json!({
+                        "payer": { "client_ip": client_ip },
+                        "h5_info": { "type": scene_type },
+                    });
+                }
+                "wechat_app" => {
+                    // App 支付不需要 payer/scene_info; prepay_id returned for SDK signing
+                }
+                _ => {}
+            }
+            let response = self.client.post_json(path, payload).await?;
+            // For JSAPI/App, generate the SDK invocation signature so the
+            // cashier can hand it directly to the WeChat JS SDK / App SDK.
+            let mut response = response;
+            if matches!(method_key, "wechat_jsapi" | "wechat_app") {
+                if let Some(prepay_id) = response.get("prepay_id").and_then(Value::as_str).map(str::to_owned) {
+                    let sdk_params = self.build_wechat_sdk_invoke_params(&prepay_id)?;
+                    response["sdk_invoke_params"] = sdk_params;
+                }
+            }
             wechat_pay_operation_outcome(PaymentAdapterOperation::CreatePaymentIntent, response)
         })
     }
@@ -590,4 +662,21 @@ fn unix_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+/// Maps a method_key to the WeChat Pay V3 API path.
+///
+/// Supported method_keys (mirrors `commerce_payment_method.method_key` DB rows):
+/// - `wechat_native` → `/v3/pay/transactions/native`  (扫码支付, returns `code_url`)
+/// - `wechat_jsapi`  → `/v3/pay/transactions/jsapi`  (JSAPI/小程序, returns `prepay_id`)
+/// - `wechat_h5`     → `/v3/pay/transactions/h5`     (H5, returns `h5_url`)
+/// - `wechat_app`    → `/v3/pay/transactions/app`    (App, returns `prepay_id`)
+fn wechat_pay_path_for_key(method_key: &str) -> &'static str {
+    match method_key {
+        "wechat_native" => "/v3/pay/transactions/native",
+        "wechat_jsapi" => "/v3/pay/transactions/jsapi",
+        "wechat_h5" => "/v3/pay/transactions/h5",
+        "wechat_app" => "/v3/pay/transactions/app",
+        _ => "/v3/pay/transactions/native",
+    }
 }

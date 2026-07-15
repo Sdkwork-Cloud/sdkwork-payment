@@ -41,6 +41,18 @@ CREATE TABLE IF NOT EXISTS commerce_payment_method (
     deleted_at      TIMESTAMPTZ NULL
 );
 
+-- Self-heal: back-fill columns when the table was pre-created by another module
+-- (e.g. sdkwork-clawrouter commerce_bootstrap). CREATE TABLE IF NOT EXISTS is a
+-- no-op on existing tables, so ALTER TABLE ensures the payment schema is complete.
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS provider_code TEXT;
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'tenant';
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS currency_code TEXT NOT NULL DEFAULT 'CNY';
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS country_code TEXT;
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_method_tenant_org_key
     ON commerce_payment_method (tenant_id, COALESCE(organization_id, ''), method_key)
     WHERE deleted_at IS NULL;
@@ -80,6 +92,11 @@ CREATE TABLE IF NOT EXISTS commerce_payment_intent (
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at        TIMESTAMPTZ NULL
 );
+
+-- Self-heal: back-fill columns when the table was pre-created by another module.
+ALTER TABLE commerce_payment_intent ADD COLUMN IF NOT EXISTS payment_intent_no TEXT NOT NULL DEFAULT '';
+ALTER TABLE commerce_payment_intent ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_intent ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_intent_idempotency
     ON commerce_payment_intent (tenant_id, order_id, idempotency_key)
@@ -127,6 +144,10 @@ CREATE TABLE IF NOT EXISTS commerce_payment_attempt (
     deleted_at             TIMESTAMPTZ NULL
 );
 
+-- Self-heal: back-fill columns when the table was pre-created by another module.
+ALTER TABLE commerce_payment_attempt ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_attempt ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_attempt_idempotency
     ON commerce_payment_attempt (tenant_id, owner_user_id, payment_intent_id, id)
     WHERE deleted_at IS NULL;
@@ -169,6 +190,13 @@ CREATE TABLE IF NOT EXISTS commerce_refund (
     deleted_at          TIMESTAMPTZ NULL
 );
 
+-- Self-heal: back-fill columns when the table was pre-created by another module.
+ALTER TABLE commerce_refund ADD COLUMN IF NOT EXISTS refund_reason_code TEXT;
+ALTER TABLE commerce_refund ADD COLUMN IF NOT EXISTS requested_by_type TEXT NOT NULL DEFAULT 'buyer';
+ALTER TABLE commerce_refund ADD COLUMN IF NOT EXISTS requested_by TEXT;
+ALTER TABLE commerce_refund ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_refund ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_refund_idempotency
     ON commerce_refund (tenant_id, order_id, idempotency_key)
     WHERE deleted_at IS NULL;
@@ -201,6 +229,13 @@ CREATE TABLE IF NOT EXISTS commerce_refund_event (
     idempotency_key TEXT NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Self-heal: back-fill columns when the table was pre-created by another module.
+ALTER TABLE commerce_refund_event ADD COLUMN IF NOT EXISTS event_no TEXT NOT NULL DEFAULT '';
+ALTER TABLE commerce_refund_event ADD COLUMN IF NOT EXISTS actor_type TEXT NOT NULL DEFAULT 'buyer';
+ALTER TABLE commerce_refund_event ADD COLUMN IF NOT EXISTS actor_id TEXT;
+ALTER TABLE commerce_refund_event ADD COLUMN IF NOT EXISTS request_id TEXT;
+ALTER TABLE commerce_refund_event ADD COLUMN IF NOT EXISTS idempotency_key TEXT NOT NULL DEFAULT '';
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_refund_event_idempotency
     ON commerce_refund_event (tenant_id, refund_id, event_type, idempotency_key);
@@ -235,6 +270,14 @@ CREATE TABLE IF NOT EXISTS commerce_payment_channel (
     deleted_at          TIMESTAMPTZ NULL
 );
 
+-- Self-heal: back-fill columns when the table was pre-created by another module.
+ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS channel_name TEXT;
+ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS provider_code TEXT;
+ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_channel_tenant_org_no
     ON commerce_payment_channel (tenant_id, COALESCE(organization_id, ''), channel_no)
     WHERE deleted_at IS NULL;
@@ -250,28 +293,54 @@ CREATE INDEX IF NOT EXISTS idx_commerce_payment_channel_method
 -- =============================================================================
 -- 7. commerce_payment_provider_account
 -- =============================================================================
+-- account_mode = direct: merchant self-connection (Stripe secret_key / Alipay merchantPrivateKey).
+-- account_mode = partner: ISV/service-provider mode with sub_merchants (Alipay sub_appid /
+-- WeChat sub_mch_id / Stripe Connected Account). partner_provider_account_id points to the
+-- parent partner account. capabilities tracks {pay, refund, close, query} supported verbs.
+-- certificate_expires_at / last_tested_at / last_test_status support dev config health checks.
 CREATE TABLE IF NOT EXISTS commerce_payment_provider_account (
-    id                 TEXT PRIMARY KEY,
-    tenant_id          TEXT NOT NULL,
-    organization_id   TEXT,
-    account_no         TEXT NOT NULL,
-    provider_code      TEXT NOT NULL,
-    merchant_id        TEXT,
-    environment        TEXT NOT NULL DEFAULT 'production'
-                       CHECK (environment IN ('development', 'sandbox', 'production')),
-    country_code       TEXT,
-    settlement_currency TEXT NOT NULL DEFAULT 'CNY',
-    secret_ref         TEXT NOT NULL,
-    webhook_secret_ref TEXT,
-    certificate_ref    TEXT,
-    status             TEXT NOT NULL DEFAULT 'active'
-                       CHECK (status IN ('active', 'inactive', 'suspended', 'deprecated')),
-    metadata           JSONB NOT NULL DEFAULT '{}'::jsonb,
-    version            BIGINT NOT NULL DEFAULT 0,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at         TIMESTAMPTZ NULL
+    id                          TEXT PRIMARY KEY,
+    tenant_id                   TEXT NOT NULL,
+    organization_id             TEXT,
+    account_no                  TEXT NOT NULL,
+    provider_code               TEXT NOT NULL,
+    merchant_id                 TEXT,
+    account_mode                TEXT NOT NULL DEFAULT 'direct'
+                                CHECK (account_mode IN ('direct', 'partner')),
+    partner_provider_account_id TEXT,
+    environment                 TEXT NOT NULL DEFAULT 'production'
+                                CHECK (environment IN ('development', 'sandbox', 'production')),
+    country_code                TEXT,
+    settlement_currency         TEXT NOT NULL DEFAULT 'CNY',
+    secret_ref                  TEXT NOT NULL,
+    webhook_secret_ref          TEXT,
+    certificate_ref             TEXT,
+    capabilities                JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status                      TEXT NOT NULL DEFAULT 'active'
+                                CHECK (status IN ('active', 'inactive', 'suspended', 'deprecated')),
+    metadata                    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    certificate_expires_at      TIMESTAMPTZ NULL,
+    last_tested_at              TIMESTAMPTZ NULL,
+    last_test_status            TEXT
+                                CHECK (last_test_status IS NULL OR last_test_status IN ('success', 'failure', 'unknown')),
+    version                     BIGINT NOT NULL DEFAULT 0,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at                  TIMESTAMPTZ NULL
 );
+
+-- Self-heal: back-fill columns when the table was pre-created by another module.
+-- The Claw Router commerce_bootstrap creates a simpler commerce_payment_provider_account
+-- without account_mode, capabilities, metadata, version, deleted_at, etc.
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS account_mode TEXT NOT NULL DEFAULT 'direct';
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS partner_provider_account_id TEXT;
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS certificate_expires_at TIMESTAMPTZ NULL;
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMPTZ NULL;
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS last_test_status TEXT;
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_provider_account_tenant_org_no
     ON commerce_payment_provider_account (tenant_id, COALESCE(organization_id, ''), account_no)
@@ -280,6 +349,106 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_provider_account_tenant_or
 CREATE INDEX IF NOT EXISTS idx_commerce_payment_provider_account_status
     ON commerce_payment_provider_account (tenant_id, provider_code, status)
     WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_provider_account_partner
+    ON commerce_payment_provider_account (tenant_id, account_mode, partner_provider_account_id)
+    WHERE deleted_at IS NULL AND account_mode = 'partner';
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_provider_account_env
+    ON commerce_payment_provider_account (tenant_id, environment, status)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_provider_account_cert_expiry
+    ON commerce_payment_provider_account (tenant_id, certificate_expires_at)
+    WHERE deleted_at IS NULL AND certificate_expires_at IS NOT NULL;
+
+-- =============================================================================
+-- 7.1 commerce_payment_sub_merchant
+-- =============================================================================
+-- Sub-merchant records under a partner/ISV provider account.
+-- Maps to: Alipay sub_appid (offline merchant expansion), WeChat sub_mch_id (sub-merchant
+-- id under service provider), Stripe Connected Account id. The external_sub_merchant_id is
+-- the PSP-issued identifier; appid/mch_id columns hold provider-specific sub-app identifiers
+-- when applicable. metadata stores arbitrary PSP extras (e.g.legal_name, settlement_currency).
+CREATE TABLE IF NOT EXISTS commerce_payment_sub_merchant (
+    id                       TEXT PRIMARY KEY,
+    tenant_id                TEXT NOT NULL,
+    organization_id          TEXT,
+    provider_account_id      TEXT NOT NULL,
+    external_sub_merchant_id TEXT NOT NULL,
+    sub_appid                TEXT,
+    sub_mch_id               TEXT,
+    display_name             TEXT,
+    legal_name               TEXT,
+    status                   TEXT NOT NULL DEFAULT 'active'
+                             CHECK (status IN ('active', 'inactive', 'suspended', 'deprecated', 'pending_review')),
+    capabilities             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metadata                 JSONB NOT NULL DEFAULT '{}'::jsonb,
+    version                  BIGINT NOT NULL DEFAULT 0,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at               TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_sub_merchant_external
+    ON commerce_payment_sub_merchant (tenant_id, provider_account_id, external_sub_merchant_id)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_sub_merchant_account
+    ON commerce_payment_sub_merchant (tenant_id, provider_account_id, status)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_sub_merchant_sub_mch_id
+    ON commerce_payment_sub_merchant (tenant_id, sub_mch_id)
+    WHERE sub_mch_id IS NOT NULL AND deleted_at IS NULL;
+
+-- =============================================================================
+-- 7.2 commerce_payment_certificate
+-- =============================================================================
+-- Certificate store: PEM-encoded public/private certificates used by provider accounts.
+-- certificate_ref on provider_account points to an env var name; this table stores the
+-- metadata (subject, issuer, serial, expires_at, fingerprint) and a content_ref (env var
+-- or secret store path) for the PEM itself. Private keys MUST never be persisted as plaintext;
+-- use the env var indirection via content_ref. Status tracks lifecycle (active/expired/revoked).
+CREATE TABLE IF NOT EXISTS commerce_payment_certificate (
+    id                TEXT PRIMARY KEY,
+    tenant_id         TEXT NOT NULL,
+    organization_id   TEXT,
+    certificate_no    TEXT NOT NULL,
+    provider_code     TEXT NOT NULL,
+    kind              TEXT NOT NULL DEFAULT 'public'
+                      CHECK (kind IN ('public', 'private', 'platform', 'root')),
+    subject_cn        TEXT,
+    issuer_cn         TEXT,
+    serial_number     TEXT,
+    fingerprint_sha256 TEXT,
+    content_ref       TEXT NOT NULL,
+    valid_from        TIMESTAMPTZ,
+    valid_until       TIMESTAMPTZ,
+    status            TEXT NOT NULL DEFAULT 'active'
+                      CHECK (status IN ('active', 'expired', 'revoked', 'pending')),
+    metadata          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    version           BIGINT NOT NULL DEFAULT 0,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at        TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_certificate_tenant_org_no
+    ON commerce_payment_certificate (tenant_id, COALESCE(organization_id, ''), certificate_no)
+    WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_certificate_fingerprint
+    ON commerce_payment_certificate (tenant_id, fingerprint_sha256)
+    WHERE fingerprint_sha256 IS NOT NULL AND deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_certificate_provider
+    ON commerce_payment_certificate (tenant_id, provider_code, status)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_certificate_expiry
+    ON commerce_payment_certificate (tenant_id, valid_until)
+    WHERE deleted_at IS NULL AND valid_until IS NOT NULL;
 
 -- =============================================================================
 -- 8. commerce_payment_route_rule
@@ -308,6 +477,10 @@ CREATE TABLE IF NOT EXISTS commerce_payment_route_rule (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at      TIMESTAMPTZ NULL
 );
+
+-- Self-heal: back-fill columns when the table was pre-created by another module.
+ALTER TABLE commerce_payment_route_rule ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_route_rule ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_route_rule_tenant_org_no
     ON commerce_payment_route_rule (tenant_id, COALESCE(organization_id, ''), rule_no)
@@ -373,6 +546,14 @@ CREATE TABLE IF NOT EXISTS commerce_payment_reconciliation_run (
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at              TIMESTAMPTZ NULL
 );
+
+-- Self-heal: back-fill columns when the table was pre-created by another module.
+ALTER TABLE commerce_payment_reconciliation_run ADD COLUMN IF NOT EXISTS reconciliation_type TEXT NOT NULL DEFAULT 'daily';
+ALTER TABLE commerce_payment_reconciliation_run ADD COLUMN IF NOT EXISTS unmatched_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_reconciliation_run ADD COLUMN IF NOT EXISTS total_difference_amount NUMERIC(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_reconciliation_run ADD COLUMN IF NOT EXISTS currency_code TEXT NOT NULL DEFAULT 'CNY';
+ALTER TABLE commerce_payment_reconciliation_run ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_reconciliation_run ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_reconciliation_run_no
     ON commerce_payment_reconciliation_run (tenant_id, run_no)

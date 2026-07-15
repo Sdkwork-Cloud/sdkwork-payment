@@ -1,0 +1,425 @@
+/**
+ * Provider admin controller.
+ *
+ * Stateful controller that consumes `SdkworkPaymentBackendService` (via the
+ * port-adapter-service pattern from APP_SDK_INTEGRATION_SPEC.md §9). It owns:
+ *   - Two paged list sessions (providerAccounts, subMerchants)
+ *   - CRUD mutations for provider accounts and sub-merchants
+ *   - Dev-config operations: credential test + credential rotate
+ *   - React-friendly external store contract (subscribe/getState)
+ *
+ * The controller NEVER imports `@sdkwork/payment-backend-sdk` directly; the
+ * backend SDK client is injected via `service.backend` on the parent app service.
+ */
+
+import {
+  createSdkWorkPagedListSession,
+  extractSdkWorkResourceItem,
+  type SdkWorkPagedListSession,
+} from "@sdkwork/payment-contracts";
+import type { SdkworkPaymentBackendService } from "@sdkwork/payment-service";
+import {
+  asRecord,
+  asRequiredString,
+  asStatus,
+  asString,
+} from "@sdkwork/payment-pc-admin-core";
+import type {
+  CreatePaymentProviderAdminControllerInput,
+  PaymentProviderAccountDraft,
+  PaymentProviderAccountTestOptions,
+  PaymentProviderAccountTestResult,
+  PaymentProviderAccountUpdateDraft,
+  PaymentProviderAccountView,
+  PaymentProviderAdminController,
+  PaymentProviderAdminState,
+  PaymentProviderAdminStatus,
+  PaymentSubMerchantDraft,
+  PaymentSubMerchantUpdateDraft,
+  PaymentSubMerchantView,
+  PaymentCredentialRotateDraft,
+} from "../types/provider-admin-types";
+
+type Snapshot = Pick<PaymentProviderAdminState, "providerAccounts" | "subMerchants">;
+
+const EMPTY_SNAPSHOT: Snapshot = {
+  providerAccounts: [],
+  subMerchants: [],
+};
+
+function cloneSnapshot(snapshot: Snapshot): Snapshot {
+  return {
+    providerAccounts: [...snapshot.providerAccounts],
+    subMerchants: [...snapshot.subMerchants],
+  };
+}
+
+const PROVIDER_CODES = ["stripe", "alipay", "wechat_pay", "sandbox"] as const;
+const ACCOUNT_MODES = ["direct", "partner"] as const;
+const ENVIRONMENTS = ["development", "sandbox", "production"] as const;
+const PROVIDER_ACCOUNT_STATUSES = ["active", "inactive", "suspended", "deprecated"] as const;
+const LAST_TEST_STATUSES = ["success", "failure", "unknown"] as const;
+const SUB_MERCHANT_STATUSES = ["active", "inactive", "suspended", "deprecated"] as const;
+
+function asCapabilities(value: unknown): PaymentProviderAccountView["capabilities"] {
+  const record = asRecord(value);
+  const capabilities: Record<string, boolean> = {};
+  for (const [key, val] of Object.entries(record)) {
+    if (typeof val === "boolean") {
+      capabilities[key] = val;
+    }
+  }
+  return capabilities;
+}
+
+function mapProviderAccount(value: unknown): PaymentProviderAccountView | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = asString(record.id);
+  if (!id) {
+    return undefined;
+  }
+  return {
+    id,
+    accountNo: asRequiredString(record.accountNo, id),
+    providerCode: asStatus(record.providerCode, PROVIDER_CODES, "sandbox"),
+    merchantId: asString(record.merchantId),
+    accountMode: asStatus(record.accountMode, ACCOUNT_MODES, "direct"),
+    partnerProviderAccountId: asString(record.partnerProviderAccountId),
+    environment: asStatus(record.environment, ENVIRONMENTS, "production"),
+    countryCode: asString(record.countryCode),
+    settlementCurrency: asString(record.settlementCurrency) ?? "CNY",
+    secretRef: asString(record.secretRef) ?? "",
+    webhookSecretRef: asString(record.webhookSecretRef),
+    certificateRef: asString(record.certificateRef),
+    capabilities: asCapabilities(record.capabilities),
+    status: asStatus(record.status, PROVIDER_ACCOUNT_STATUSES, "active"),
+    metadata: asRecord(record.metadata),
+    certificateExpiresAt: asString(record.certificateExpiresAt),
+    lastTestedAt: asString(record.lastTestedAt),
+    lastTestStatus: asStatus(record.lastTestStatus, LAST_TEST_STATUSES, "unknown"),
+    createdAt: asString(record.createdAt) ?? new Date(0).toISOString(),
+    updatedAt: asString(record.updatedAt) ?? new Date(0).toISOString(),
+  };
+}
+
+function mapSubMerchant(value: unknown): PaymentSubMerchantView | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = asString(record.id);
+  if (!id) {
+    return undefined;
+  }
+  return {
+    id,
+    providerAccountId: asRequiredString(record.providerAccountId, id),
+    subMerchantNo: asRequiredString(record.subMerchantNo ?? record.sub_merchant_no ?? record.externalSubMerchantId ?? record.external_sub_merchant_id, id),
+    subMerchantName: asString(record.subMerchantName ?? record.sub_merchant_name ?? record.displayName ?? record.display_name),
+    subAppId: asString(record.subAppId ?? record.sub_app_id ?? record.subAppid ?? record.sub_appid),
+    subMchId: asString(record.subMchId ?? record.sub_mch_id),
+    stripeConnectedAccountId: asString(record.stripeConnectedAccountId ?? record.stripe_connected_account_id),
+    providerCode: asStatus(record.providerCode ?? record.provider_code, PROVIDER_CODES, "sandbox"),
+    status: asStatus(record.status, SUB_MERCHANT_STATUSES, "active"),
+    metadata: asRecord(record.metadata),
+    createdAt: asString(record.createdAt) ?? new Date(0).toISOString(),
+    updatedAt: asString(record.updatedAt) ?? new Date(0).toISOString(),
+  };
+}
+
+function mapTestResult(value: unknown): PaymentProviderAccountTestResult | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.ok !== "boolean") {
+    return undefined;
+  }
+  return {
+    ok: record.ok,
+    providerCode: asStatus(record.providerCode, PROVIDER_CODES, "sandbox"),
+    environment: asStatus(record.environment, ENVIRONMENTS, "production"),
+    pspResponseCode: asString(record.pspResponseCode ?? record.psp_response_code),
+    pspResponseTimeMs: typeof record.pspResponseTimeMs === "number" ? record.pspResponseTimeMs : typeof record.psp_response_time_ms === "number" ? record.psp_response_time_ms : undefined,
+    diagnostic: asString(record.diagnostic),
+    testedAt: asString(record.testedAt ?? record.tested_at) ?? new Date().toISOString(),
+  };
+}
+
+interface ProviderAdminSessions {
+  providerAccounts: SdkWorkPagedListSession<PaymentProviderAccountView>;
+  subMerchants: SdkWorkPagedListSession<PaymentSubMerchantView>;
+  subMerchantsProviderAccountId?: string;
+}
+
+function createSessions(service: SdkworkPaymentBackendService): ProviderAdminSessions {
+  return {
+    providerAccounts: createSdkWorkPagedListSession<PaymentProviderAccountView>({
+      fetchPage: (query) => service.providerAccounts.list(query),
+      mapItem: mapProviderAccount,
+    }),
+    subMerchants: createSdkWorkPagedListSession<PaymentSubMerchantView>({
+      fetchPage: (query) => service.subMerchants.list(query),
+      mapItem: mapSubMerchant,
+    }),
+  };
+}
+
+function snapshotFromSessions(sessions: ProviderAdminSessions): Snapshot {
+  return {
+    providerAccounts: [...sessions.providerAccounts.getItems()],
+    subMerchants: [...sessions.subMerchants.getItems()],
+  };
+}
+
+export function createPaymentProviderAdminController(
+  input: CreatePaymentProviderAdminControllerInput,
+): PaymentProviderAdminController {
+  const service = input.service;
+  const listeners = new Set<() => void>();
+  const sessions = createSessions(service);
+
+  let state: PaymentProviderAdminState = {
+    ...EMPTY_SNAPSHOT,
+    status: "idle",
+  };
+
+  function emit(): void {
+    listeners.forEach((listener) => listener());
+  }
+
+  function setState(patch: Partial<PaymentProviderAdminState>): void {
+    const nextSnapshot: Snapshot = {
+      providerAccounts: [...sessions.providerAccounts.getItems()],
+      subMerchants: [...sessions.subMerchants.getItems()],
+    };
+    state = {
+      ...state,
+      ...patch,
+      ...cloneSnapshot(nextSnapshot),
+    };
+    emit();
+  }
+
+  function setStatus(status: PaymentProviderAdminStatus, lastError?: string): void {
+    state = { ...state, status, ...(lastError === undefined ? {} : { lastError }) };
+    emit();
+  }
+
+  async function wrapMutation<T>(
+    action: () => Promise<T>,
+    errorMessage: string,
+    options: { reload: "providerAccounts" | "subMerchants" | "both" | "none" } = { reload: "providerAccounts" },
+  ): Promise<T> {
+    setStatus("saving", undefined);
+    try {
+      const result = await action();
+      if (options.reload === "providerAccounts" || options.reload === "both") {
+        await sessions.providerAccounts.list();
+      }
+      if (options.reload === "subMerchants" || options.reload === "both") {
+        await sessions.subMerchants.list();
+      }
+      setState({ status: "ready", lastError: undefined });
+      return result;
+    } catch (error) {
+      setStatus("error", error instanceof Error ? error.message : errorMessage);
+      throw error;
+    }
+  }
+
+  return {
+    getState() {
+      return state;
+    },
+
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+
+    async load() {
+      setStatus("loading", undefined);
+      sessions.providerAccounts.reset();
+      sessions.subMerchants.reset();
+      sessions.subMerchantsProviderAccountId = undefined;
+      try {
+        await Promise.all([
+          sessions.providerAccounts.list(),
+          sessions.subMerchants.list(),
+        ]);
+        setState({
+          status: "ready",
+          lastError: undefined,
+          selectedProviderAccount: undefined,
+          selectedSubMerchant: undefined,
+        });
+        return state;
+      } catch (error) {
+        setStatus("error", error instanceof Error ? error.message : "Failed to load provider admin data.");
+        throw error;
+      }
+    },
+
+    async loadMoreProviderAccounts() {
+      try {
+        return await sessions.providerAccounts.loadMore();
+      } finally {
+        setState({});
+      }
+    },
+
+    async loadMoreSubMerchants(providerAccountId) {
+      if (providerAccountId && sessions.subMerchantsProviderAccountId !== providerAccountId) {
+        sessions.subMerchants.reset();
+        sessions.subMerchantsProviderAccountId = providerAccountId;
+        return sessions.subMerchants.list({ providerAccountId });
+      }
+      const items = await sessions.subMerchants.loadMore(
+        providerAccountId ? { providerAccountId } : undefined,
+      );
+      setState({});
+      return items;
+    },
+
+    selectProviderAccount(id) {
+      const next = id
+        ? state.providerAccounts.find((account) => account.id === id)
+        : undefined;
+      state = { ...state, selectedProviderAccount: next };
+      emit();
+      return next;
+    },
+
+    selectSubMerchant(id) {
+      const next = id
+        ? state.subMerchants.find((merchant) => merchant.id === id)
+        : undefined;
+      state = { ...state, selectedSubMerchant: next };
+      emit();
+      return next;
+    },
+
+    async createProviderAccount(draft) {
+      return wrapMutation(
+        async () => {
+          const response = await service.providerAccounts.create(draft);
+          const item = extractSdkWorkResourceItem<unknown>(response);
+          const mapped = mapProviderAccount(item);
+          if (!mapped) {
+            throw new Error("Failed to parse created provider account.");
+          }
+          return mapped;
+        },
+        "Failed to create provider account.",
+        { reload: "providerAccounts" },
+      );
+    },
+
+    async updateProviderAccount(id, draft) {
+      return wrapMutation(
+        async () => {
+          const response = await service.providerAccounts.update(id, draft);
+          const item = extractSdkWorkResourceItem<unknown>(response);
+          const mapped = mapProviderAccount(item);
+          if (!mapped) {
+            throw new Error("Failed to parse updated provider account.");
+          }
+          return mapped;
+        },
+        "Failed to update provider account.",
+        { reload: "providerAccounts" },
+      );
+    },
+
+    async testProviderAccount(id, options) {
+      setStatus("testing", undefined);
+      try {
+        const response = await service.providerAccounts.test(id, options ?? {});
+        const item = extractSdkWorkResourceItem<unknown>(response);
+        const mapped = mapTestResult(item);
+        if (!mapped) {
+          throw new Error("Failed to parse provider account test result.");
+        }
+        // Reload provider account to refresh lastTestedAt/lastTestStatus.
+        await sessions.providerAccounts.list();
+        setState({
+          status: "ready",
+          lastError: undefined,
+          lastTestResult: mapped,
+        });
+        return mapped;
+      } catch (error) {
+        setStatus("error", error instanceof Error ? error.message : "Failed to test provider account credentials.");
+        throw error;
+      }
+    },
+
+    async rotateProviderAccountCredentials(id, draft) {
+      return wrapMutation(
+        async () => {
+          const response = await service.providerAccounts.credentials.rotate(id, draft);
+          const item = extractSdkWorkResourceItem<unknown>(response);
+          const mapped = mapProviderAccount(item);
+          if (!mapped) {
+            throw new Error("Failed to parse provider account after credential rotation.");
+          }
+          return mapped;
+        },
+        "Failed to rotate provider account credentials.",
+        { reload: "providerAccounts" },
+      ).then((account) => {
+        state = { ...state, lastRotatedAccountId: id };
+        emit();
+        return account;
+      });
+    },
+
+    async createSubMerchant(draft) {
+      return wrapMutation(
+        async () => {
+          const response = await service.subMerchants.create(draft);
+          const item = extractSdkWorkResourceItem<unknown>(response);
+          const mapped = mapSubMerchant(item);
+          if (!mapped) {
+            throw new Error("Failed to parse created sub-merchant.");
+          }
+          return mapped;
+        },
+        "Failed to create sub-merchant.",
+        { reload: "subMerchants" },
+      );
+    },
+
+    async updateSubMerchant(id, draft) {
+      return wrapMutation(
+        async () => {
+          const response = await service.subMerchants.update(id, draft);
+          const item = extractSdkWorkResourceItem<unknown>(response);
+          const mapped = mapSubMerchant(item);
+          if (!mapped) {
+            throw new Error("Failed to parse updated sub-merchant.");
+          }
+          return mapped;
+        },
+        "Failed to update sub-merchant.",
+        { reload: "subMerchants" },
+      );
+    },
+
+    async deleteSubMerchant(id) {
+      return wrapMutation(
+        async () => {
+          await service.subMerchants.delete(id);
+        },
+        "Failed to delete sub-merchant.",
+        { reload: "subMerchants" },
+      );
+    },
+  };
+}
