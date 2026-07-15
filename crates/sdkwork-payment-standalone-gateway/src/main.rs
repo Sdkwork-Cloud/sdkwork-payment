@@ -1,4 +1,3 @@
-use axum::http::HeaderValue;
 use sdkwork_payment_gateway_assembly::{
     assemble_application_router, gateway_contract_fallback_config,
 };
@@ -6,7 +5,6 @@ use sdkwork_payment_service_host::PaymentServiceHost;
 use sdkwork_web_bootstrap::{service_router, ServiceRouterConfig};
 use std::sync::Arc;
 use std::time::Duration;
-use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
@@ -14,7 +12,6 @@ use tower_http::trace::TraceLayer;
 /// C13/H1/C23 修复：API server 生产级启动配置。
 ///
 /// - C13: CORS 由 `PAYMENT_API_CORS_ORIGINS` 环境变量驱动（逗号分隔），默认拒绝跨域，
-///        替代 `CorsLayer::permissive()` 的致命安全漏洞。
 /// - H1:  接入 graceful shutdown、请求超时（30s）、请求体大小限制（1 MiB）。
 /// - C23: 接入 TraceLayer 结构化请求追踪（含 span、URI、状态码、耗时）。
 #[tokio::main]
@@ -23,7 +20,14 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let host = Arc::new(PaymentServiceHost::new().await);
-    let cors_layer = build_cors_layer_from_env();
+    let cors_layer = sdkwork_web_bootstrap::application_cors_layer_from_env(
+        &["SDKWORK_PAYMENT_ENVIRONMENT", "PAYMENT_ENVIRONMENT"],
+        &[
+            "PAYMENT_API_CORS_ORIGINS",
+            "SDKWORK_PAYMENT_CORS_ALLOWED_ORIGINS",
+            "SDKWORK_CORS_ALLOWED_ORIGINS",
+        ],
+    );
     let business = assemble_application_router(host)
         .await
         .router
@@ -75,61 +79,4 @@ async fn main() {
         .with_graceful_shutdown(shutdown)
         .await
         .expect("serve");
-}
-
-/// 从 `PAYMENT_API_CORS_ORIGINS` 构建白名单 CORS 层。
-/// - 未设置或为空：返回最严格 CorsLayer（不允许任何跨域）。
-/// - 设置为 `*`：显式记录警告但仍不允许（支付系统严禁 wildcard）。
-/// - 设置为逗号分隔的 origin 列表：仅允许这些 origin。
-fn build_cors_layer_from_env() -> CorsLayer {
-    let raw = std::env::var("PAYMENT_API_CORS_ORIGINS").unwrap_or_default();
-    let origins: Vec<&str> = raw
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect();
-
-    if origins.is_empty() {
-        tracing::warn!(
-            "PAYMENT_API_CORS_ORIGINS not set; CORS will deny all cross-origin requests"
-        );
-        return CorsLayer::new();
-    }
-
-    if origins.iter().any(|origin| *origin == "*") {
-        tracing::error!(
-            "PAYMENT_API_CORS_ORIGINS contains wildcard '*'; payment APIs MUST NOT allow wildcard CORS. Denying all cross-origin requests."
-        );
-        return CorsLayer::new();
-    }
-
-    let parsed: Vec<HeaderValue> = origins
-        .iter()
-        .filter_map(|origin| match HeaderValue::try_from(*origin) {
-            Ok(value) => Some(value),
-            Err(error) => {
-                tracing::warn!(origin = *origin, error = %error, "invalid CORS origin skipped");
-                None
-            }
-        })
-        .collect();
-
-    if parsed.is_empty() {
-        tracing::error!("no valid CORS origins parsed; denying all cross-origin requests");
-        return CorsLayer::new();
-    }
-
-    tracing::info!(origins = ?origins, "CORS allowlist configured");
-    CorsLayer::new()
-        .allow_origin(AllowOrigin::list(parsed))
-        .allow_credentials(true)
-        .allow_methods([
-            axum::http::Method::GET,
-            axum::http::Method::POST,
-            axum::http::Method::PUT,
-            axum::http::Method::PATCH,
-            axum::http::Method::DELETE,
-            axum::http::Method::OPTIONS,
-        ])
-        .allow_headers(tower_http::cors::Any)
 }

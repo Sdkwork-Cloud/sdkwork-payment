@@ -231,7 +231,11 @@ impl PaymentProviderAdapter for AlipayPaymentProviderAdapter {
             // a form HTML or URL in `body` rather than JSON fields. We surface
             // it under a normalized key so the cashier can render accordingly.
             if let Some(field) = return_field {
-                if let Some(redirect) = response.get(field).and_then(Value::as_str).map(str::to_owned) {
+                if let Some(redirect) = response
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                {
                     response["redirect_url"] = json!(redirect);
                 }
             }
@@ -595,12 +599,14 @@ fn build_alipay_biz_content(
         }
         "alipay_jsapi" => {
             // JSAPI — trade.create returns trade_no; requires buyer_openid
-            let buyer_id = metadata_string(metadata, "buyer_id").or_else(|| metadata_string(metadata, "buyer_open_id")).ok_or_else(|| {
-                ProviderError::invalid_request(
-                    PaymentAdapterOperation::CreatePaymentIntent,
-                    "alipay_jsapi requires metadata.buyer_id (buyer's openid)",
-                )
-            })?;
+            let buyer_id = metadata_string(metadata, "buyer_id")
+                .or_else(|| metadata_string(metadata, "buyer_open_id"))
+                .ok_or_else(|| {
+                    ProviderError::invalid_request(
+                        PaymentAdapterOperation::CreatePaymentIntent,
+                        "alipay_jsapi requires metadata.buyer_id (buyer's openid)",
+                    )
+                })?;
             biz_content["buyer_id"] = json!(buyer_id);
         }
         _ => {

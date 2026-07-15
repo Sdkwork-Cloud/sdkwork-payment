@@ -359,8 +359,8 @@ impl PaymentProviderAdapter for WeChatPayProviderAdapter {
                                 "wechat_h5 requires metadata.client_ip",
                             )
                         })?;
-                    let scene_type = metadata_string(&request.metadata, "scene_type")
-                        .unwrap_or("Wap");
+                    let scene_type =
+                        metadata_string(&request.metadata, "scene_type").unwrap_or("Wap");
                     payload["scene_info"] = json!({
                         "payer": { "client_ip": client_ip },
                         "h5_info": { "type": scene_type },
@@ -376,7 +376,11 @@ impl PaymentProviderAdapter for WeChatPayProviderAdapter {
             // cashier can hand it directly to the WeChat JS SDK / App SDK.
             let mut response = response;
             if matches!(method_key, "wechat_jsapi" | "wechat_app") {
-                if let Some(prepay_id) = response.get("prepay_id").and_then(Value::as_str).map(str::to_owned) {
+                if let Some(prepay_id) = response
+                    .get("prepay_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                {
                     let sdk_params = self.build_wechat_sdk_invoke_params(&prepay_id)?;
                     response["sdk_invoke_params"] = sdk_params;
                 }
