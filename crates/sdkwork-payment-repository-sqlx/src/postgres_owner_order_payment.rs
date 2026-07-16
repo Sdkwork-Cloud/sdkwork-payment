@@ -265,17 +265,19 @@ impl PostgresCommerceOwnerOrderPaymentStore {
                 o.order_no AS order_sn,
                 o.subject AS order_subject,
                 o.status,
-                COALESCE(
-                    (
-                        SELECT b.payable_amount
-                        FROM commerce_order_amount_breakdown b
-                        WHERE b.tenant_id = o.tenant_id
-                          AND b.order_id = o.id
-                          AND COALESCE(to_jsonb(b) ->> 'allocation_type', 'order_total') = 'order_total'
-                        LIMIT 1
-                    ),
-                    '0'
-                ) AS total_amount
+                CAST(
+                    COALESCE(
+                        (
+                            SELECT b.payable_amount
+                            FROM commerce_order_amount_breakdown b
+                            WHERE b.tenant_id = o.tenant_id
+                              AND b.order_id = o.id
+                              AND COALESCE(to_jsonb(b) ->> 'allocation_type', 'order_total') = 'order_total'
+                            LIMIT 1
+                        ),
+                        '0'
+                    ) AS BIGINT
+                )::TEXT AS total_amount
             FROM commerce_order o
             WHERE o.id = CAST($1 AS TEXT)
               AND o.tenant_id = CAST($2 AS TEXT)
@@ -362,7 +364,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
                  payment_method, provider_code, amount, currency_code, status, request_no,
                  idempotency_key, created_at, updated_at)
             VALUES
-                ($1, CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, 'CNY', $10, $11, $12, $13::timestamptz, $14::timestamptz)
+                ($1, CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9::numeric, 'CNY', $10, $11, $12, $13::timestamptz, $14::timestamptz)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -410,7 +412,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
                  payment_method, provider_code, out_trade_no, amount, currency_code, status,
                  callback_payload, request_no, idempotency_key, created_at, paid_at, updated_at)
             VALUES
-                ($1, CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10, 'CNY', $11, $12, $13, $14, $15::timestamptz, NULL, $16::timestamptz)
+                ($1, CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10::numeric, 'CNY', $11, $12::jsonb, $13, $14, $15::timestamptz, NULL, $16::timestamptz)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -764,7 +766,7 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
         r#"
         SELECT pa.id AS payment_attempt_id,
                pa.out_trade_no,
-               CAST(pa.amount AS TEXT) AS amount,
+               CAST(pa.amount AS BIGINT)::TEXT AS amount,
                pa.payment_method,
                pa.provider_code,
                pa.status
@@ -824,7 +826,9 @@ async fn load_reusable_owner_payment_in_tx(
 ) -> Result<Option<PayOwnerOrderOutcome>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT pa.id, pa.out_trade_no, pa.amount, pa.payment_method, pa.provider_code, pa.status
+        SELECT pa.id, pa.out_trade_no,
+               CAST(pa.amount AS BIGINT)::TEXT AS amount,
+               pa.payment_method, pa.provider_code, pa.status
         FROM commerce_payment_attempt pa
         INNER JOIN commerce_order o
             ON o.id = pa.order_id
@@ -919,6 +923,14 @@ mod tests {
         assert!(attempt_query.contains("deleted_at IS NULL"));
         assert!(attempt_query.contains("AT TIME ZONE 'UTC'"));
         assert!(attempt_query.ends_with("FOR UPDATE"));
+    }
+
+    #[test]
+    fn owner_payment_queries_project_numeric_amounts_as_minor_unit_text() {
+        let source = include_str!("postgres_owner_order_payment.rs");
+
+        assert!(source.contains("CAST(pa.amount AS BIGINT)::TEXT AS amount"));
+        assert!(source.contains(") AS BIGINT\n                )::TEXT AS total_amount"));
     }
 
     #[test]
