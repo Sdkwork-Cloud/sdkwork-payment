@@ -20,6 +20,10 @@ export interface ProviderAccountListProps {
   pageInfo?: import("@sdkwork/payment-contracts").SdkWorkPageInfo;
   selectedId?: string;
   busy?: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canRotate: boolean;
+  canTest: boolean;
   onSelect(account: PaymentProviderAccountView): void;
   onEdit(account: PaymentProviderAccountView): void;
   onTest(account: PaymentProviderAccountView): void;
@@ -65,7 +69,7 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
         <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-8 text-center text-sm text-[var(--sdk-color-text-secondary)]">
           No provider accounts yet. Create one to configure payment channels.
           {/* Empty-state inline create button: guides users to create a provider account directly */}
-          <div className="mt-3">
+          {props.canCreate ? <div className="mt-3">
             <Button
               type="button"
               variant="primary"
@@ -75,7 +79,7 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
             >
               Create provider account
             </Button>
-          </div>
+          </div> : null}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
@@ -130,7 +134,7 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
                   </dl>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
+                  {props.canTest ? <Button
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -139,8 +143,8 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
                     title="Cannot test while another operation is in progress"
                   >
                     Test
-                  </Button>
-                  <Button
+                  </Button> : null}
+                  {props.canRotate ? <Button
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -149,8 +153,8 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
                     title="Cannot rotate while another operation is in progress"
                   >
                     Rotate
-                  </Button>
-                  <Button
+                  </Button> : null}
+                  {props.canEdit ? <Button
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -159,7 +163,7 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
                     title="Cannot edit while another operation is in progress"
                   >
                     Edit
-                  </Button>
+                  </Button> : null}
                   <Button
                     type="button"
                     size="sm"

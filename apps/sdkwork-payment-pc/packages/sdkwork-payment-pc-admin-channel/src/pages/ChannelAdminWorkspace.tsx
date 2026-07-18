@@ -36,8 +36,18 @@ import type {
 
 export interface PaymentChannelAdminWorkspaceProps {
   controller: PaymentChannelAdminController;
+  capabilities: PaymentChannelAdminCapabilities;
   title?: string;
   description?: string;
+}
+
+export interface PaymentChannelAdminCapabilities {
+  canCreateMethod: boolean;
+  canUpdateMethod: boolean;
+  canCreateChannel: boolean;
+  canCreateRouteRule: boolean;
+  canUpdateRouteRule: boolean;
+  canDeleteRouteRule: boolean;
 }
 
 type TabKind = "methods" | "channels" | "rules";
@@ -136,6 +146,8 @@ export function PaymentChannelAdminWorkspace(
               pageInfo={state.listPageInfo?.methods}
               busy={busy}
               selectedId={state.selectedMethodId}
+              canCreate={props.capabilities.canCreateMethod}
+              canUpdate={props.capabilities.canUpdateMethod}
               onSelect={(method) => handleSelectMethod(method.id)}
               onCreate={handleCreateMethod}
               onUpdate={handleUpdateMethod}
@@ -156,6 +168,7 @@ export function PaymentChannelAdminWorkspace(
               providerAccounts={state.providerAccounts}
               pageInfo={state.listPageInfo?.channels}
               busy={busy}
+              canCreate={props.capabilities.canCreateChannel}
               onCreate={handleCreateChannel}
               onLoadMore={() => void controller.loadMoreChannels()}
             />
@@ -173,6 +186,9 @@ export function PaymentChannelAdminWorkspace(
               channels={state.channels}
               pageInfo={state.listPageInfo?.routeRules}
               busy={busy}
+              canCreate={props.capabilities.canCreateRouteRule}
+              canDelete={props.capabilities.canDeleteRouteRule}
+              canUpdate={props.capabilities.canUpdateRouteRule}
               onCreate={handleCreateRouteRule}
               onUpdate={handleUpdateRouteRule}
               onDelete={handleDeleteRouteRule}

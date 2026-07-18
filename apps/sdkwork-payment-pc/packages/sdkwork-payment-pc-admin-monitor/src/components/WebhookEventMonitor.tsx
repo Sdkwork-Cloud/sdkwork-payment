@@ -62,6 +62,7 @@ export interface WebhookEventMonitorProps {
   events: readonly PaymentWebhookEventView[];
   pageInfo?: SdkWorkPageInfo;
   busy?: boolean;
+  canReplay: boolean;
   lastReplayResult?: WebhookReplayResult;
   onApplyFilter(filter: PaymentWebhookEventListFilter): Promise<void> | void;
   onLoadMore(): void;
@@ -311,20 +312,22 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
                   >
                     View
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setPendingReplay(event)}
-                    disabled={props.busy || replayDisabled}
-                    title={
-                      replayDisabled
-                        ? "Replay disabled: max retries reached or event marked dead"
-                        : "Replay this webhook event"
-                    }
-                  >
-                    Replay
-                  </Button>
+                  {props.canReplay ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPendingReplay(event)}
+                      disabled={props.busy || replayDisabled}
+                      title={
+                        replayDisabled
+                          ? "Replay disabled: max retries reached or event marked dead"
+                          : "Replay this webhook event"
+                      }
+                    >
+                      Replay
+                    </Button>
+                  ) : null}
                 </div>
               </li>
             );
@@ -350,6 +353,7 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
             <WebhookEventDetail
               event={viewingEventResolved}
               busy={props.busy}
+              canReplay={props.canReplay}
               replayDisabled={
                 viewingEventResolved.status === "dead" ||
                 viewingEventResolved.retries >= ADMIN_WEBHOOK_REPLAY_MAX_RETRIES
@@ -364,7 +368,7 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
       </Drawer>
 
       <ConfirmDialog
-        open={pendingReplay !== null}
+        open={props.canReplay && pendingReplay !== null}
         title="Replay webhook event?"
         description={
           pendingReplay
@@ -390,6 +394,7 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
 interface WebhookEventDetailProps {
   event: PaymentWebhookEventView;
   busy?: boolean;
+  canReplay: boolean;
   replayDisabled: boolean;
   onReplay(): void;
 }
@@ -490,20 +495,22 @@ function WebhookEventDetail(props: WebhookEventDetailProps) {
         ) : null}
       </DrawerBody>
       <DrawerFooter>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={props.onReplay}
-          disabled={props.busy || props.replayDisabled}
-          title={
-            props.replayDisabled
-              ? "Replay disabled: max retries reached or event marked dead"
-              : "Replay this webhook event"
-          }
-        >
-          Replay
-        </Button>
+        {props.canReplay ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={props.onReplay}
+            disabled={props.busy || props.replayDisabled}
+            title={
+              props.replayDisabled
+                ? "Replay disabled: max retries reached or event marked dead"
+                : "Replay this webhook event"
+            }
+          >
+            Replay
+          </Button>
+        ) : null}
       </DrawerFooter>
     </>
   );

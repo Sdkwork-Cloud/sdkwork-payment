@@ -51,6 +51,8 @@ export interface PaymentMethodManagerProps {
   pageInfo?: SdkWorkPageInfo;
   busy?: boolean;
   selectedId?: string;
+  canCreate: boolean;
+  canUpdate: boolean;
   onSelect(method: PaymentMethodView): void;
   onCreate(draft: PaymentMethodDraft): Promise<void> | void;
   onUpdate(methodKey: string, draft: PaymentMethodUpdateDraft): Promise<void> | void;
@@ -92,7 +94,7 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
   return (
     <div className="space-y-4" data-slot="payment-method-manager">
       <div className="flex justify-end">
-        <Button
+        {props.canCreate ? <Button
           type="button"
           size="sm"
           onClick={() => setDialog({ kind: "create" })}
@@ -100,14 +102,14 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
           title={props.busy ? "Cannot create a payment method while another operation is in progress" : "Create a new payment method"}
         >
           Create payment method
-        </Button>
+        </Button> : null}
       </div>
 
       {props.methods.length === 0 ? (
         <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-8 text-center text-sm text-[var(--sdk-color-text-secondary)]">
           No payment methods configured. Create one to start accepting payments.
           {/* Empty-state inline create button: guides users to create a payment method directly */}
-          <div className="mt-3">
+          {props.canCreate ? <div className="mt-3">
             <Button
               type="button"
               variant="primary"
@@ -117,7 +119,7 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
             >
               Create payment method
             </Button>
-          </div>
+          </div> : null}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
@@ -169,7 +171,7 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
                 >
                   Select
                 </Button>
-                <Button
+                {props.canUpdate ? <Button
                   type="button"
                   variant="ghost"
                   size="sm"
@@ -178,7 +180,7 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
                   title="Cannot edit while another operation is in progress"
                 >
                   Edit
-                </Button>
+                </Button> : null}
               </div>
             </li>
           ))}
@@ -192,7 +194,10 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
       />
 
       <Dialog
-        open={dialog.kind === "create" || dialog.kind === "edit"}
+        open={
+          (props.canCreate && dialog.kind === "create")
+          || (props.canUpdate && dialog.kind === "edit")
+        }
         onOpenChange={(open) => {
           if (!open) setDialog({ kind: "closed" });
         }}

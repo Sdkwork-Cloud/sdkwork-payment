@@ -67,6 +67,9 @@ export interface SubMerchantManagerProps {
   subMerchants: readonly PaymentSubMerchantView[];
   pageInfo?: import("@sdkwork/payment-contracts").SdkWorkPageInfo;
   busy?: boolean;
+  canCreate: boolean;
+  canDelete: boolean;
+  canUpdate: boolean;
   onCreate(draft: PaymentSubMerchantDraft): Promise<void> | void;
   onUpdate(id: string, draft: PaymentSubMerchantUpdateDraft): Promise<void> | void;
   onDelete(id: string): Promise<void> | void;
@@ -222,19 +225,19 @@ export function SubMerchantManager(props: SubMerchantManagerProps) {
             {providerHint}
           </div>
         </div>
-        <Button type="button" size="sm" onClick={openCreate}>
+        {props.canCreate ? <Button type="button" size="sm" onClick={openCreate}>
           Add sub-merchant
-        </Button>
+        </Button> : null}
       </div>
 
       {props.subMerchants.length === 0 ? (
         <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-6 text-center text-sm text-[var(--sdk-color-text-secondary)]">
           No sub-merchants configured under this partner account.
-          <div className="mt-3">
+          {props.canCreate ? <div className="mt-3">
             <Button type="button" variant="primary" size="sm" onClick={openCreate} disabled={submitting}>
               Create sub-merchant
             </Button>
-          </div>
+          </div> : null}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
@@ -267,7 +270,7 @@ export function SubMerchantManager(props: SubMerchantManagerProps) {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button
+                {props.canUpdate ? <Button
                   type="button"
                   variant="ghost"
                   size="sm"
@@ -276,8 +279,8 @@ export function SubMerchantManager(props: SubMerchantManagerProps) {
                   title="Cannot edit while another operation is in progress"
                 >
                   Edit
-                </Button>
-                <Button
+                </Button> : null}
+                {props.canDelete ? <Button
                   type="button"
                   variant="ghost"
                   size="sm"
@@ -286,7 +289,7 @@ export function SubMerchantManager(props: SubMerchantManagerProps) {
                   title="Cannot delete while another operation is in progress"
                 >
                   Delete
-                </Button>
+                </Button> : null}
               </div>
             </li>
           ))}
@@ -299,7 +302,7 @@ export function SubMerchantManager(props: SubMerchantManagerProps) {
         pageInfo={props.pageInfo}
       />
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={(props.canCreate || props.canUpdate) && dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -426,7 +429,7 @@ export function SubMerchantManager(props: SubMerchantManagerProps) {
       </Dialog>
 
       <ConfirmDialog
-        open={pendingDelete !== null}
+        open={props.canDelete && pendingDelete !== null}
         title="Delete sub-merchant?"
         description={
           pendingDelete

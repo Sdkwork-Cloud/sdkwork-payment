@@ -1,6 +1,10 @@
 export * from "./types/monitor-admin-types";
 export { createPaymentMonitorAdminController } from "./services/monitor-admin-controller";
-export { PaymentMonitorAdminWorkspace } from "./pages/MonitorAdminWorkspace";
+export {
+  PaymentMonitorAdminWorkspace,
+  type PaymentMonitorAdminCapabilities,
+  type PaymentMonitorAdminWorkspaceProps,
+} from "./pages/MonitorAdminWorkspace";
 export { IntentMonitor } from "./components/IntentMonitor";
 export { AttemptMonitor } from "./components/AttemptMonitor";
 export { WebhookEventMonitor } from "./components/WebhookEventMonitor";

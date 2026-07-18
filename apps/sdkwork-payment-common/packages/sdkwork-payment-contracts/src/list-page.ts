@@ -106,7 +106,7 @@ export function extractSdkWorkResourceItem<T = unknown>(value: unknown): T | und
   if (isRecord(value.data) && "item" in value.data) {
     return value.data.item as T;
   }
-  return undefined;
+  return value as T;
 }
 
 const LIST_QUERY_KEYS = new Set(["page", "page_size", "pageSize", "cursor", "sort", "q"]);

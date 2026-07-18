@@ -77,7 +77,6 @@ export const BACKEND_PAYMENT_METHOD_TREE = {
     list: true,
     create: true,
     retrieve: true,
-    update: true,
     delete: true,
   },
   attempts: {

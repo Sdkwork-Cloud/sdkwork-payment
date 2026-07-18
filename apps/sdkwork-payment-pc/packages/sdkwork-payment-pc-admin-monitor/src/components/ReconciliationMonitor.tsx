@@ -53,6 +53,7 @@ export interface ReconciliationMonitorProps {
   runs: readonly ReconciliationRunView[];
   pageInfo?: SdkWorkPageInfo;
   busy?: boolean;
+  canCreate: boolean;
   // The create-run form requires selecting from configured provider accounts, so the dropdown data source is injected by the caller
   providerAccounts: readonly ReconciliationProviderAccountOption[];
   onApplyFilter(filter: ReconciliationRunListFilter): Promise<void> | void;
@@ -153,11 +154,13 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
 
   return (
     <div className="space-y-4" data-slot="payment-reconciliation-monitor">
-      <div className="flex justify-end">
-        <Button type="button" size="sm" onClick={() => setDialogOpen(true)} disabled={props.busy} title={props.busy ? "Cannot create a reconciliation run while another operation is in progress" : "Create a new reconciliation run"}>
-          New reconciliation run
-        </Button>
-      </div>
+      {props.canCreate ? (
+        <div className="flex justify-end">
+          <Button type="button" size="sm" onClick={() => setDialogOpen(true)} disabled={props.busy} title={props.busy ? "Cannot create a reconciliation run while another operation is in progress" : "Create a new reconciliation run"}>
+            New reconciliation run
+          </Button>
+        </div>
+      ) : null}
 
       <form
         className="grid grid-cols-1 gap-3 rounded-md border border-[var(--sdk-color-border-subtle)] p-3 sm:grid-cols-2 lg:grid-cols-4"
@@ -226,11 +229,13 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
       {props.runs.length === 0 ? (
         <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-8 text-center text-sm text-[var(--sdk-color-text-secondary)]">
           No reconciliation runs found. Create one to start a new reconciliation cycle.
-          <div className="mt-3">
-            <Button type="button" variant="primary" size="sm" onClick={() => setDialogOpen(true)} disabled={props.busy} title={props.busy ? "Cannot create a reconciliation run while another operation is in progress" : "Create a new reconciliation run"}>
-              Create reconciliation run
-            </Button>
-          </div>
+          {props.canCreate ? (
+            <div className="mt-3">
+              <Button type="button" variant="primary" size="sm" onClick={() => setDialogOpen(true)} disabled={props.busy} title={props.busy ? "Cannot create a reconciliation run while another operation is in progress" : "Create a new reconciliation run"}>
+                Create reconciliation run
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
@@ -289,7 +294,7 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
       />
 
       <Dialog
-        open={dialogOpen}
+        open={props.canCreate && dialogOpen}
         onOpenChange={(open) => {
           if (!open) setDialogOpen(false);
         }}

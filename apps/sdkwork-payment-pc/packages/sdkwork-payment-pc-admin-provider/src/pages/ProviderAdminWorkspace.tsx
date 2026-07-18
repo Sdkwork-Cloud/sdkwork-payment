@@ -42,8 +42,19 @@ import type {
 
 export interface PaymentProviderAdminWorkspaceProps {
   controller: PaymentProviderAdminController;
+  capabilities: PaymentProviderAdminCapabilities;
   title?: string;
   description?: string;
+}
+
+export interface PaymentProviderAdminCapabilities {
+  canCreateProviderAccount: boolean;
+  canUpdateProviderAccount: boolean;
+  canTestProviderAccount: boolean;
+  canRotateProviderCredentials: boolean;
+  canCreateSubMerchant: boolean;
+  canUpdateSubMerchant: boolean;
+  canDeleteSubMerchant: boolean;
 }
 
 type DialogState =
@@ -189,14 +200,16 @@ export function PaymentProviderAdminWorkspace(
             title="Provider Accounts"
             description="Manage PSP credentials, environment, and capabilities per provider account. Secrets are referenced by env var name only."
             actions={
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => setDialog({ kind: "create" })}
-                disabled={state.status === "saving" || state.status === "loading"}
-              >
-                Create provider account
-              </Button>
+              props.capabilities.canCreateProviderAccount ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setDialog({ kind: "create" })}
+                  disabled={state.status === "saving" || state.status === "loading"}
+                >
+                  Create provider account
+                </Button>
+              ) : null
             }
           >
             <ProviderAccountList
@@ -204,6 +217,10 @@ export function PaymentProviderAdminWorkspace(
               pageInfo={state.listPageInfo?.providerAccounts}
               selectedId={state.selectedProviderAccount?.id}
               busy={state.status === "saving" || state.status === "loading"}
+              canCreate={props.capabilities.canCreateProviderAccount}
+              canEdit={props.capabilities.canUpdateProviderAccount}
+              canRotate={props.capabilities.canRotateProviderCredentials}
+              canTest={props.capabilities.canTestProviderAccount}
               onSelect={handleSelect}
               onEdit={(account) => setDialog({ kind: "edit", account })}
               onTest={(account) => setDialog({ kind: "test", account })}
@@ -252,6 +269,9 @@ export function PaymentProviderAdminWorkspace(
               subMerchants={visibleSubMerchants}
               pageInfo={state.listPageInfo?.subMerchants}
               busy={state.status === "saving" || state.status === "loading"}
+              canCreate={props.capabilities.canCreateSubMerchant}
+              canDelete={props.capabilities.canDeleteSubMerchant}
+              canUpdate={props.capabilities.canUpdateSubMerchant}
               onCreate={(draft) => void controller.createSubMerchant(draft)}
               onUpdate={(id, draft) => void controller.updateSubMerchant(id, draft)}
               onDelete={(id) => void controller.deleteSubMerchant(id)}

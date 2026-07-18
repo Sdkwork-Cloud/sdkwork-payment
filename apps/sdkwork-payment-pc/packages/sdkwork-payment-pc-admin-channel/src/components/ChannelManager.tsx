@@ -51,6 +51,7 @@ export interface ChannelManagerProps {
   providerAccounts: readonly PaymentProviderAccountView[];
   pageInfo?: SdkWorkPageInfo;
   busy?: boolean;
+  canCreate: boolean;
   onCreate(draft: PaymentChannelDraft): Promise<void> | void;
   onLoadMore(): void;
 }
@@ -92,7 +93,7 @@ export function ChannelManager(props: ChannelManagerProps) {
           Once created, channels cannot be edited or deleted via the API — set the
           status carefully at creation time.
         </p>
-        <Button
+        {props.canCreate ? <Button
           type="button"
           size="sm"
           onClick={() => setOpen(true)}
@@ -104,7 +105,7 @@ export function ChannelManager(props: ChannelManagerProps) {
           }
         >
           Create channel
-        </Button>
+        </Button> : null}
       </div>
 
       {props.channels.length === 0 ? (
@@ -112,7 +113,7 @@ export function ChannelManager(props: ChannelManagerProps) {
           No payment channels configured. Create one to bridge a payment method with a
           provider account.
           {/* Empty-state inline create button: disabled when a payment method or provider account is missing, mirroring the header button logic */}
-          <div className="mt-3">
+          {props.canCreate ? <div className="mt-3">
             <Button
               type="button"
               variant="primary"
@@ -122,7 +123,7 @@ export function ChannelManager(props: ChannelManagerProps) {
             >
               Create channel
             </Button>
-          </div>
+          </div> : null}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
@@ -174,7 +175,7 @@ export function ChannelManager(props: ChannelManagerProps) {
       />
 
       <Dialog
-        open={open}
+        open={props.canCreate && open}
         onOpenChange={setOpen}
       >
         <DialogContent>

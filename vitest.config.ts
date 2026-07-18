@@ -187,6 +187,7 @@ export default defineConfig({
       },
     },
     include: [
+      "apps/sdkwork-payment-common/packages/**/*.test.ts",
       "apps/sdkwork-payment-pc/packages/**/*.test.ts",
       "apps/sdkwork-payment-pc/packages/**/*.test.tsx",
     ],

@@ -39,8 +39,14 @@ import type {
 
 export interface PaymentMonitorAdminWorkspaceProps {
   controller: PaymentMonitorAdminController;
+  capabilities: PaymentMonitorAdminCapabilities;
   title?: string;
   description?: string;
+}
+
+export interface PaymentMonitorAdminCapabilities {
+  canCreateReconciliationRun: boolean;
+  canReplayWebhookEvent: boolean;
 }
 
 type TabKind = "intents" | "attempts" | "webhooks" | "reconciliation";
@@ -169,6 +175,7 @@ export function PaymentMonitorAdminWorkspace(
               events={state.webhookEvents}
               pageInfo={state.listPageInfo?.webhookEvents}
               busy={busy}
+              canReplay={props.capabilities.canReplayWebhookEvent}
               lastReplayResult={state.lastReplayResult}
               onApplyFilter={handleApplyWebhookFilter}
               onLoadMore={() => void controller.loadMoreWebhookEvents()}
@@ -187,6 +194,7 @@ export function PaymentMonitorAdminWorkspace(
               runs={state.reconciliationRuns}
               pageInfo={state.listPageInfo?.reconciliationRuns}
               busy={busy}
+              canCreate={props.capabilities.canCreateReconciliationRun}
               // Provider account dropdown data source: read from controller state (empty array when not yet wired up)
               providerAccounts={state.providerAccounts ?? []}
               onApplyFilter={handleApplyReconciliationFilter}

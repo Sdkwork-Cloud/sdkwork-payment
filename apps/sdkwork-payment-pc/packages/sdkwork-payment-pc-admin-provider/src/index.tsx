@@ -1,6 +1,10 @@
 export * from "./types/provider-admin-types";
 export { createPaymentProviderAdminController } from "./services/provider-admin-controller";
-export { PaymentProviderAdminWorkspace } from "./pages/ProviderAdminWorkspace";
+export {
+  PaymentProviderAdminWorkspace,
+  type PaymentProviderAdminCapabilities,
+  type PaymentProviderAdminWorkspaceProps,
+} from "./pages/ProviderAdminWorkspace";
 export { ProviderAccountForm } from "./components/ProviderAccountForm";
 export { ProviderAccountList } from "./components/ProviderAccountList";
 export { SubMerchantManager } from "./components/SubMerchantManager";

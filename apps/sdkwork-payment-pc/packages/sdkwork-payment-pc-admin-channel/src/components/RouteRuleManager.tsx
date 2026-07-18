@@ -51,6 +51,9 @@ export interface RouteRuleManagerProps {
   channels: readonly PaymentChannelView[];
   pageInfo?: SdkWorkPageInfo;
   busy?: boolean;
+  canCreate: boolean;
+  canDelete: boolean;
+  canUpdate: boolean;
   onCreate(draft: PaymentRouteRuleDraft): Promise<void> | void;
   onUpdate(id: string, draft: PaymentRouteRuleUpdateDraft): Promise<void> | void;
   onDelete(id: string): Promise<void> | void;
@@ -105,7 +108,7 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
   return (
     <div className="space-y-4" data-slot="route-rule-manager">
       <div className="flex justify-end">
-        <Button
+        {props.canCreate ? <Button
           type="button"
           size="sm"
           onClick={() => setDialog({ kind: "create" })}
@@ -117,7 +120,7 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
           }
         >
           Create route rule
-        </Button>
+        </Button> : null}
       </div>
 
       {props.routeRules.length === 0 ? (
@@ -125,7 +128,7 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
           No routing rules configured. Without rules, payments will be rejected (no
           matching channel). Create one to start routing payments.
           {/* Empty-state inline create button: disabled when no channels exist, mirroring the header button logic */}
-          <div className="mt-3">
+          {props.canCreate ? <div className="mt-3">
             <Button
               type="button"
               variant="primary"
@@ -135,7 +138,7 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
             >
               Create route rule
             </Button>
-          </div>
+          </div> : null}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
@@ -208,7 +211,7 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
                   </div>
                 ) : null}
                 <div className="flex justify-end gap-2">
-                  <Button
+                  {props.canUpdate ? <Button
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -217,8 +220,8 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
                     title="Cannot edit while another operation is in progress"
                   >
                     Edit
-                  </Button>
-                  <Button
+                  </Button> : null}
+                  {props.canDelete ? <Button
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -227,7 +230,7 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
                     title="Cannot delete while another operation is in progress"
                   >
                     Delete
-                  </Button>
+                  </Button> : null}
                 </div>
               </li>
             );
@@ -242,7 +245,10 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
       />
 
       <Dialog
-        open={dialog.kind === "create" || dialog.kind === "edit"}
+        open={
+          (props.canCreate && dialog.kind === "create")
+          || (props.canUpdate && dialog.kind === "edit")
+        }
         onOpenChange={(open) => {
           if (!open) setDialog({ kind: "closed" });
         }}
@@ -279,7 +285,7 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
       ) : null}
 
       <ConfirmDialog
-        open={pendingDelete !== null}
+        open={props.canDelete && pendingDelete !== null}
         title="Delete route rule?"
         description={
           pendingDelete

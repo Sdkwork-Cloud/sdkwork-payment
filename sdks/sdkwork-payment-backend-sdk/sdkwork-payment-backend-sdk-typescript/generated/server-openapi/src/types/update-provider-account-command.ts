@@ -1,0 +1,14 @@
+export interface UpdateProviderAccountCommand {
+  merchantId?: string;
+  accountMode?: 'direct' | 'partner';
+  partnerProviderAccountId?: string;
+  environment?: 'development' | 'sandbox' | 'production';
+  countryCode?: string;
+  settlementCurrency?: string;
+  secretRef?: string;
+  webhookSecretRef?: string;
+  certificateRef?: string;
+  capabilities?: Record<string, unknown>;
+  status?: 'active' | 'inactive' | 'suspended' | 'deprecated';
+  metadata?: Record<string, unknown>;
+}

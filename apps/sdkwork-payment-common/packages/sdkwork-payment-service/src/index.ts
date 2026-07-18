@@ -166,6 +166,16 @@ export function createSdkworkPaymentAppService(
   return service;
 }
 
+export function createSdkworkPaymentBackendService(
+  backendClient: PaymentBackendSdkClient,
+): SdkworkPaymentBackendService {
+  return buildServiceTree<SdkworkPaymentBackendService>(
+    BACKEND_PAYMENT_METHOD_TREE,
+    backendClient.payments,
+    ["payments"],
+  );
+}
+
 /**
  * C16/C17 对齐：RFC 9457 Problem+json 错误响应。
  *

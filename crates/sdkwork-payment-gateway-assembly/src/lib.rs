@@ -8,6 +8,12 @@ pub use bootstrap::{
     assemble_application_router, gateway_contract_fallback_config, ApplicationAssembly,
 };
 
+pub async fn assemble_application_router_from_env() -> Result<ApplicationAssembly, String> {
+    let host =
+        std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);
+    Ok(assemble_application_router(host).await)
+}
+
 pub fn assembly_route_count() -> usize {
     generated::ROUTE_CRATE_COUNT
 }

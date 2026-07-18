@@ -31,7 +31,7 @@
     {
       "language": "typescript",
       "workspace": "sdkwork-payment-backend-sdk-typescript",
-      "generationState": "pending",
+      "generationState": "generated",
       "releaseState": "not_published",
       "packagePath": "sdkwork-payment-backend-sdk-typescript/generated/server-openapi",
       "manifestPath": "sdkwork-payment-backend-sdk-typescript/generated/server-openapi/package.json",
@@ -42,5 +42,6 @@
       "transportPackageName": "sdkwork-payment-backend-sdk-generated-typescript"
     }
   ],
-  "sdkDependencies": []
+  "sdkDependencies": [],
+  "ownerOnlyOperationCount": 32
 }
