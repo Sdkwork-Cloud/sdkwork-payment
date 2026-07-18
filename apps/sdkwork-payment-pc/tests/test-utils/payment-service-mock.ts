@@ -35,12 +35,11 @@ function createMissingPaymentsTree(): SdkworkPaymentAppService["payments"] {
     "close",
     "create",
     "methods.list",
-    "statistics.retrieve",
+    "statistics.summary.retrieve",
     "records.list",
     "records.retrieve",
     "status.retrieve",
-    "status.retrieveByOutTradeNo",
-    "orderPayments.list",
+    "status.outTradeNo.retrieve",
     "reconcile",
   ]) {
     addMissingMethod(tree, method);

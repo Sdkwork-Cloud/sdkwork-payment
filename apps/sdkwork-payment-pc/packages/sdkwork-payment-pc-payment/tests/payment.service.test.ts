@@ -80,7 +80,8 @@ describe("sdkwork-payment-pc-payment service", () => {
     const paymentAppService = createPaymentAppServiceMock({
       payments: {
         statistics: {
-          retrieve: vi.fn().mockResolvedValue({
+          summary: {
+            retrieve: vi.fn().mockResolvedValue({
           code: 0,
           data: {
             closedPayments: 1,
@@ -136,7 +137,8 @@ describe("sdkwork-payment-pc-payment service", () => {
                 hasNextPage: false,
               },
             },
-          }),
+            }),
+          },
         },
       },
     });
@@ -269,25 +271,42 @@ describe("sdkwork-payment-pc-payment service", () => {
               transactionId: "TXN-1001",
             },
           }),
-          retrieveByOutTradeNo: vi.fn().mockResolvedValue({
+          outTradeNo: {
+            retrieve: vi.fn().mockResolvedValue({
+              code: 0,
+              data: {
+                amount: "699",
+                orderId: "ORDER-9",
+                outTradeNo: "OUT-ORDER-9",
+                paymentId: 1001,
+                paymentMethod: "WECHAT_PAY",
+                paymentProvider: "WECHAT_PAY",
+                paymentSn: "PAY-1001",
+                status: "SUCCESS",
+                statusName: "Success",
+              },
+            }),
+          },
+        },
+        records: {
+          retrieve: vi.fn().mockResolvedValue({
             code: 0,
             data: {
               amount: "699",
+              createdAt: "2026-04-03T10:05:00.000Z",
               orderId: "ORDER-9",
               outTradeNo: "OUT-ORDER-9",
               paymentId: 1001,
               paymentMethod: "WECHAT_PAY",
               paymentProvider: "WECHAT_PAY",
               paymentSn: "PAY-1001",
-              status: "SUCCESS",
-              statusName: "Success",
+              status: "PENDING",
+              statusName: "Pending",
             },
           }),
-        },
-        orderPayments: {
           list: vi.fn().mockResolvedValue({
             code: 0,
-            data: [
+            data: { items: [
               {
                 amount: "699",
                 createdAt: "2026-04-03T10:05:00.000Z",
@@ -314,7 +333,7 @@ describe("sdkwork-payment-pc-payment service", () => {
                 status: "FAILED",
                 statusName: "Failed",
               },
-            ],
+            ], pageInfo: { mode: "offset", page: 1, pageSize: 200, totalItems: 2, totalPages: 1 } },
           }),
         },
         reconcile,
@@ -411,7 +430,8 @@ describe("sdkwork-payment-pc-payment service", () => {
     const paymentAppService = createPaymentAppServiceMock({
       payments: {
         statistics: {
-          retrieve: vi.fn().mockResolvedValue({
+          summary: {
+            retrieve: vi.fn().mockResolvedValue({
             code: 0,
             data: {
               closedPayments: 1,
@@ -421,7 +441,8 @@ describe("sdkwork-payment-pc-payment service", () => {
               timeoutPayments: 0,
               totalPayments: 1,
             },
-          }),
+            }),
+          },
         },
         methods: {
           list: vi.fn().mockResolvedValue({
