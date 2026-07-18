@@ -18,12 +18,9 @@ pub async fn assemble_application_business_router(
     host: Arc<PaymentServiceHost>,
 ) -> ApplicationAssembly {
     let mut router = Router::new();
-    router = router.merge(
-        sdkwork_routes_payment_app_api::gateway_mount_business(host.clone()).await,
-    );
-    router = router.merge(
-        sdkwork_routes_payment_backend_api::gateway_mount_business(host).await,
-    );
+    router =
+        router.merge(sdkwork_routes_payment_app_api::gateway_mount_business(host.clone()).await);
+    router = router.merge(sdkwork_routes_payment_backend_api::gateway_mount_business(host).await);
     ApplicationAssembly { router }
 }
 

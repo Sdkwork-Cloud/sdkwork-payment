@@ -362,7 +362,7 @@ mod tests {
         )
         .trim_start_matches('\u{feff}');
         let document: serde_json::Value = serde_json::from_str(authority)
-        .expect("payment backend OpenAPI must be valid JSON-compatible YAML");
+            .expect("payment backend OpenAPI must be valid JSON-compatible YAML");
         let openapi_operations = openapi_operations(&document);
         let manifest_operations = backend_route_manifest()
             .routes()

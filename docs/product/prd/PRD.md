@@ -86,7 +86,7 @@ Reconciliation runs compare internal payment records against PSP settlement repo
 - **Run status lifecycle**: `pending` → `queued` → `running` → `succeeded` / `failed` / `canceled`
 - **Metrics**: `matchedCount`, `mismatchedCount`, `unmatchedCount`, `totalDifferenceAmount`
 - **Create**: `POST /backend/v3/api/payments/reconciliation_runs` creates a new reconciliation run
-- **App reconcile lookup**: `POST /app/v3/api/payments/reconciliations` is a lookup command that returns the latest payment record for an `orderId` or `outTradeNo` (PSP status repair is not performed inline)
+- **App reconcile lookup**: `POST /app/v3/api/payments:reconcile` is a lookup command that returns the latest payment record for an `orderId` or `outTradeNo` (PSP status repair is not performed inline)
 
 ## 8. User Scenarios
 

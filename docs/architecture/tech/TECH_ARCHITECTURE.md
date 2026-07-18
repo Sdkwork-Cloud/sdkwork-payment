@@ -65,7 +65,7 @@ Errors use HTTP 4xx/5xx `application/problem+json` (`SdkWorkProblemDetail`) with
 
 - Registry: `PaymentProviderRegistry::from_env()` reads deployment env vars; tenant-scoped `commerce_payment_provider_account` rows override per provider via `secret_ref` (env var name), `webhook_secret_ref`, `certificate_ref`, and `metadata` JSON.
 - Pay flow: after repository persists intent/attempt, shared `enrich_owner_order_payment_*` (`owner_order_checkout.rs`) calls the configured PSP and merges `providerTransactionId` / `providerStatus` into attempt `callback_payload` for later close/cancel.
-- Reconcile (app): `POST /payments/reconciliations` is a **lookup** command — returns the latest payment record for `orderId` or `outTradeNo`; PSP status repair is not performed inline (use backend webhook replay or order settlement).
+- Reconcile (app): `POST /payments:reconcile` is a **lookup** command that returns the latest payment record for `orderId` or `outTradeNo`; PSP status repair is not performed inline (use backend webhook replay or order settlement).
 - Close: `POST /payments/{paymentId}/close` marks attempt/intent `canceled` in the database first, then best-effort PSP cancel (Stripe uses `providerTransactionId` from attempt `callback_payload` when present).
 - Refund: `POST /refunds` persists the refund row, then submits `create_refund` to the PSP with up to three transient retries; terminal PSP failure marks the refund `failed` in DB and returns an error response.
 - Checkout polling: `GET /payments/checkout/{paymentId}` re-enriches pending attempts via PSP for cashier/QR parameters.

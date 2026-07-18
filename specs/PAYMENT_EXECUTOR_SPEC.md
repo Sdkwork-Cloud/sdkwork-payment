@@ -96,7 +96,10 @@ Machine contract: [commerce-dependency-boundary.spec.json](./commerce-dependency
 
 ## 9. Write Response Envelopes
 
-All payment/refund mutating app-api and backend-api routes return `SdkWorkApiResponse` command payloads:
+Create operations return HTTP `201` with the created resource under `data.item`. Update operations
+return HTTP `200` with the updated resource under `data.item`, and deletes return HTTP `204`
+without a JSON body. Domain commands such as cancel, close, replay, test, and rotate return an
+HTTP `200` `SdkWorkApiResponse` command payload:
 
 ```json
 {
@@ -112,7 +115,7 @@ All payment/refund mutating app-api and backend-api routes return `SdkWorkApiRes
 
 Read routes return `data.item` or `data.items` plus `data.pageInfo`.
 
-App reconcile (`POST /payments/reconciliations`) is a lookup command that returns the latest payment record as `data.item`. It performs no inline PSP status repair.
+App reconcile (`POST /payments:reconcile`) is a lookup command that returns the latest payment record as `data.item`. It performs no inline PSP status repair.
 
 ## 10. PSP Enrichment And Persistence
 

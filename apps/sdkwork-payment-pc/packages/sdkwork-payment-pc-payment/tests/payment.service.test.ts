@@ -91,7 +91,8 @@ describe("sdkwork-payment-pc-payment service", () => {
             timeoutPayments: 0,
             totalPayments: 4,
           },
-        }),
+            }),
+          },
         },
         methods: { list: listPaymentMethods },
         records: {
@@ -237,23 +238,6 @@ describe("sdkwork-payment-pc-payment service", () => {
       payments: {
         close,
         create: createPayment,
-        records: {
-          retrieve: vi.fn().mockResolvedValue({
-            code: 0,
-            data: {
-              amount: "699",
-              createdAt: "2026-04-03T10:05:00.000Z",
-              orderId: "ORDER-9",
-              outTradeNo: "OUT-ORDER-9",
-              paymentId: 1001,
-              paymentMethod: "WECHAT_PAY",
-              paymentProvider: "WECHAT_PAY",
-              paymentSn: "PAY-1001",
-              status: "PENDING",
-              statusName: "Pending",
-            },
-          }),
-        },
         status: {
           retrieve: vi.fn().mockResolvedValue({
             code: 0,
@@ -432,15 +416,15 @@ describe("sdkwork-payment-pc-payment service", () => {
         statistics: {
           summary: {
             retrieve: vi.fn().mockResolvedValue({
-            code: 0,
-            data: {
-              closedPayments: 1,
-              failedPayments: 0,
-              pendingPayments: 0,
-              successPayments: 0,
-              timeoutPayments: 0,
-              totalPayments: 1,
-            },
+              code: 0,
+              data: {
+                closedPayments: 1,
+                failedPayments: 0,
+                pendingPayments: 0,
+                successPayments: 0,
+                timeoutPayments: 0,
+                totalPayments: 1,
+              },
             }),
           },
         },
