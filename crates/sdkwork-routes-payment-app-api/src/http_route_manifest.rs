@@ -149,6 +149,7 @@ const HTTP_ROUTES: &[HttpRoute] = &[
 mod tests {
     use super::*;
     use sdkwork_web_core::RouteAuth;
+    use std::collections::BTreeSet;
 
     #[test]
     fn manifest_declares_all_routes_with_dual_token_auth() {
@@ -249,5 +250,58 @@ mod tests {
         manifest
             .validate_no_ambient_context_path_markers(&profile)
             .expect("manifest must not embed ambient tenant/org scoping");
+    }
+
+    #[test]
+    fn active_manifest_operations_match_app_openapi_authority() {
+        let document: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+        ))
+        .expect("payment app OpenAPI must be valid JSON-compatible YAML");
+        let openapi_operations = openapi_operations(&document);
+        let manifest_operations = app_route_manifest()
+            .routes()
+            .iter()
+            .filter(|route| route.operation_id != "payments.webhooks.receiveDeprecated")
+            .map(|route| {
+                (
+                    method_label(route.method).to_owned(),
+                    route.path.to_owned(),
+                    route.operation_id.to_owned(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(openapi_operations, manifest_operations);
+    }
+
+    fn openapi_operations(document: &serde_json::Value) -> BTreeSet<(String, String, String)> {
+        let mut operations = BTreeSet::new();
+        for (path, path_item) in document["paths"].as_object().expect("paths object") {
+            for method in ["get", "post", "put", "patch", "delete"] {
+                let Some(operation) = path_item.get(method) else {
+                    continue;
+                };
+                operations.insert((
+                    method.to_owned(),
+                    path.to_owned(),
+                    operation["operationId"]
+                        .as_str()
+                        .expect("operationId")
+                        .to_owned(),
+                ));
+            }
+        }
+        operations
+    }
+
+    fn method_label(method: HttpMethod) -> &'static str {
+        match method {
+            HttpMethod::Get => "get",
+            HttpMethod::Post => "post",
+            HttpMethod::Put => "put",
+            HttpMethod::Patch => "patch",
+            HttpMethod::Delete => "delete",
+        }
     }
 }
