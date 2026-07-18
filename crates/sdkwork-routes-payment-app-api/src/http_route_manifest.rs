@@ -1,15 +1,14 @@
-﻿//! C17 淇锛歱ayment app-api 鐨?HTTP route manifest銆?//!
-//! 閬靛惊 `API_SPEC.md` 搂4.2.1 涓?`WEB_FRAMEWORK_SPEC.md` 搂2/搂7 鐨勮姹傦紝route crate
-//! `MUST` 閫氳繃 framework contract 绫诲瀷 `HttpRoute` 澹版槑 manifest锛屼互渚匡細
-//! 1. 妗嗘灦杩愯鏃惰В鏋?operationId / rate-limit tier / 鍏叡璺緞锛?//! 2. 妗嗘灦鑷姩娲剧敓 `ContractFallbackConfig`锛屼负 manifest 鍐呮湭鎸傝浇 handler 鐨勮矾寰?//!    杩斿洖 501 Problem+json銆佷负瀹屽叏鏈煡璺緞杩斿洖 404 Problem+json锛?//! 3. OpenAPI 鐗╁寲鍣ㄧ敓鎴?owner-only authority 鏂囨。銆?//!
-//! 鎵€鏈夊彈淇濇姢璺敱缁熶竴浣跨敤 `RouteAuth::DualToken`锛坄API_SPEC.md` 搂4.2.1 瑙勫畾鍙椾繚鎶?//! app-api `MUST` 浣跨敤 `dual-token`锛夈€傚啓鎿嶄綔锛圥OST锛夋爣璁?`idempotent = true`锛?//! 琛ㄧず璇ヨ矾鐢辨帴鍙?`Idempotency-Key` / `Sdkwork-Request-Hash` 鍛戒护澶村苟鍙備笌骞傜瓑
-//! 浠撳偍灞傚幓閲嶃€?
+//! Payment app-api route manifest.
+//!
+//! This is the runtime projection of the owner OpenAPI authority.
+
 use sdkwork_web_core::{HttpMethod, HttpRoute, HttpRouteManifest};
 
-/// payment app-api 璺敱鍓嶇紑锛坄API_SPEC.md` 搂4.2.1 瑙勫畾 app-api `MUST` 浣跨敤
-/// `/app/v3/api`锛夈€?pub const APP_API_PREFIX: &str = "/app/v3/api";
+/// Canonical app-api prefix.
+pub const APP_API_PREFIX: &str = "/app/v3/api";
 
-/// payment app-api 鍏叡璺緞鍓嶇紑銆備粎鍖呭惈 infra 鍋ュ悍妫€鏌ヨ矾寰勶紝涓氬姟璺緞鍏ㄩ儴鍙?/// dual-token 淇濇姢銆?pub fn payment_app_api_public_path_prefixes() -> Vec<String> {
+/// Infrastructure paths are public; payment business routes remain protected.
+pub fn payment_app_api_public_path_prefixes() -> Vec<String> {
     sdkwork_web_bootstrap::infra_public_path_prefixes()
 }
 
@@ -141,7 +140,8 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     ),
 ];
 
-/// 鏋勯€?payment app-api 鐨?route manifest銆?pub fn app_route_manifest() -> HttpRouteManifest {
+/// Build the payment app-api route manifest.
+pub fn app_route_manifest() -> HttpRouteManifest {
     HttpRouteManifest::new(HTTP_ROUTES)
 }
 

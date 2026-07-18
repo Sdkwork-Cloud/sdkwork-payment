@@ -22,17 +22,17 @@
   "canonicalSpecs": [
     {
       "file": "APPLICATION_GATEWAY_SPEC.md",
-      "path": "../../../sdkwork-specs/APPLICATION_GATEWAY_SPEC.md",
+      "path": "../../../../sdkwork-specs/APPLICATION_GATEWAY_SPEC.md",
       "purpose": "Gateway assembly discovery, business-only mounting, and verification rules."
     },
     {
       "file": "WEB_FRAMEWORK_SPEC.md",
-      "path": "../../../sdkwork-specs/WEB_FRAMEWORK_SPEC.md",
+      "path": "../../../../sdkwork-specs/WEB_FRAMEWORK_SPEC.md",
       "purpose": "Typed request context and HTTP framework composition rules."
     },
     {
       "file": "DATABASE_FRAMEWORK_SPEC.md",
-      "path": "../../../sdkwork-specs/DATABASE_FRAMEWORK_SPEC.md",
+      "path": "../../../../sdkwork-specs/DATABASE_FRAMEWORK_SPEC.md",
       "purpose": "Database lifecycle bootstrap ownership for embedded assemblies."
     }
   ],
@@ -42,6 +42,7 @@
     ],
     "runtimeEntrypoints": [
       "sdkwork_payment_gateway_assembly::assemble_application_router_from_env",
+      "sdkwork_payment_gateway_assembly::assemble_application_business_router_from_env",
       "sdkwork_payment_gateway_assembly::assemble_backend_business_router_from_env"
     ],
     "routeManifest": "assembly-manifest.json",

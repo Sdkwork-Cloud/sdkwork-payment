@@ -1,4 +1,4 @@
-﻿//! C17 淇锛歱ayment backend-api 鐨?HTTP route manifest銆?
+//! C17 淇锛歱ayment backend-api 鐨?HTTP route manifest銆?
 //!
 //! 閬靛惊 `API_SPEC.md` 搂4.2.1 涓?`WEB_BACKEND_SPEC.md` 搂4.2/搂4.3 鐨勮姹傦紝backend-api
 //! route crate `MUST` 瀵煎嚭 `backend_route_manifest` 涓?`gateway_route_manifest`锛?
@@ -357,9 +357,11 @@ mod tests {
 
     #[test]
     fn manifest_operations_match_backend_openapi_authority() {
-        let document: serde_json::Value = serde_json::from_str(include_str!(
+        let authority = include_str!(
             "../../../apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
-        ))
+        )
+        .trim_start_matches('\u{feff}');
+        let document: serde_json::Value = serde_json::from_str(authority)
         .expect("payment backend OpenAPI must be valid JSON-compatible YAML");
         let openapi_operations = openapi_operations(&document);
         let manifest_operations = backend_route_manifest()

@@ -11,9 +11,19 @@ pub struct ApplicationAssembly {
 }
 
 pub async fn assemble_application_router(host: Arc<PaymentServiceHost>) -> ApplicationAssembly {
+    assemble_application_business_router(host).await
+}
+
+pub async fn assemble_application_business_router(
+    host: Arc<PaymentServiceHost>,
+) -> ApplicationAssembly {
     let mut router = Router::new();
-    router = router.merge(sdkwork_routes_payment_app_api::gateway_mount(host.clone()).await);
-    router = router.merge(sdkwork_routes_payment_backend_api::gateway_mount(host).await);
+    router = router.merge(
+        sdkwork_routes_payment_app_api::gateway_mount_business(host.clone()).await,
+    );
+    router = router.merge(
+        sdkwork_routes_payment_backend_api::gateway_mount_business(host).await,
+    );
     ApplicationAssembly { router }
 }
 
@@ -21,7 +31,7 @@ pub async fn assemble_backend_business_router(
     host: Arc<PaymentServiceHost>,
 ) -> ApplicationAssembly {
     ApplicationAssembly {
-        router: sdkwork_routes_payment_backend_api::gateway_mount(host).await,
+        router: sdkwork_routes_payment_backend_api::gateway_mount_business(host).await,
     }
 }
 
@@ -45,4 +55,17 @@ pub fn gateway_contract_fallback_config() -> ContractFallbackConfig {
             .into_iter(),
     );
     config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assembly_contract_fallback_contains_both_api_surfaces() {
+        let config = gateway_contract_fallback_config();
+        assert_eq!(51, config.manifest_paths.len());
+        assert!(config.contains("POST", "/app/v3/api/payments/intents"));
+        assert!(config.contains("GET", "/backend/v3/api/payments/certificates"));
+    }
 }

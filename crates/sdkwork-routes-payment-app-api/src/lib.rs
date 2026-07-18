@@ -35,6 +35,11 @@ pub async fn gateway_mount(host: Arc<PaymentServiceHost>) -> Router {
     build_payment_app_router_with_framework(host).await
 }
 
+/// Business-only assembly entrypoint. Infrastructure probes remain listener-owned.
+pub async fn gateway_mount_business(host: Arc<PaymentServiceHost>) -> Router {
+    build_payment_app_router_with_framework(host).await
+}
+
 /// C17 修复：导出 route manifest，满足 `WEB_BACKEND_SPEC.md` §4.2 的导出契约。
 /// 物化器与网关通过此函数获取 payment app-api 的路由契约元数据。
 pub fn gateway_route_manifest() -> HttpRouteManifest {
