@@ -111,6 +111,8 @@ pub(crate) struct AppPaymentState {
 struct PaymentRecordsQueryParams {
     page: Option<i64>,
     page_size: Option<i64>,
+    #[serde(alias = "orderId")]
+    order_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -938,33 +940,49 @@ async fn list_payment_methods(
 async fn list_payment_records(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
     Query(params): Query<PaymentRecordsQueryParams>,
 ) -> Response {
+    let ctx = request_ctx(&request_context);
     let subject = match app_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
-        Err(message) => return unauthorized_response(None, message),
+        Err(message) => return unauthorized(ctx, message),
     };
     // Phase 1.3：在 handler 解析标准分页参数（page/page_size），下推为 offset/limit 到 SQL。
     // 默认 page=1, page_size=20，page_size 上限 200（PAGINATION_SPEC §2）。
     let page_params = OffsetListPageParams::parse(params.page, params.page_size);
-    let query = match PaymentRecordListQuery::new(
-        &subject.tenant_id,
-        subject.organization_id.as_deref(),
-        &subject.user_id,
-    ) {
-        Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
-        Err(error) => return validation_response(None, error.message()),
+    let page = if let Some(order_id) = params.order_id.as_deref() {
+        let query = match PaymentRecordOrderListQuery::new(
+            &subject.tenant_id,
+            subject.organization_id.as_deref(),
+            &subject.user_id,
+            order_id,
+        ) {
+            Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
+            Err(error) => return validation(ctx, error.message()),
+        };
+        state.store.list_payment_records_by_order(query).await
+    } else {
+        let query = match PaymentRecordListQuery::new(
+            &subject.tenant_id,
+            subject.organization_id.as_deref(),
+            &subject.user_id,
+        ) {
+            Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
+            Err(error) => return validation(ctx, error.message()),
+        };
+        state.store.list_payment_records(query).await
     };
 
-    match state.store.list_payment_records(query).await {
+    match page {
         Ok(page) => {
             // Phase 1.3：store 已在 SQL 层完成 LIMIT/OFFSET 并返回真实 total_items，
             // handler 不再做进程内 skip/take（PAGINATION_SPEC §2 合规）。
             let items: Vec<_> = page.items.into_iter().map(map_payment_record).collect();
-            success_list(None, items, page.total_items, page_params)
+            success_list(ctx, items, page.total_items, page_params)
         }
         Err(error) => {
-            payment_system_response(None, "payment records read model is unavailable", error)
+            payment_system_response(ctx, "payment records read model is unavailable", error)
         }
     }
 }

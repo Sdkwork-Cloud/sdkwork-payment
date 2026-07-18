@@ -13,16 +13,15 @@ export const APP_PAYMENT_METHOD_TREE = {
     checkout: { retrieve: true },
     close: true,
     create: true,
-    orderPayments: { list: true },
     records: {
       list: true,
       retrieve: true,
     },
     reconcile: true,
-    statistics: { retrieve: true },
+    statistics: { summary: { retrieve: true } },
     status: {
       retrieve: true,
-      retrieveByOutTradeNo: true,
+      outTradeNo: { retrieve: true },
     },
   },
   refunds: {

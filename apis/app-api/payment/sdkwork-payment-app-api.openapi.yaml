@@ -55,7 +55,7 @@
     "/app/v3/api/payments/records": {
       "get": {
         "tags": ["commerce"], "summary": "List payment records.", "operationId": "payments.records.list",
-        "parameters": [{ "$ref": "#/components/parameters/Page" }, { "$ref": "#/components/parameters/PageSize" }],
+        "parameters": [{ "$ref": "#/components/parameters/Page" }, { "$ref": "#/components/parameters/PageSize" }, { "name": "order_id", "in": "query", "required": false, "schema": { "type": "string" } }],
         "responses": { "200": { "description": "Success", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentRecordListResponse" } } } }, "default": { "$ref": "#/components/responses/Problem" } },
         "security": [{ "AuthToken": [], "AccessToken": [] }], "x-sdkwork-auth-mode": "dual-token", "x-sdkwork-forbid-credential-headers": false, "x-sdkwork-owner": "sdkwork-payment", "x-sdkwork-api-authority": "sdkwork-payment-app-api", "x-sdkwork-domain": "commerce", "x-sdkwork-resource": "paymentRecords", "x-sdkwork-request-context": "WebRequestContext", "x-sdkwork-api-surface": "app-api", "x-sdkwork-server-request-id": true, "x-sdkwork-permission": "commerce.payments.records.read"
       }
