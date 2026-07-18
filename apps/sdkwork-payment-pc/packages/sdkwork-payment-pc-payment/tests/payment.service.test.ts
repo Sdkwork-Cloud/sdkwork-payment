@@ -138,8 +138,7 @@ describe("sdkwork-payment-pc-payment service", () => {
                 hasNextPage: false,
               },
             },
-            }),
-          },
+          }),
         },
       },
     });
