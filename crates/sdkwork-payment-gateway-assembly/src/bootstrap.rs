@@ -17,6 +17,14 @@ pub async fn assemble_application_router(host: Arc<PaymentServiceHost>) -> Appli
     ApplicationAssembly { router }
 }
 
+pub async fn assemble_backend_business_router(
+    host: Arc<PaymentServiceHost>,
+) -> ApplicationAssembly {
+    ApplicationAssembly {
+        router: sdkwork_routes_payment_backend_api::gateway_mount(host).await,
+    }
+}
+
 /// C17 修复：构造组合的 contract fallback config。
 ///
 /// 合并 app-api 与 backend-api 两个 route manifest 的所有 (method, path) 对，

@@ -35,6 +35,19 @@ pub fn success_item<T: Serialize>(context: Option<&WebRequestContext>, item: T) 
     attach_trace_header((StatusCode::OK, Json(envelope)).into_response(), &trace_id)
 }
 
+/// Build an HTTP 201 create response with the created resource under `data.item`.
+pub fn success_created_item<T: Serialize>(
+    context: Option<&WebRequestContext>,
+    item: T,
+) -> Response {
+    let trace_id = resolve_trace_id(context);
+    let envelope = SdkWorkApiResponse::success(SdkWorkResourceData { item }, trace_id.clone());
+    attach_trace_header(
+        (StatusCode::CREATED, Json(envelope)).into_response(),
+        &trace_id,
+    )
+}
+
 /// 构建 HTTP 200 列表成功响应：`{code:0, data:{items, pageInfo}, traceId}`。
 ///
 /// `total_items` 为满足查询条件的总记录数（来自 `COUNT(*) OVER()` 或独立 count 查询），

@@ -1,4 +1,4 @@
-{
+﻿{
   "openapi": "3.1.2",
   "info": {
     "title": "SDKWork Payment Backend API",
@@ -16,7 +16,7 @@
   ],
   "tags": [
     {
-      "name": "payments",
+      "name": "commerce",
       "description": "Payment admin API resources.",
       "x-sdk-nested-resource-surface": true
     }
@@ -30,7 +30,7 @@
   "paths": {
     "/backend/v3/api/payments/intents": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Payment intents list.",
         "operationId": "payments.intents.list",
         "parameters": [
@@ -66,7 +66,7 @@
     },
     "/backend/v3/api/payments/intents/{paymentIntentId}": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Payment intent retrieve.",
         "operationId": "payments.intents.retrieve",
         "parameters": [
@@ -97,7 +97,7 @@
     },
     "/backend/v3/api/payments/methods": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Payment methods list.",
         "operationId": "payments.methods.list",
         "parameters": [
@@ -129,7 +129,7 @@
         "x-sdkwork-permission": "commerce.payments.methods.read"
       },
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Payment method create.",
         "operationId": "payments.methods.create",
         "parameters": [],
@@ -161,7 +161,7 @@
     },
     "/backend/v3/api/payments/methods/{methodKey}": {
       "patch": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Payment method update.",
         "operationId": "payments.methods.update",
         "parameters": [
@@ -196,7 +196,7 @@
     },
     "/backend/v3/api/payments/provider_accounts": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Provider accounts list.",
         "operationId": "payments.providerAccounts.list",
         "parameters": [
@@ -231,7 +231,7 @@
         "x-sdkwork-permission": "commerce.payments.provider_accounts.read"
       },
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Provider account create.",
         "operationId": "payments.providerAccounts.create",
         "parameters": [],
@@ -263,7 +263,7 @@
     },
     "/backend/v3/api/payments/provider_accounts/{providerAccountId}": {
       "patch": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Provider account update.",
         "operationId": "payments.providerAccounts.update",
         "parameters": [
@@ -298,7 +298,7 @@
     },
     "/backend/v3/api/payments/provider_accounts/{providerAccountId}/test": {
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Provider account credential connectivity test.",
         "description": "Dev config: verifies provider credentials by invoking the lowest-cost PSP API (e.g., Stripe /balance, Alipay sandbox ping, WeChat Pay rate limit query). Updates last_tested_at and last_test_status on the provider account.",
         "operationId": "payments.providerAccounts.test",
@@ -335,7 +335,7 @@
     },
     "/backend/v3/api/payments/provider_accounts/{providerAccountId}/credentials/rotate": {
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Provider account credential rotation.",
         "description": "Dev config: rotates the secret_ref/webhook_secret_ref/certificate_ref pointers for a provider account. Does not revoke the underlying env secret; only updates the pointer used at runtime resolution.",
         "operationId": "payments.providerAccounts.credentials.rotate",
@@ -371,7 +371,7 @@
     },
     "/backend/v3/api/payments/channels": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Payment channels list.",
         "operationId": "payments.channels.list",
         "parameters": [
@@ -405,7 +405,7 @@
         "x-sdkwork-permission": "commerce.payments.channels.read"
       },
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Payment channel create.",
         "operationId": "payments.channels.create",
         "parameters": [],
@@ -437,7 +437,7 @@
     },
     "/backend/v3/api/payments/route_rules": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Route rules list.",
         "operationId": "payments.routeRules.list",
         "parameters": [
@@ -470,7 +470,7 @@
         "x-sdkwork-permission": "commerce.payments.route_rules.read"
       },
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Route rule create.",
         "operationId": "payments.routeRules.create",
         "parameters": [],
@@ -502,7 +502,7 @@
     },
     "/backend/v3/api/payments/route_rules/{routeRuleId}": {
       "patch": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Route rule update.",
         "operationId": "payments.routeRules.update",
         "parameters": [
@@ -535,7 +535,7 @@
         "x-sdkwork-idempotent": true
       },
       "delete": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Route rule delete.",
         "operationId": "payments.routeRules.delete",
         "parameters": [
@@ -567,7 +567,7 @@
     },
     "/backend/v3/api/payments/sub_merchants": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Sub-merchants list (ISV/partner mode only).",
         "description": "Lists sub-merchants under a partner (service provider) provider account. Each sub-merchant maps to Alipay sub_appid, WeChat Pay sub_mch_id, or Stripe connected account id.",
         "operationId": "payments.subMerchants.list",
@@ -602,7 +602,7 @@
         "x-sdkwork-permission": "commerce.payments.sub_merchants.read"
       },
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Sub-merchant create (ISV/partner mode only).",
         "operationId": "payments.subMerchants.create",
         "parameters": [],
@@ -634,7 +634,7 @@
     },
     "/backend/v3/api/payments/sub_merchants/{subMerchantId}": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Sub-merchant retrieve.",
         "operationId": "payments.subMerchants.retrieve",
         "parameters": [
@@ -663,7 +663,7 @@
         "x-sdkwork-permission": "commerce.payments.sub_merchants.read"
       },
       "patch": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Sub-merchant update.",
         "operationId": "payments.subMerchants.update",
         "parameters": [
@@ -696,7 +696,7 @@
         "x-sdkwork-idempotent": true
       },
       "delete": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Sub-merchant delete.",
         "operationId": "payments.subMerchants.delete",
         "parameters": [
@@ -728,7 +728,7 @@
     },
     "/backend/v3/api/payments/certificates": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Certificates list.",
         "description": "Dev config: lists PEM certificate references (Alipay public key, WeChat platform cert, merchant private key) with expiry metadata.",
         "operationId": "payments.certificates.list",
@@ -763,7 +763,7 @@
         "x-sdkwork-permission": "commerce.payments.certificates.read"
       },
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Certificate create (upload/register PEM).",
         "description": "Dev config: registers a PEM certificate by storing its env var name reference (certificate_ref) and parsed expiry. The PEM content itself is stored in env/secrets manager, never in the database.",
         "operationId": "payments.certificates.create",
@@ -796,7 +796,7 @@
     },
     "/backend/v3/api/payments/certificates/{certificateId}": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Certificate retrieve.",
         "operationId": "payments.certificates.retrieve",
         "parameters": [
@@ -825,7 +825,7 @@
         "x-sdkwork-permission": "commerce.payments.certificates.read"
       },
       "delete": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Certificate delete.",
         "operationId": "payments.certificates.delete",
         "parameters": [
@@ -857,7 +857,7 @@
     },
     "/backend/v3/api/payments/attempts": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Payment attempts list.",
         "operationId": "payments.attempts.list",
         "parameters": [
@@ -893,7 +893,7 @@
     },
     "/backend/v3/api/payments/webhook_events": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Webhook events list.",
         "operationId": "payments.webhookEvents.list",
         "parameters": [
@@ -929,7 +929,7 @@
     },
     "/backend/v3/api/payments/webhook_events/{eventId}/replay": {
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Webhook event replay.",
         "description": "Re-applies stored payment attempt status from the webhook event payload. Replays are capped at WEBHOOK_STORED_REPLAY_MAX_RETRIES (5). Returns 409 when limit exceeded, 404 when event missing.",
         "operationId": "payments.webhookEvents.replay",
@@ -964,7 +964,7 @@
     },
     "/backend/v3/api/payments/reconciliation_runs": {
       "get": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Reconciliation runs list.",
         "operationId": "payments.reconciliationRuns.list",
         "parameters": [
@@ -998,7 +998,7 @@
         "x-sdkwork-permission": "commerce.payments.reconciliation_runs.read"
       },
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Reconciliation run create.",
         "operationId": "payments.reconciliationRuns.create",
         "parameters": [],
@@ -1030,7 +1030,7 @@
     },
     "/backend/v3/api/payments/dev/sandbox_trigger": {
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Sandbox event trigger (dev config).",
         "description": "Dev config: simulates a PSP webhook event for local/sandbox integration testing. Only available when the target provider account environment is development or sandbox. Aligned with Stripe CLI `trigger` semantics.",
         "operationId": "payments.dev.sandboxTrigger",
@@ -1064,7 +1064,7 @@
     },
     "/backend/v3/api/payments/dev/webhook_signature_test": {
       "post": {
-        "tags": ["payments"],
+        "tags": ["commerce"],
         "summary": "Webhook signature verification test (dev config).",
         "description": "Dev config: verifies a webhook signature against the configured webhook_secret_ref for a provider account. Accepts the raw payload, signature header, and timestamp; returns whether verification succeeded and diagnostic info. Aligned with Stripe CLI `listen` verify semantics.",
         "operationId": "payments.dev.webhookSignatureTest",
@@ -1193,7 +1193,7 @@
       },
       "SdkWorkPlatformErrorCode": {
         "type": "integer", "format": "int32", "minimum": 40001, "maximum": 79999,
-        "description": "Platform or domain error code per API_SPEC.md §15.3."
+        "description": "Platform or domain error code per API_SPEC.md 搂15.3."
       },
       "ProblemDetail": {
         "type": "object", "additionalProperties": true, "required": ["type", "title", "status", "code", "traceId"],

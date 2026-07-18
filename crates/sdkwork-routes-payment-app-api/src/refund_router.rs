@@ -29,8 +29,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
 use crate::api_response::{
-    map_service_error, not_found, success_command_accepted, success_item, success_list,
-    unauthorized, validation,
+    map_service_error, not_found, success_created_item, success_item, success_list, unauthorized,
+    validation,
 };
 use crate::command_headers::validate_app_write_payload;
 use crate::subject::app_runtime_subject_from_extension;
@@ -475,7 +475,7 @@ async fn create_refund(
     };
 
     match state.store.create_owner_refund(command).await {
-        Ok(refund) => success_command_accepted(ctx, Some(refund.refund_id)),
+        Ok(refund) => success_created_item(ctx, map_refund(refund)),
         Err(error) => refund_system_response(ctx, "refund create failed", error),
     }
 }

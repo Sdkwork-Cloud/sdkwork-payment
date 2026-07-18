@@ -117,6 +117,9 @@ importers:
       '@sdkwork/utils':
         specifier: workspace:*
         version: link:../../../../../sdkwork-utils/packages/sdkwork-utils-typescript
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.7.0(react@19.2.4)
       react:
         specifier: '>=18.2.0 <20.0.0'
         version: 19.2.4
@@ -667,6 +670,9 @@ importers:
 
   apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-admin-core:
     dependencies:
+      '@sdkwork/i18n-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/pc-react/foundation/sdkwork-i18n-pc-react
       '@sdkwork/payment-contracts':
         specifier: workspace:*
         version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-contracts

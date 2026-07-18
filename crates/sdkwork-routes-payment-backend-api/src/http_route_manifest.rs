@@ -1,64 +1,64 @@
-//! C17 修复：payment backend-api 的 HTTP route manifest。
+﻿//! C17 淇锛歱ayment backend-api 鐨?HTTP route manifest銆?
 //!
-//! 遵循 `API_SPEC.md` §4.2.1 与 `WEB_BACKEND_SPEC.md` §4.2/§4.3 的要求，backend-api
-//! route crate `MUST` 导出 `backend_route_manifest` 与 `gateway_route_manifest`，
-//! 并通过 framework contract 类型 `HttpRoute` 声明 manifest，以便：
-//! 1. 框架运行时解析 operationId / rate-limit tier / 公共路径；
-//! 2. 框架自动派生 `ContractFallbackConfig`，为 manifest 内未挂载 handler 的路径
-//!    返回 501 Problem+json、为完全未知路径返回 404 Problem+json；
-//! 3. OpenAPI 物化器生成 owner-only authority 文档。
+//! 閬靛惊 `API_SPEC.md` 搂4.2.1 涓?`WEB_BACKEND_SPEC.md` 搂4.2/搂4.3 鐨勮姹傦紝backend-api
+//! route crate `MUST` 瀵煎嚭 `backend_route_manifest` 涓?`gateway_route_manifest`锛?
+//! 骞堕€氳繃 framework contract 绫诲瀷 `HttpRoute` 澹版槑 manifest锛屼互渚匡細
+//! 1. 妗嗘灦杩愯鏃惰В鏋?operationId / rate-limit tier / 鍏叡璺緞锛?
+//! 2. 妗嗘灦鑷姩娲剧敓 `ContractFallbackConfig`锛屼负 manifest 鍐呮湭鎸傝浇 handler 鐨勮矾寰?
+//!    杩斿洖 501 Problem+json銆佷负瀹屽叏鏈煡璺緞杩斿洖 404 Problem+json锛?
+//! 3. OpenAPI 鐗╁寲鍣ㄧ敓鎴?owner-only authority 鏂囨。銆?
 //!
-//! 所有受保护路由统一使用 `RouteAuth::DualToken`（`API_SPEC.md` §4.2.1 规定受保护
-//! backend-api `MUST` 使用 `dual-token`，agent 路由可用 `agent-token`，payment
-//! backend 暂无 agent 路由）。写操作（POST/PATCH）标记 `idempotent = true`，表示
-//! 该路由接受 `Idempotency-Key` / `Sdkwork-Request-Hash` 命令头并参与幂等仓储层
-//! 去重。DELETE 与 replay action 不标记 idempotent（HTTP DELETE 本身幂等；
-//! replay 是递增 retries 的动作，非幂等）。
+//! 鎵€鏈夊彈淇濇姢璺敱缁熶竴浣跨敤 `RouteAuth::DualToken`锛坄API_SPEC.md` 搂4.2.1 瑙勫畾鍙椾繚鎶?
+//! backend-api `MUST` 浣跨敤 `dual-token`锛宎gent 璺敱鍙敤 `agent-token`锛宲ayment
+//! backend 鏆傛棤 agent 璺敱锛夈€傚啓鎿嶄綔锛圥OST/PATCH锛夋爣璁?`idempotent = true`锛岃〃绀?
+//! 璇ヨ矾鐢辨帴鍙?`Idempotency-Key` / `Sdkwork-Request-Hash` 鍛戒护澶村苟鍙備笌骞傜瓑浠撳偍灞?
+//! 鍘婚噸銆侱ELETE 涓?replay action 涓嶆爣璁?idempotent锛圚TTP DELETE 鏈韩骞傜瓑锛?
+//! replay 鏄€掑 retries 鐨勫姩浣滐紝闈炲箓绛夛級銆?
 
 use sdkwork_web_core::{HttpMethod, HttpRoute, HttpRouteManifest};
 
-/// payment backend-api 路由前缀（`API_SPEC.md` §4.2.1 规定 backend-api `MUST`
-/// 使用 `/backend/v3/api`）。
+/// payment backend-api 璺敱鍓嶇紑锛坄API_SPEC.md` 搂4.2.1 瑙勫畾 backend-api `MUST`
+/// 浣跨敤 `/backend/v3/api`锛夈€?
 pub const BACKEND_API_PREFIX: &str = "/backend/v3/api";
 
-/// payment backend-api 公共路径前缀。仅包含 infra 健康检查路径，业务路径全部受
-/// dual-token 保护。
+/// payment backend-api 鍏叡璺緞鍓嶇紑銆備粎鍖呭惈 infra 鍋ュ悍妫€鏌ヨ矾寰勶紝涓氬姟璺緞鍏ㄩ儴鍙?
+/// dual-token 淇濇姢銆?
 pub fn payment_backend_api_public_path_prefixes() -> Vec<String> {
     sdkwork_web_bootstrap::infra_public_path_prefixes()
 }
 
 const HTTP_ROUTES: &[HttpRoute] = &[
-    // === Payment Intent（查询） ===
+    // === Payment Intent锛堟煡璇級 ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/intents",
-        "payments",
+        "commerce",
         "payments.intents.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/intents/{paymentIntentId}",
-        "payments",
+        "commerce",
         "payments.intents.retrieve",
     ),
     // === Payment Method ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/methods",
-        "payments",
+        "commerce",
         "payments.methods.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/methods",
-        "payments",
+        "commerce",
         "payments.methods.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Patch,
         "/backend/v3/api/payments/methods/{methodKey}",
-        "payments",
+        "commerce",
         "payments.methods.update",
     )
     .with_idempotent(true),
@@ -66,34 +66,48 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/provider_accounts",
-        "payments",
+        "commerce",
         "payments.providerAccounts.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/provider_accounts",
-        "payments",
+        "commerce",
         "payments.providerAccounts.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Patch,
         "/backend/v3/api/payments/provider_accounts/{providerAccountId}",
-        "payments",
+        "commerce",
         "payments.providerAccounts.update",
+    )
+    .with_idempotent(true),
+    HttpRoute::dual_token(
+        HttpMethod::Post,
+        "/backend/v3/api/payments/provider_accounts/{providerAccountId}/test",
+        "commerce",
+        "payments.providerAccounts.test",
+    )
+    .with_idempotent(true),
+    HttpRoute::dual_token(
+        HttpMethod::Post,
+        "/backend/v3/api/payments/provider_accounts/{providerAccountId}/credentials/rotate",
+        "commerce",
+        "payments.providerAccounts.credentials.rotate",
     )
     .with_idempotent(true),
     // === Channel ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/channels",
-        "payments",
+        "commerce",
         "payments.channels.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/channels",
-        "payments",
+        "commerce",
         "payments.channels.create",
     )
     .with_idempotent(true),
@@ -101,64 +115,138 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/route_rules",
-        "payments",
+        "commerce",
         "payments.routeRules.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/route_rules",
-        "payments",
+        "commerce",
         "payments.routeRules.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Patch,
         "/backend/v3/api/payments/route_rules/{routeRuleId}",
-        "payments",
+        "commerce",
         "payments.routeRules.update",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Delete,
         "/backend/v3/api/payments/route_rules/{routeRuleId}",
-        "payments",
+        "commerce",
         "payments.routeRules.delete",
+    ),
+    // === Partner sub-merchants ===
+    HttpRoute::dual_token(
+        HttpMethod::Get,
+        "/backend/v3/api/payments/sub_merchants",
+        "commerce",
+        "payments.subMerchants.list",
+    ),
+    HttpRoute::dual_token(
+        HttpMethod::Post,
+        "/backend/v3/api/payments/sub_merchants",
+        "commerce",
+        "payments.subMerchants.create",
+    )
+    .with_idempotent(true),
+    HttpRoute::dual_token(
+        HttpMethod::Get,
+        "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
+        "commerce",
+        "payments.subMerchants.retrieve",
+    ),
+    HttpRoute::dual_token(
+        HttpMethod::Patch,
+        "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
+        "commerce",
+        "payments.subMerchants.update",
+    )
+    .with_idempotent(true),
+    HttpRoute::dual_token(
+        HttpMethod::Delete,
+        "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
+        "commerce",
+        "payments.subMerchants.delete",
+    ),
+    // === Provider certificates ===
+    HttpRoute::dual_token(
+        HttpMethod::Get,
+        "/backend/v3/api/payments/certificates",
+        "commerce",
+        "payments.certificates.list",
+    ),
+    HttpRoute::dual_token(
+        HttpMethod::Post,
+        "/backend/v3/api/payments/certificates",
+        "commerce",
+        "payments.certificates.create",
+    )
+    .with_idempotent(true),
+    HttpRoute::dual_token(
+        HttpMethod::Get,
+        "/backend/v3/api/payments/certificates/{certificateId}",
+        "commerce",
+        "payments.certificates.retrieve",
+    ),
+    HttpRoute::dual_token(
+        HttpMethod::Delete,
+        "/backend/v3/api/payments/certificates/{certificateId}",
+        "commerce",
+        "payments.certificates.delete",
     ),
     // === Attempt / Webhook / Reconciliation ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/attempts",
-        "payments",
+        "commerce",
         "payments.attempts.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/webhook_events",
-        "payments",
+        "commerce",
         "payments.webhookEvents.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/webhook_events/{eventId}/replay",
-        "payments",
+        "commerce",
         "payments.webhookEvents.replay",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/reconciliation_runs",
-        "payments",
+        "commerce",
         "payments.reconciliationRuns.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/reconciliation_runs",
-        "payments",
+        "commerce",
         "payments.reconciliationRuns.create",
+    )
+    .with_idempotent(true),
+    // === Development diagnostics ===
+    HttpRoute::dual_token(
+        HttpMethod::Post,
+        "/backend/v3/api/payments/dev/sandbox_trigger",
+        "commerce",
+        "payments.dev.sandboxTrigger",
+    )
+    .with_idempotent(true),
+    HttpRoute::dual_token(
+        HttpMethod::Post,
+        "/backend/v3/api/payments/dev/webhook_signature_test",
+        "commerce",
+        "payments.dev.webhookSignatureTest",
     )
     .with_idempotent(true),
 ];
 
-/// 构造 payment backend-api 的 route manifest。
+/// 鏋勯€?payment backend-api 鐨?route manifest銆?
 pub fn backend_route_manifest() -> HttpRouteManifest {
     HttpRouteManifest::new(HTTP_ROUTES)
 }
@@ -222,7 +310,7 @@ mod tests {
             .filter(|route| route.idempotent)
             .map(|route| route.operation_id)
             .collect();
-        // 核心写操作必须标记幂等
+        // 鏍稿績鍐欐搷浣滃繀椤绘爣璁板箓绛?
         assert!(idempotent_write_routes.contains(&"payments.methods.create"));
         assert!(idempotent_write_routes.contains(&"payments.methods.update"));
         assert!(idempotent_write_routes.contains(&"payments.providerAccounts.create"));
@@ -241,7 +329,7 @@ mod tests {
             .filter(|route| !route.idempotent)
             .map(|route| route.operation_id)
             .collect();
-        // DELETE 本身幂等，replay 是递增 retries 的动作，均不使用幂等头
+        // DELETE 鏈韩骞傜瓑锛宺eplay 鏄€掑 retries 鐨勫姩浣滐紝鍧囦笉浣跨敤骞傜瓑澶?
         assert!(non_idempotent.contains(&"payments.routeRules.delete"));
         assert!(non_idempotent.contains(&"payments.webhookEvents.replay"));
     }

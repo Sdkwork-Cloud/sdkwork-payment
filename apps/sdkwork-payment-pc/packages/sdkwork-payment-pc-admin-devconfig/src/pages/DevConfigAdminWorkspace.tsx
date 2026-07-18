@@ -17,12 +17,18 @@
 
 import * as React from "react";
 import {
-  SettingsSection,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "@sdkwork/ui-pc-react";
+import {
+  PaymentAdminI18nBoundary,
+  PaymentAdminTabsContent,
+  PaymentAdminTabsList,
+  PaymentAdminTabsTrigger,
+  PaymentAdminWorkspace,
+} from "@sdkwork/payment-pc-admin-core";
 import { CertificateManager } from "../components/CertificateManager";
 import { EnvironmentSwitcher } from "../components/EnvironmentSwitcher";
 import { IntegrationLogs } from "../components/IntegrationLogs";
@@ -130,42 +136,22 @@ export function PaymentDevConfigAdminWorkspace(
   }
 
   return (
-    <section className="space-y-6" data-slot="payment-devconfig-admin-workspace">
-      <header className="space-y-2">
-        <h2 className="text-lg font-semibold text-[var(--sdk-color-text)]">
-          {props.title ?? "Payment development configuration"}
-        </h2>
-        <p className="text-sm text-[var(--sdk-color-text-secondary)]">
-          {props.description ??
-            "Centralized developer surface for provider credentials, webhook debugging, certificate management, and integration logs. Aligned with Stripe CLI, Alipay open platform, and WeChat Pay dev tools."}
-        </p>
-      </header>
-
-      {state.lastError ? (
-        <div
-          role="alert"
-          className="rounded-md border border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] p-3 text-sm text-[var(--sdk-color-text-error)]"
-        >
-          {state.lastError}
-        </div>
-      ) : null}
-
-      <Tabs
-        value={tab}
-        onValueChange={(value) => setTab(value as TabKind)}
+    <PaymentAdminI18nBoundary>
+      <PaymentAdminWorkspace
+        data-slot="payment-devconfig-admin-workspace"
+        description={props.description}
+        error={state.lastError}
+        title={props.title ?? "Payment integration configuration"}
       >
-        <TabsList>
-          <TabsTrigger value="environment">Environment &amp; Test</TabsTrigger>
-          <TabsTrigger value="webhook">Webhook Debugger</TabsTrigger>
-          <TabsTrigger value="certificates">Certificates</TabsTrigger>
-          <TabsTrigger value="logs">Integration Logs</TabsTrigger>
-        </TabsList>
+        <Tabs value={tab} onValueChange={(value) => setTab(value as TabKind)}>
+          <PaymentAdminTabsList aria-label="Payment developer tool sections">
+            <PaymentAdminTabsTrigger value="environment">Environment &amp; Test</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="webhook">Webhook Debugger</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="certificates">Certificates</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="logs">Integration Logs</PaymentAdminTabsTrigger>
+          </PaymentAdminTabsList>
 
-        <TabsContent value="environment">
-          <SettingsSection
-            title="Environment switching & credential test"
-            description="Switch provider account environments (development / sandbox / production) and verify connectivity via the lowest-cost PSP API. Production transitions require elevated backend permission."
-          >
+          <PaymentAdminTabsContent value="environment">
             <EnvironmentSwitcher
               accounts={state.providerAccounts}
               pageInfo={state.listPageInfo?.providerAccounts}
@@ -175,14 +161,9 @@ export function PaymentDevConfigAdminWorkspace(
               onTest={handleTestProviderAccount}
               onLoadMore={() => void controller.loadMoreProviderAccounts()}
             />
-          </SettingsSection>
-        </TabsContent>
+          </PaymentAdminTabsContent>
 
-        <TabsContent value="webhook">
-          <SettingsSection
-            title="Webhook debugger"
-            description="Simulate PSP webhook events for local/sandbox integration and verify webhook signatures against the configured webhook_secret_ref. Mirrors Stripe CLI trigger + listen."
-          >
+          <PaymentAdminTabsContent value="webhook">
             <WebhookDebugger
               accounts={state.providerAccounts}
               recentEvents={state.webhookEvents}
@@ -192,14 +173,9 @@ export function PaymentDevConfigAdminWorkspace(
               onSandboxTrigger={handleSandboxTrigger}
               onSignatureTest={handleSignatureTest}
             />
-          </SettingsSection>
-        </TabsContent>
+          </PaymentAdminTabsContent>
 
-        <TabsContent value="certificates">
-          <SettingsSection
-            title="Certificate management"
-            description="PEM certificate reference registry. PEM content is never stored; only the env var reference and parsed metadata (subject CN, serial, fingerprint, validity) are persisted."
-          >
+          <PaymentAdminTabsContent value="certificates">
             <CertificateManager
               certificates={state.certificates}
               pageInfo={state.listPageInfo?.certificates}
@@ -208,14 +184,9 @@ export function PaymentDevConfigAdminWorkspace(
               onDelete={handleDeleteCertificate}
               onLoadMore={() => void controller.loadMoreCertificates()}
             />
-          </SettingsSection>
-        </TabsContent>
+          </PaymentAdminTabsContent>
 
-        <TabsContent value="logs">
-          <SettingsSection
-            title="Integration logs"
-            description="Full webhook event timeline with replay capability. Filters are pushed to the server (PAGINATION_SPEC.md §2). Replay is capped at 5 retries per event."
-          >
+          <PaymentAdminTabsContent value="logs">
             <IntegrationLogs
               events={state.webhookEvents}
               pageInfo={state.listPageInfo?.webhookEvents}
@@ -225,14 +196,12 @@ export function PaymentDevConfigAdminWorkspace(
               onLoadMore={() => void controller.loadMoreWebhookEvents()}
               onReplay={handleReplayWebhook}
             />
-          </SettingsSection>
-        </TabsContent>
-      </Tabs>
-    </section>
+          </PaymentAdminTabsContent>
+        </Tabs>
+      </PaymentAdminWorkspace>
+    </PaymentAdminI18nBoundary>
   );
 }
 
 // Re-export commonly used Tabs sub-components for host apps that want to wrap them.
 export { Tabs as PaymentDevConfigAdminTabs, TabsList, TabsTrigger, TabsContent };
-
-

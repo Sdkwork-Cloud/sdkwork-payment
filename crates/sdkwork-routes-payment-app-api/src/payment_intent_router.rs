@@ -25,7 +25,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
 use crate::api_response::{
-    map_service_error, not_found, success_command_accepted, success_item, unauthorized, validation,
+    map_service_error, not_found, success_command_accepted, success_created_item, success_item,
+    unauthorized, validation,
 };
 use crate::command_headers::{validate_app_write_payload, write_payload_with_route_param};
 use crate::subject::app_runtime_subject_from_extension;
@@ -93,6 +94,20 @@ struct PaymentIntentResponse {
     amount: String,
     currency_code: String,
     status: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaymentAttemptResponse {
+    attempt_id: String,
+    payment_intent_id: String,
+    order_id: String,
+    out_trade_no: String,
+    payment_method: String,
+    provider_code: String,
+    amount: String,
+    status: String,
+    payment_params: std::collections::BTreeMap<String, String>,
 }
 
 impl CommercePaymentIntentStore for SqliteCommercePaymentIntentStore {
@@ -352,7 +367,7 @@ async fn create_payment_intent(
     };
 
     match state.store.create_owner_payment_intent(command).await {
-        Ok(intent) => success_command_accepted(ctx, Some(intent.payment_intent_id)),
+        Ok(intent) => success_created_item(ctx, map_payment_intent(intent)),
         Err(error) => payment_intent_system_response(ctx, "payment intent create failed", error),
     }
 }
@@ -469,7 +484,20 @@ async fn create_payment_attempt(
     };
 
     match state.store.create_owner_payment_attempt(command).await {
-        Ok(outcome) => success_command_accepted(ctx, Some(outcome.attempt_id)),
+        Ok(outcome) => success_created_item(
+            ctx,
+            PaymentAttemptResponse {
+                attempt_id: outcome.attempt_id,
+                payment_intent_id: outcome.payment_intent_id,
+                order_id: outcome.order_id,
+                out_trade_no: outcome.out_trade_no,
+                payment_method: outcome.payment_method,
+                provider_code: outcome.provider_code,
+                amount: outcome.amount.as_str().to_owned(),
+                status: outcome.status,
+                payment_params: outcome.payment_params,
+            },
+        ),
         Err(error) => payment_intent_system_response(ctx, "payment attempt create failed", error),
     }
 }

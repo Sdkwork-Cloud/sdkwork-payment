@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
 
 use crate::api_response::{
-    conflict, map_service_error, not_found, success_command_accepted, success_list, unauthorized,
-    validation,
+    conflict, map_service_error, not_found, success_command_accepted, success_created_item,
+    success_item, success_list, success_no_content, unauthorized, validation,
 };
 use crate::command_headers::{
     validate_write_payload, AppWriteCommandHeaders, WriteCommandHeaderError,
@@ -1620,7 +1620,7 @@ async fn create_method(
     };
 
     match state.store.upsert_payment_method(command).await {
-        Ok(view) => success_command_accepted(ctx, Some(view.id)),
+        Ok(view) => success_created_item(ctx, map_method(view)),
         Err(error) => backend_payment_error_response(ctx, "payment method upsert failed", error),
     }
 }
@@ -1664,7 +1664,7 @@ async fn update_method(
     };
 
     match state.store.upsert_payment_method(command).await {
-        Ok(view) => success_command_accepted(ctx, Some(view.id)),
+        Ok(view) => success_item(ctx, map_method(view)),
         Err(error) => backend_payment_error_response(ctx, "payment method upsert failed", error),
     }
 }
@@ -1738,6 +1738,7 @@ async fn upsert_provider_account_inner(
     provider_account_id: Option<String>,
     body: UpsertProviderAccountBody,
 ) -> Response {
+    let is_create = provider_account_id.is_none();
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(ctx, message),
@@ -1803,12 +1804,8 @@ async fn upsert_provider_account_inner(
         status: body.status.unwrap_or_else(|| "active".to_owned()),
     };
     match state.store.upsert_provider_account(payload).await {
-        Ok(item) => success_command_accepted(
-            ctx,
-            item.get("id")
-                .and_then(|value| value.as_str())
-                .map(str::to_owned),
-        ),
+        Ok(item) if is_create => success_created_item(ctx, item),
+        Ok(item) => success_item(ctx, item),
         Err(error) => {
             backend_payment_error_response(ctx, "payment provider account upsert failed", error)
         }
@@ -1904,12 +1901,7 @@ async fn create_channel(
         priority: body.priority.unwrap_or(0),
     };
     match state.store.upsert_channel(payload).await {
-        Ok(item) => success_command_accepted(
-            ctx,
-            item.get("id")
-                .and_then(|value| value.as_str())
-                .map(str::to_owned),
-        ),
+        Ok(item) => success_created_item(ctx, item),
         Err(error) => backend_payment_error_response(ctx, "payment channel upsert failed", error),
     }
 }
@@ -1981,6 +1973,7 @@ async fn upsert_route_rule_inner(
     route_rule_id: Option<String>,
     body: UpsertRouteRuleBody,
 ) -> Response {
+    let is_create = route_rule_id.is_none();
     let subject = match backend_runtime_subject_from_extension(runtime_context) {
         Ok(subject) => subject,
         Err(message) => return unauthorized_response(ctx, message),
@@ -2029,12 +2022,8 @@ async fn upsert_route_rule_inner(
         ends_at: body.ends_at,
     };
     match state.store.upsert_route_rule(payload).await {
-        Ok(item) => success_command_accepted(
-            ctx,
-            item.get("id")
-                .and_then(|value| value.as_str())
-                .map(str::to_owned),
-        ),
+        Ok(item) if is_create => success_created_item(ctx, item),
+        Ok(item) => success_item(ctx, item),
         Err(error) => {
             backend_payment_error_response(ctx, "payment route rule upsert failed", error)
         }
@@ -2057,7 +2046,7 @@ async fn delete_route_rule(
         organization_id: subject.organization_id,
     };
     match state.store.delete_route_rule(scope, route_rule_id).await {
-        Ok(()) => success_command_accepted(ctx, None),
+        Ok(()) => success_no_content(ctx),
         Err(error) => {
             backend_payment_error_response(ctx, "payment route rule delete failed", error)
         }
@@ -2272,12 +2261,7 @@ async fn create_reconciliation_run(
         idempotency_key: write_headers.idempotency_key,
     };
     match state.store.create_reconciliation_run(payload).await {
-        Ok(item) => success_command_accepted(
-            ctx,
-            item.get("id")
-                .and_then(|value| value.as_str())
-                .map(str::to_owned),
-        ),
+        Ok(item) => success_created_item(ctx, item),
         Err(error) => {
             backend_payment_error_response(ctx, "payment reconciliation run create failed", error)
         }

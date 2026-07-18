@@ -15,12 +15,18 @@
 
 import * as React from "react";
 import {
-  SettingsSection,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "@sdkwork/ui-pc-react";
+import {
+  PaymentAdminI18nBoundary,
+  PaymentAdminTabsContent,
+  PaymentAdminTabsList,
+  PaymentAdminTabsTrigger,
+  PaymentAdminWorkspace,
+} from "@sdkwork/payment-pc-admin-core";
 import { ChannelManager } from "../components/ChannelManager";
 import { PaymentMethodManager } from "../components/PaymentMethodManager";
 import { RouteRuleManager } from "../components/RouteRuleManager";
@@ -105,42 +111,21 @@ export function PaymentChannelAdminWorkspace(
   }
 
   return (
-    <section className="space-y-6" data-slot="payment-channel-admin-workspace">
-      <header className="space-y-2">
-        <h2 className="text-lg font-semibold text-[var(--sdk-color-text)]">
-          {props.title ?? "Payment channels & routing"}
-        </h2>
-        <p className="text-sm text-[var(--sdk-color-text-secondary)]">
-          {props.description ??
-            "Configure payment methods, channels, and routing rules. A channel bridges a method with a provider account; routing rules match payment requests to channels."}
-        </p>
-      </header>
-
-      {state.lastError ? (
-        <div
-          role="alert"
-          className="rounded-md border border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] p-3 text-sm text-[var(--sdk-color-text-error)]"
-        >
-          {state.lastError}
-        </div>
-      ) : null}
-
-      <Tabs
-        value={tab}
-        onValueChange={(value) => setTab(value as TabKind)}
+    <PaymentAdminI18nBoundary>
+      <PaymentAdminWorkspace
+        data-slot="payment-channel-admin-workspace"
+        description={props.description}
+        error={state.lastError}
+        title={props.title ?? "Payment methods, channels & routing"}
       >
-        <TabsList>
-          <TabsTrigger value="methods">Payment Methods</TabsTrigger>
-          <TabsTrigger value="channels">Channels</TabsTrigger>
-          <TabsTrigger value="rules">Routing Rules</TabsTrigger>
-        </TabsList>
+        <Tabs value={tab} onValueChange={(value) => setTab(value as TabKind)}>
+          <PaymentAdminTabsList aria-label="Payment channel sections">
+            <PaymentAdminTabsTrigger value="methods">Payment methods</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="channels">Channels</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="rules">Route rules</PaymentAdminTabsTrigger>
+          </PaymentAdminTabsList>
 
-        <TabsContent value="methods">
-          <SettingsSection
-            title="Payment methods"
-            description="The 'what' of payments — user-facing payment instruments (alipay_wap, wechat_h5, stripe_card, etc.). Each method is bridged to a provider account via a channel."
-            actions={null}
-          >
+          <PaymentAdminTabsContent value="methods">
             <PaymentMethodManager
               methods={state.methods}
               pageInfo={state.listPageInfo?.methods}
@@ -153,15 +138,9 @@ export function PaymentChannelAdminWorkspace(
               onUpdate={handleUpdateMethod}
               onLoadMore={() => void controller.loadMoreMethods()}
             />
-          </SettingsSection>
-        </TabsContent>
+          </PaymentAdminTabsContent>
 
-        <TabsContent value="channels">
-          <SettingsSection
-            title="Payment channels"
-            description="The 'how' of payments — bridges a payment method with a provider account under a specific scene (app / web / mini_program / api). Channels cannot be edited or deleted via the API — set status carefully at creation."
-            actions={null}
-          >
+          <PaymentAdminTabsContent value="channels">
             <ChannelManager
               channels={state.channels}
               methods={state.methods}
@@ -172,15 +151,9 @@ export function PaymentChannelAdminWorkspace(
               onCreate={handleCreateChannel}
               onLoadMore={() => void controller.loadMoreChannels()}
             />
-          </SettingsSection>
-        </TabsContent>
+          </PaymentAdminTabsContent>
 
-        <TabsContent value="rules">
-          <SettingsSection
-            title="Routing rules"
-            description="The 'traffic controller' — match payment requests to channels based on conditions (purchase type, country, currency, amount range, user segment, risk level). Lower priority numbers win."
-            actions={null}
-          >
+          <PaymentAdminTabsContent value="rules">
             <RouteRuleManager
               routeRules={state.routeRules}
               channels={state.channels}
@@ -194,10 +167,10 @@ export function PaymentChannelAdminWorkspace(
               onDelete={handleDeleteRouteRule}
               onLoadMore={() => void controller.loadMoreRouteRules()}
             />
-          </SettingsSection>
-        </TabsContent>
-      </Tabs>
-    </section>
+          </PaymentAdminTabsContent>
+        </Tabs>
+      </PaymentAdminWorkspace>
+    </PaymentAdminI18nBoundary>
   );
 }
 

@@ -16,12 +16,18 @@
 
 import * as React from "react";
 import {
-  SettingsSection,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "@sdkwork/ui-pc-react";
+import {
+  PaymentAdminI18nBoundary,
+  PaymentAdminTabsContent,
+  PaymentAdminTabsList,
+  PaymentAdminTabsTrigger,
+  PaymentAdminWorkspace,
+} from "@sdkwork/payment-pc-admin-core";
 import { AttemptMonitor } from "../components/AttemptMonitor";
 import { IntentMonitor } from "../components/IntentMonitor";
 import { ReconciliationMonitor } from "../components/ReconciliationMonitor";
@@ -103,40 +109,22 @@ export function PaymentMonitorAdminWorkspace(
   }
 
   return (
-    <section className="space-y-6" data-slot="payment-monitor-admin-workspace">
-      <header className="space-y-2">
-        <h2 className="text-lg font-semibold text-[var(--sdk-color-text)]">
-          {props.title ?? "Payment operations monitor"}
-        </h2>
-        <p className="text-sm text-[var(--sdk-color-text-secondary)]">
-          {props.description ??
-            "Monitor payment intents, attempts, webhook events, and reconciliation runs. Investigate failures, replay stuck webhooks, and trigger reconciliation cycles."}
-        </p>
-      </header>
+    <PaymentAdminI18nBoundary>
+      <PaymentAdminWorkspace
+        data-slot="payment-monitor-admin-workspace"
+        description={props.description}
+        error={state.lastError}
+        title={props.title ?? "Payment operations monitor"}
+      >
+        <Tabs value={tab} onValueChange={(value) => setTab(value as TabKind)}>
+          <PaymentAdminTabsList aria-label="Payment operation sections">
+            <PaymentAdminTabsTrigger value="intents">Intents</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="attempts">Attempts</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="webhooks">Webhook events</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="reconciliation">Reconciliation</PaymentAdminTabsTrigger>
+          </PaymentAdminTabsList>
 
-      {state.lastError ? (
-        <div
-          role="alert"
-          className="rounded-md border border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] p-3 text-sm text-[var(--sdk-color-text-error)]"
-        >
-          {state.lastError}
-        </div>
-      ) : null}
-
-      <Tabs value={tab} onValueChange={(value) => setTab(value as TabKind)}>
-        <TabsList>
-          <TabsTrigger value="intents">Intents</TabsTrigger>
-          <TabsTrigger value="attempts">Attempts</TabsTrigger>
-          <TabsTrigger value="webhooks">Webhook Events</TabsTrigger>
-          <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="intents">
-          <SettingsSection
-            title="Payment intents"
-            description="The 'why' of a payment — the user-facing payment intention tied to an order. Click an intent to view its attempts and metadata."
-            actions={null}
-          >
+          <PaymentAdminTabsContent value="intents">
             <IntentMonitor
               intents={state.intents}
               pageInfo={state.listPageInfo?.intents}
@@ -146,15 +134,9 @@ export function PaymentMonitorAdminWorkspace(
               onLoadMore={() => void controller.loadMoreIntents()}
               onSelect={handleSelectIntent}
             />
-          </SettingsSection>
-        </TabsContent>
+          </PaymentAdminTabsContent>
 
-        <TabsContent value="attempts">
-          <SettingsSection
-            title="Payment attempts"
-            description="The 'how' of a payment — PSP-facing execution records. Each intent may produce multiple attempts (retries, provider routing)."
-            actions={null}
-          >
+          <PaymentAdminTabsContent value="attempts">
             <AttemptMonitor
               attempts={state.attempts}
               pageInfo={state.listPageInfo?.attempts}
@@ -162,15 +144,9 @@ export function PaymentMonitorAdminWorkspace(
               onApplyFilter={handleApplyAttemptFilter}
               onLoadMore={() => void controller.loadMoreAttempts()}
             />
-          </SettingsSection>
-        </TabsContent>
+          </PaymentAdminTabsContent>
 
-        <TabsContent value="webhooks">
-          <SettingsSection
-            title="Webhook events"
-            description="Inbound event stream from PSPs. Replay stuck or failed events (up to 5 retries). Events marked 'dead' have exhausted retry limits."
-            actions={null}
-          >
+          <PaymentAdminTabsContent value="webhooks">
             <WebhookEventMonitor
               events={state.webhookEvents}
               pageInfo={state.listPageInfo?.webhookEvents}
@@ -181,15 +157,9 @@ export function PaymentMonitorAdminWorkspace(
               onLoadMore={() => void controller.loadMoreWebhookEvents()}
               onReplay={handleReplay}
             />
-          </SettingsSection>
-        </TabsContent>
+          </PaymentAdminTabsContent>
 
-        <TabsContent value="reconciliation">
-          <SettingsSection
-            title="Reconciliation runs"
-            description="Settlement matching cycles — compare local records with PSP settlement reports. Create manual runs or track scheduled ones."
-            actions={null}
-          >
+          <PaymentAdminTabsContent value="reconciliation">
             <ReconciliationMonitor
               runs={state.reconciliationRuns}
               pageInfo={state.listPageInfo?.reconciliationRuns}
@@ -201,10 +171,10 @@ export function PaymentMonitorAdminWorkspace(
               onLoadMore={() => void controller.loadMoreReconciliationRuns()}
               onCreate={handleCreateReconciliationRun}
             />
-          </SettingsSection>
-        </TabsContent>
-      </Tabs>
-    </section>
+          </PaymentAdminTabsContent>
+        </Tabs>
+      </PaymentAdminWorkspace>
+    </PaymentAdminI18nBoundary>
   );
 }
 

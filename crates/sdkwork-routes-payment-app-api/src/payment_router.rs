@@ -36,8 +36,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, SqlitePool};
 
 use crate::api_response::{
-    map_service_error, not_found, success_command_accepted, success_item, success_list,
-    unauthorized, validation,
+    map_service_error, not_found, success_command_accepted, success_created_item, success_item,
+    success_list, unauthorized, validation,
 };
 use crate::command_headers::{validate_app_write_payload, write_payload_with_route_param};
 use crate::subject::app_runtime_subject_from_extension;
@@ -105,12 +105,6 @@ pub(crate) enum PaymentCheckoutDeps {
 pub(crate) struct AppPaymentState {
     store: Arc<dyn CommercePaymentStore>,
     checkout: Option<PaymentCheckoutDeps>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OrderPaymentsQueryParams {
-    page: Option<i64>,
-    page_size: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -373,9 +367,9 @@ pub fn build_app_payment_router(store: Arc<dyn CommercePaymentStore>) -> Router 
 
 pub(crate) fn build_app_payment_router_with_options(
     state: AppPaymentState,
-    options: PaymentAppRouterMountOptions,
+    _options: PaymentAppRouterMountOptions,
 ) -> Router {
-    let mut router = Router::new()
+    Router::new()
         .route("/app/v3/api/payments/methods", get(list_payment_methods))
         .route("/app/v3/api/payments/records", get(list_payment_records))
         .route(
@@ -387,7 +381,7 @@ pub(crate) fn build_app_payment_router_with_options(
             get(retrieve_payment_attempt),
         )
         .route(
-            "/app/v3/api/payments/statistics",
+            "/app/v3/api/payments/statistics/summary",
             get(fetch_payment_statistics),
         )
         .route(
@@ -403,23 +397,12 @@ pub(crate) fn build_app_payment_router_with_options(
             get(retrieve_payment_status_by_out_trade_no),
         )
         .route("/app/v3/api/payments", post(create_payment))
-        .route(
-            "/app/v3/api/payments/reconciliations",
-            post(reconcile_payment),
-        )
+        .route("/app/v3/api/payments:reconcile", post(reconcile_payment))
         .route(
             "/app/v3/api/payments/{paymentId}/close",
             post(close_payment_record),
-        );
-
-    if options.include_order_payments_list {
-        router = router.route(
-            "/app/v3/api/orders/{orderId}/payments",
-            get(list_order_payments),
-        );
-    }
-
-    router.with_state(state)
+        )
+        .with_state(state)
 }
 
 struct CompositeCommercePaymentStore {
@@ -986,44 +969,6 @@ async fn list_payment_records(
     }
 }
 
-async fn list_order_payments(
-    State(state): State<AppPaymentState>,
-    runtime_context: Option<Extension<IamAppContext>>,
-    request_context: Option<Extension<WebRequestContext>>,
-    Path(order_id): Path<String>,
-    Query(params): Query<OrderPaymentsQueryParams>,
-) -> Response {
-    let ctx = request_context.as_ref().map(|Extension(value)| value);
-    let subject = match app_runtime_subject_from_extension(runtime_context) {
-        Ok(subject) => subject,
-        Err(message) => return unauthorized(ctx, message),
-    };
-    let page_params = OffsetListPageParams::parse(params.page, params.page_size);
-    let query = match PaymentRecordOrderListQuery::new(
-        &subject.tenant_id,
-        subject.organization_id.as_deref(),
-        &subject.user_id,
-        &order_id,
-    ) {
-        Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
-        Err(error) => return validation(ctx, error.message()),
-    };
-
-    match state.store.list_payment_records_by_order(query).await {
-        Ok(page) => {
-            let items = page
-                .items
-                .into_iter()
-                .map(map_payment_record)
-                .collect::<Vec<_>>();
-            success_list(ctx, items, page.total_items, page_params)
-        }
-        Err(error) => {
-            payment_system_response(ctx, "order payment read model is unavailable", error)
-        }
-    }
-}
-
 async fn retrieve_payment_record(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1382,7 +1327,7 @@ async fn create_payment(
     };
 
     match state.store.pay_owner_order(command).await {
-        Ok(outcome) => success_command_accepted(ctx, Some(outcome.payment_id)),
+        Ok(outcome) => success_created_item(ctx, map_checkout_from_outcome(outcome)),
         Err(error) => payment_system_response(ctx, "payment create command failed", error),
     }
 }

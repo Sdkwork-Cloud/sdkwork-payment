@@ -17,14 +17,20 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  SettingsSection,
   Switch,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "@sdkwork/ui-pc-react";
-import { AdminFieldLabel } from "@sdkwork/payment-pc-admin-core";
+import {
+  AdminFieldLabel,
+  PaymentAdminI18nBoundary,
+  PaymentAdminTabsContent,
+  PaymentAdminTabsList,
+  PaymentAdminTabsTrigger,
+  PaymentAdminWorkspace,
+} from "@sdkwork/payment-pc-admin-core";
 import { ProviderAccountForm } from "../components/ProviderAccountForm";
 import { ProviderAccountList } from "../components/ProviderAccountList";
 import { SubMerchantManager } from "../components/SubMerchantManager";
@@ -143,75 +149,46 @@ export function PaymentProviderAdminWorkspace(
   }
 
   return (
-    <section className="space-y-6" data-slot="payment-provider-admin-workspace">
-      <header className="space-y-2">
-        <h2 className="text-lg font-semibold text-[var(--sdk-color-text)]">
-          {props.title ?? "Payment provider administration"}
-        </h2>
-        <p className="text-sm text-[var(--sdk-color-text-secondary)]">
-          {props.description ??
-            "Configure Stripe, Alipay, WeChat Pay, and sandbox provider accounts. Supports direct (merchant self-connection) and partner/ISV (sub-merchant) modes."}
-        </p>
-      </header>
-
-      {state.lastError ? (
-        <div
-          role="alert"
-          className="rounded-md border border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] p-3 text-sm text-[var(--sdk-color-text-error)]"
-        >
-          {state.lastError}
-        </div>
-      ) : null}
-
-      {state.lastTestResult ? (
-        <div
-          role="status"
-          className={
-            "rounded-md border p-3 text-sm " +
-            (state.lastTestResult.ok
-              ? "border-[var(--sdk-color-border-success)] bg-[var(--sdk-color-bg-success-subtle)] text-[var(--sdk-color-text-success)]"
-              : "border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] text-[var(--sdk-color-text-error)]")
-          }
-        >
-          <div className="font-medium">
-            {state.lastTestResult.ok ? "Credentials verified" : "Credential test failed"}
-          </div>
-          <div className="mt-1 text-xs">
-            Provider: {state.lastTestResult.providerCode} · Environment:{" "}
-            {state.lastTestResult.environment}
-            {typeof state.lastTestResult.pspResponseTimeMs === "number"
-              ? ` · Latency: ${state.lastTestResult.pspResponseTimeMs}ms`
-              : ""}
-            {state.lastTestResult.diagnostic ? ` · ${state.lastTestResult.diagnostic}` : ""}
-          </div>
-        </div>
-      ) : null}
-
-      <Tabs
-        value={tab}
-        onValueChange={(value) => setTab(value as "accounts" | "submerchants")}
+    <PaymentAdminI18nBoundary>
+      <PaymentAdminWorkspace
+        data-slot="payment-provider-admin-workspace"
+        description={props.description}
+        error={state.lastError}
+        title={props.title ?? "Provider accounts & sub-merchants"}
       >
-        <TabsList>
-          <TabsTrigger value="accounts">Provider Accounts</TabsTrigger>
-          <TabsTrigger value="submerchants">Sub-Merchants</TabsTrigger>
-        </TabsList>
-        <TabsContent value="accounts">
-          <SettingsSection
-            title="Provider Accounts"
-            description="Manage PSP credentials, environment, and capabilities per provider account. Secrets are referenced by env var name only."
-            actions={
-              props.capabilities.canCreateProviderAccount ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => setDialog({ kind: "create" })}
-                  disabled={state.status === "saving" || state.status === "loading"}
-                >
-                  Create provider account
-                </Button>
-              ) : null
+        {state.lastTestResult ? (
+          <div
+            role="status"
+            className={
+              "border-l-2 px-3 py-2 text-sm " +
+              (state.lastTestResult.ok
+                ? "border-[var(--sdk-color-border-success)] bg-[var(--sdk-color-bg-success-subtle)] text-[var(--sdk-color-text-success)]"
+                : "border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] text-[var(--sdk-color-text-error)]")
             }
           >
+            <div className="font-medium">
+              {state.lastTestResult.ok ? "Credentials verified" : "Credential test failed"}
+            </div>
+            <div className="mt-1 text-xs">
+              Provider: {state.lastTestResult.providerCode} · Environment:{" "}
+              {state.lastTestResult.environment}
+              {typeof state.lastTestResult.pspResponseTimeMs === "number"
+                ? ` · Latency: ${state.lastTestResult.pspResponseTimeMs}ms`
+                : ""}
+              {state.lastTestResult.diagnostic ? ` · ${state.lastTestResult.diagnostic}` : ""}
+            </div>
+          </div>
+        ) : null}
+
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as "accounts" | "submerchants")}
+        >
+          <PaymentAdminTabsList aria-label="Payment provider sections">
+            <PaymentAdminTabsTrigger value="accounts">Provider accounts</PaymentAdminTabsTrigger>
+            <PaymentAdminTabsTrigger value="submerchants">Sub-merchants</PaymentAdminTabsTrigger>
+          </PaymentAdminTabsList>
+          <PaymentAdminTabsContent value="accounts">
             <ProviderAccountList
               accounts={state.providerAccounts}
               pageInfo={state.listPageInfo?.providerAccounts}
@@ -228,60 +205,60 @@ export function PaymentProviderAdminWorkspace(
               onLoadMore={() => void controller.loadMoreProviderAccounts()}
               onCreate={() => setDialog({ kind: "create" })}
             />
-          </SettingsSection>
-        </TabsContent>
-        <TabsContent value="submerchants">
-          <SettingsSection
-            title="Sub-Merchants"
-            description="Sub-merchant records under a partner/ISV provider account. Each maps to Alipay sub_appid, WeChat sub_mch_id, or Stripe Connected Account."
-          >
-            {partnerAccounts.length > 0 ? (
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-[var(--sdk-color-text-muted)]">
-                  Selected partner account
-                </label>
-                <select
-                  className="w-full rounded-md border border-[var(--sdk-color-border-subtle)] bg-[var(--sdk-color-bg)] px-3 py-2 text-sm"
-                  value={selectedPartnerAccount?.id ?? ""}
-                  onChange={(event) => {
-                    const nextId = event.target.value;
-                    if (!nextId) {
-                      controller.selectProviderAccount(undefined);
-                      return;
-                    }
-                    const account = partnerAccounts.find((item) => item.id === nextId);
-                    if (account) {
-                      controller.selectProviderAccount(account.id);
-                      void controller.loadMoreSubMerchants(account.id);
-                    }
-                  }}
-                >
-                  {partnerAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.accountNo} ({account.providerCode})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-            <SubMerchantManager
-              partnerAccount={selectedPartnerAccount}
-              subMerchants={visibleSubMerchants}
-              pageInfo={state.listPageInfo?.subMerchants}
-              busy={state.status === "saving" || state.status === "loading"}
-              canCreate={props.capabilities.canCreateSubMerchant}
-              canDelete={props.capabilities.canDeleteSubMerchant}
-              canUpdate={props.capabilities.canUpdateSubMerchant}
-              onCreate={(draft) => void controller.createSubMerchant(draft)}
-              onUpdate={(id, draft) => void controller.updateSubMerchant(id, draft)}
-              onDelete={(id) => void controller.deleteSubMerchant(id)}
-              onLoadMore={() =>
-                void controller.loadMoreSubMerchants(selectedPartnerAccount?.id)
-              }
-            />
-          </SettingsSection>
-        </TabsContent>
-      </Tabs>
+          </PaymentAdminTabsContent>
+          <PaymentAdminTabsContent value="submerchants">
+            <div className="space-y-4">
+              {partnerAccounts.length > 0 ? (
+                <div className="flex flex-col gap-2 sm:max-w-sm">
+                  <label
+                    className="text-xs font-medium text-[var(--sdk-color-text-secondary)]"
+                    htmlFor="payment-provider-partner-account"
+                  >
+                    Selected partner account
+                  </label>
+                  <select
+                    className="h-9 w-full rounded-[var(--sdk-radius-control)] border border-[var(--sdk-color-border-default)] bg-[var(--sdk-color-surface-panel)] px-3 text-sm text-[var(--sdk-color-text-primary)] outline-none focus:border-[var(--sdk-color-border-focus)] focus:ring-2 focus:ring-[var(--sdk-color-border-focus)]"
+                    id="payment-provider-partner-account"
+                    value={selectedPartnerAccount?.id ?? ""}
+                    onChange={(event) => {
+                      const nextId = event.target.value;
+                      if (!nextId) {
+                        controller.selectProviderAccount(undefined);
+                        return;
+                      }
+                      const account = partnerAccounts.find((item) => item.id === nextId);
+                      if (account) {
+                        controller.selectProviderAccount(account.id);
+                        void controller.loadMoreSubMerchants(account.id);
+                      }
+                    }}
+                  >
+                    {partnerAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.accountNo} ({account.providerCode})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <SubMerchantManager
+                partnerAccount={selectedPartnerAccount}
+                subMerchants={visibleSubMerchants}
+                pageInfo={state.listPageInfo?.subMerchants}
+                busy={state.status === "saving" || state.status === "loading"}
+                canCreate={props.capabilities.canCreateSubMerchant}
+                canDelete={props.capabilities.canDeleteSubMerchant}
+                canUpdate={props.capabilities.canUpdateSubMerchant}
+                onCreate={(draft) => void controller.createSubMerchant(draft)}
+                onUpdate={(id, draft) => void controller.updateSubMerchant(id, draft)}
+                onDelete={(id) => void controller.deleteSubMerchant(id)}
+                onLoadMore={() =>
+                  void controller.loadMoreSubMerchants(selectedPartnerAccount?.id)
+                }
+              />
+            </div>
+          </PaymentAdminTabsContent>
+        </Tabs>
 
       <Dialog
         open={dialog.kind === "create" || dialog.kind === "edit"}
@@ -383,7 +360,8 @@ export function PaymentProviderAdminWorkspace(
           ) : null}
         </DialogContent>
       </Dialog>
-    </section>
+      </PaymentAdminWorkspace>
+    </PaymentAdminI18nBoundary>
   );
 }
 

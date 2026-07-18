@@ -1,26 +1,15 @@
-//! C17 修复：payment app-api 的 HTTP route manifest。
-//!
-//! 遵循 `API_SPEC.md` §4.2.1 与 `WEB_FRAMEWORK_SPEC.md` §2/§7 的要求，route crate
-//! `MUST` 通过 framework contract 类型 `HttpRoute` 声明 manifest，以便：
-//! 1. 框架运行时解析 operationId / rate-limit tier / 公共路径；
-//! 2. 框架自动派生 `ContractFallbackConfig`，为 manifest 内未挂载 handler 的路径
-//!    返回 501 Problem+json、为完全未知路径返回 404 Problem+json；
-//! 3. OpenAPI 物化器生成 owner-only authority 文档。
-//!
-//! 所有受保护路由统一使用 `RouteAuth::DualToken`（`API_SPEC.md` §4.2.1 规定受保护
-//! app-api `MUST` 使用 `dual-token`）。写操作（POST）标记 `idempotent = true`，
-//! 表示该路由接受 `Idempotency-Key` / `Sdkwork-Request-Hash` 命令头并参与幂等
-//! 仓储层去重。
-
+﻿//! C17 淇锛歱ayment app-api 鐨?HTTP route manifest銆?//!
+//! 閬靛惊 `API_SPEC.md` 搂4.2.1 涓?`WEB_FRAMEWORK_SPEC.md` 搂2/搂7 鐨勮姹傦紝route crate
+//! `MUST` 閫氳繃 framework contract 绫诲瀷 `HttpRoute` 澹版槑 manifest锛屼互渚匡細
+//! 1. 妗嗘灦杩愯鏃惰В鏋?operationId / rate-limit tier / 鍏叡璺緞锛?//! 2. 妗嗘灦鑷姩娲剧敓 `ContractFallbackConfig`锛屼负 manifest 鍐呮湭鎸傝浇 handler 鐨勮矾寰?//!    杩斿洖 501 Problem+json銆佷负瀹屽叏鏈煡璺緞杩斿洖 404 Problem+json锛?//! 3. OpenAPI 鐗╁寲鍣ㄧ敓鎴?owner-only authority 鏂囨。銆?//!
+//! 鎵€鏈夊彈淇濇姢璺敱缁熶竴浣跨敤 `RouteAuth::DualToken`锛坄API_SPEC.md` 搂4.2.1 瑙勫畾鍙椾繚鎶?//! app-api `MUST` 浣跨敤 `dual-token`锛夈€傚啓鎿嶄綔锛圥OST锛夋爣璁?`idempotent = true`锛?//! 琛ㄧず璇ヨ矾鐢辨帴鍙?`Idempotency-Key` / `Sdkwork-Request-Hash` 鍛戒护澶村苟鍙備笌骞傜瓑
+//! 浠撳偍灞傚幓閲嶃€?
 use sdkwork_web_core::{HttpMethod, HttpRoute, HttpRouteManifest};
 
-/// payment app-api 路由前缀（`API_SPEC.md` §4.2.1 规定 app-api `MUST` 使用
-/// `/app/v3/api`）。
-pub const APP_API_PREFIX: &str = "/app/v3/api";
+/// payment app-api 璺敱鍓嶇紑锛坄API_SPEC.md` 搂4.2.1 瑙勫畾 app-api `MUST` 浣跨敤
+/// `/app/v3/api`锛夈€?pub const APP_API_PREFIX: &str = "/app/v3/api";
 
-/// payment app-api 公共路径前缀。仅包含 infra 健康检查路径，业务路径全部受
-/// dual-token 保护。
-pub fn payment_app_api_public_path_prefixes() -> Vec<String> {
+/// payment app-api 鍏叡璺緞鍓嶇紑銆備粎鍖呭惈 infra 鍋ュ悍妫€鏌ヨ矾寰勶紝涓氬姟璺緞鍏ㄩ儴鍙?/// dual-token 淇濇姢銆?pub fn payment_app_api_public_path_prefixes() -> Vec<String> {
     sdkwork_web_bootstrap::infra_public_path_prefixes()
 }
 
@@ -29,27 +18,27 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/app/v3/api/payments/intents",
-        "payments",
+        "commerce",
         "payments.intents.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/payments/intents/{paymentIntentId}",
-        "payments",
+        "commerce",
         "payments.intents.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/app/v3/api/payments/intents/{paymentIntentId}/cancel",
-        "payments",
+        "commerce",
         "payments.intents.cancel",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/app/v3/api/payments/intents/{paymentIntentId}/attempts",
-        "payments",
+        "commerce",
         "payments.intents.attempts.create",
     )
     .with_idempotent(true),
@@ -57,109 +46,102 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/payments/methods",
-        "payments",
+        "commerce",
         "payments.methods.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/payments/records",
-        "payments",
+        "commerce",
         "payments.records.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/payments/records/{paymentId}",
-        "payments",
+        "commerce",
         "payments.records.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/payments/attempts/{paymentAttemptId}",
-        "payments",
+        "commerce",
         "payments.attempts.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
-        "/app/v3/api/payments/statistics",
-        "payments",
-        "payments.statistics.fetch",
+        "/app/v3/api/payments/statistics/summary",
+        "commerce",
+        "payments.statistics.summary.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/payments/checkout/{paymentId}",
-        "payments",
+        "commerce",
         "payments.checkout.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/payments/status/{paymentId}",
-        "payments",
+        "commerce",
         "payments.status.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/payments/status/out_trade_no/{outTradeNo}",
-        "payments",
-        "payments.status.retrieveByOutTradeNo",
-    ),
-    HttpRoute::dual_token(
-        HttpMethod::Get,
-        "/app/v3/api/orders/{orderId}/payments",
-        "payments",
-        "payments.orders.list",
+        "commerce",
+        "payments.status.outTradeNo.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/app/v3/api/payments",
-        "payments",
+        "commerce",
         "payments.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Post,
-        "/app/v3/api/payments/reconciliations",
-        "payments",
+        "/app/v3/api/payments:reconcile",
+        "commerce",
         "payments.reconcile",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/app/v3/api/payments/{paymentId}/close",
-        "payments",
+        "commerce",
         "payments.close",
     )
     .with_idempotent(true),
     HttpRoute::public(
         HttpMethod::Post,
-        // Deprecated 410 shim — live PSP webhooks: order POST /orders/payments/webhooks/{providerCode}
+        // Deprecated 410 shim 鈥?live PSP webhooks: order POST /orders/payments/webhooks/{providerCode}
         "/app/v3/api/payments/webhooks/{providerCode}",
-        "payments",
+        "commerce",
         "payments.webhooks.receiveDeprecated",
     ),
     // === Refund ===
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/app/v3/api/refunds",
-        "refunds",
+        "commerce",
         "refunds.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/refunds",
-        "refunds",
+        "commerce",
         "refunds.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/app/v3/api/refunds/{refundId}",
-        "refunds",
+        "commerce",
         "refunds.retrieve",
     ),
 ];
 
-/// 构造 payment app-api 的 route manifest。
-pub fn app_route_manifest() -> HttpRouteManifest {
+/// 鏋勯€?payment app-api 鐨?route manifest銆?pub fn app_route_manifest() -> HttpRouteManifest {
     HttpRouteManifest::new(HTTP_ROUTES)
 }
 
@@ -230,7 +212,7 @@ mod tests {
             .filter(|route| route.idempotent)
             .map(|route| route.operation_id)
             .collect();
-        // 至少覆盖核心写操作：create payment / intent / refund
+        // 鑷冲皯瑕嗙洊鏍稿績鍐欐搷浣滐細create payment / intent / refund
         assert!(idempotent_post_routes.contains(&"payments.create"));
         assert!(idempotent_post_routes.contains(&"payments.intents.create"));
         assert!(idempotent_post_routes.contains(&"refunds.create"));
