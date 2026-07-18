@@ -961,7 +961,11 @@ async fn list_payment_records(
             Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
             Err(error) => return validation(ctx, error.message()),
         };
-        state.store.list_payment_records_by_order(query).await
+        state
+            .store
+            .list_payment_records_by_order(query)
+            .await
+            .map(|page| (page.items, page.total_items))
     } else {
         let query = match PaymentRecordListQuery::new(
             &subject.tenant_id,
@@ -971,15 +975,19 @@ async fn list_payment_records(
             Ok(query) => query.with_paging(page_params.offset, page_params.page_size),
             Err(error) => return validation(ctx, error.message()),
         };
-        state.store.list_payment_records(query).await
+        state
+            .store
+            .list_payment_records(query)
+            .await
+            .map(|page| (page.items, page.total_items))
     };
 
     match page {
-        Ok(page) => {
+        Ok((page_items, total_items)) => {
             // Phase 1.3：store 已在 SQL 层完成 LIMIT/OFFSET 并返回真实 total_items，
             // handler 不再做进程内 skip/take（PAGINATION_SPEC §2 合规）。
-            let items: Vec<_> = page.items.into_iter().map(map_payment_record).collect();
-            success_list(ctx, items, page.total_items, page_params)
+            let items: Vec<_> = page_items.into_iter().map(map_payment_record).collect();
+            success_list(ctx, items, total_items, page_params)
         }
         Err(error) => {
             payment_system_response(ctx, "payment records read model is unavailable", error)
