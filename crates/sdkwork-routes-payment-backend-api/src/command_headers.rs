@@ -1,8 +1,5 @@
 use axum::http::HeaderMap;
-use axum::response::Response;
 use serde::Serialize;
-
-use crate::api_response::validation;
 
 pub(crate) const IDEMPOTENCY_KEY_HEADER: &str = "Idempotency-Key";
 pub(crate) const REQUEST_HASH_HEADER: &str = "Sdkwork-Request-Hash";
@@ -17,7 +14,6 @@ pub(crate) struct AppWriteCommandHeaders {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WriteCommandHeaderError {
-    MissingHeader(&'static str),
     InvalidHeader(&'static str),
 }
 
@@ -100,48 +96,39 @@ pub(crate) fn validate_write_payload(
     body: &impl Serialize,
     fallback_request_no: impl FnOnce(&str) -> String,
 ) -> Result<AppWriteCommandHeaders, WriteCommandHeaderError> {
-    let write_headers = parse_required_write_command_headers(headers, fallback_request_no)?;
     let expected_hash = stable_json_request_hash(scope, body)?;
-    if expected_hash.trim() != write_headers.request_hash.trim() {
-        return Err(WriteCommandHeaderError::InvalidHeader(
-            "Sdkwork-Request-Hash does not match the command payload",
-        ));
+    if let Some(request_hash) = optional_text_header(headers, REQUEST_HASH_HEADER) {
+        if expected_hash.trim() != request_hash.trim() {
+            return Err(WriteCommandHeaderError::InvalidHeader(
+                "Sdkwork-Request-Hash does not match the command payload",
+            ));
+        }
     }
-    Ok(write_headers)
-}
-
-#[allow(clippy::result_large_err)]
-pub(crate) fn parse_required_write_command_headers(
-    headers: &HeaderMap,
-    fallback_request_no: impl FnOnce(&str) -> String,
-) -> Result<AppWriteCommandHeaders, WriteCommandHeaderError> {
-    let idempotency_key = required_text_header(headers, IDEMPOTENCY_KEY_HEADER)
-        .map_err(|_| WriteCommandHeaderError::MissingHeader(IDEMPOTENCY_KEY_HEADER))?;
-    let request_hash = required_text_header(headers, REQUEST_HASH_HEADER)
-        .map_err(|_| WriteCommandHeaderError::MissingHeader(REQUEST_HASH_HEADER))?;
+    let idempotency_key = match optional_text_header(headers, IDEMPOTENCY_KEY_HEADER) {
+        Some(value) => validate_idempotency_key(value)?,
+        None => sdkwork_utils_rust::uuid(),
+    };
     let request_no = optional_text_header(headers, REQUEST_NO_HEADER)
         .unwrap_or_else(|| fallback_request_no(&idempotency_key));
     Ok(AppWriteCommandHeaders {
         idempotency_key,
-        request_hash,
+        request_hash: expected_hash,
         request_no,
     })
 }
 
-#[allow(clippy::result_large_err)]
-fn required_text_header(headers: &HeaderMap, name: &'static str) -> Result<String, Response> {
-    let value = headers
-        .get(name)
-        .ok_or_else(|| command_header_error_response(format!("{name} header is required")))?
-        .to_str()
-        .map(str::trim)
-        .map_err(|_| command_header_error_response(format!("{name} header value is invalid")))?;
-    if value.is_empty() {
-        return Err(command_header_error_response(format!(
-            "{name} header is required"
-        )));
+fn validate_idempotency_key(value: String) -> Result<String, WriteCommandHeaderError> {
+    let valid_length = (8..=128).contains(&value.len());
+    let valid_characters = value.chars().all(|character| {
+        character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-')
+    });
+    if valid_length && valid_characters {
+        Ok(value)
+    } else {
+        Err(WriteCommandHeaderError::InvalidHeader(
+            "Idempotency-Key must contain 8 to 128 letters, digits, dots, underscores, colons, or hyphens",
+        ))
     }
-    Ok(value.to_owned())
 }
 
 fn optional_text_header(headers: &HeaderMap, name: &'static str) -> Option<String> {
@@ -153,10 +140,6 @@ fn optional_text_header(headers: &HeaderMap, name: &'static str) -> Option<Strin
         .map(str::to_owned)
 }
 
-fn command_header_error_response(message: impl Into<String>) -> Response {
-    validation(None, message)
-}
-
 #[cfg(test)]
 mod tests {
     use axum::http::HeaderValue;
@@ -164,16 +147,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn required_app_write_command_headers_requires_idempotency_and_request_hash() {
-        let mut headers = HeaderMap::new();
-        headers.insert(IDEMPOTENCY_KEY_HEADER, HeaderValue::from_static("idem-1"));
-        headers.insert(REQUEST_HASH_HEADER, HeaderValue::from_static("hash-1"));
-
-        let parsed = parse_required_write_command_headers(&headers, |_| "request-1".to_owned())
-            .expect("headers");
-        assert_eq!(parsed.idempotency_key, "idem-1");
-        assert_eq!(parsed.request_hash, "hash-1");
-        assert_eq!(parsed.request_no, "request-1");
+    fn write_headers_allow_omitted_optional_client_identity() {
+        let parsed = validate_write_payload(
+            &HeaderMap::new(),
+            "scope",
+            &serde_json::json!({"orderId":"o-1"}),
+            |key| format!("request-{key}"),
+        )
+        .expect("headers");
+        assert!(!parsed.idempotency_key.is_empty());
+        assert!(!parsed.request_hash.is_empty());
+        assert!(parsed.request_no.starts_with("request-"));
     }
 
     #[test]
@@ -222,6 +206,20 @@ mod tests {
             |_| "request-1".to_owned(),
         )
         .expect_err("mismatch");
+        assert!(matches!(error, WriteCommandHeaderError::InvalidHeader(_)));
+    }
+
+    #[test]
+    fn invalid_idempotency_key_is_rejected() {
+        let mut headers = HeaderMap::new();
+        headers.insert(IDEMPOTENCY_KEY_HEADER, HeaderValue::from_static("short"));
+        let error = validate_write_payload(
+            &headers,
+            "scope",
+            &serde_json::json!({"orderId":"o-1"}),
+            |_| "request-1".to_owned(),
+        )
+        .expect_err("invalid key");
         assert!(matches!(error, WriteCommandHeaderError::InvalidHeader(_)));
     }
 }

@@ -1,8 +1,16 @@
 import { backendApiPath } from './paths';
 import type { HttpClient } from '../http/client';
 
-import type { Certificate, CreateCertificateCommand, CreatePaymentChannelCommand, CreatePaymentMethodCommand, CreateProviderAccountCommand, CreateReconciliationRunCommand, CreateRouteRuleCommand, CreateSubMerchantCommand, CredentialRotateCommand, PageInfo, PaymentAttempt, PaymentChannel, PaymentIntent, PaymentMethod, PaymentsWebhookEventsReplayRequest, ProviderAccount, ProviderAccountTestCommand, ProviderAccountTestResult, ReconciliationRun, RouteRule, SandboxTriggerCommand, SdkWorkAsyncData, SdkWorkCommandData, SubMerchant, UpdatePaymentMethodCommand, UpdateProviderAccountCommand, UpdateRouteRuleCommand, UpdateSubMerchantCommand, WebhookEvent, WebhookSignatureTestCommand, WebhookSignatureTestResult } from '../types';
+import type { Certificate, CreateCertificateCommand, CreatePaymentChannelCommand, CreatePaymentMethodCommand, CreateProviderAccountCommand, CreateReconciliationRunCommand, CreateRouteRuleCommand, CreateSubMerchantCommand, CredentialRotateCommand, PageInfo, PaymentAttempt, PaymentChannel, PaymentIntent, PaymentMethod, ProviderAccount, ProviderAccountTestCommand, ProviderAccountTestResult, ReconciliationRun, RouteRule, SandboxTriggerCommand, SdkWorkAsyncData, SdkWorkCommandData, SubMerchant, UpdatePaymentMethodCommand, UpdateProviderAccountCommand, UpdateRouteRuleCommand, UpdateSubMerchantCommand, WebhookEvent, WebhookEventsReplayRequest, WebhookSignatureTestCommand, WebhookSignatureTestResult } from '../types';
 
+
+export interface PaymentsDevSandboxTriggerParams {
+  idempotencyKey?: string;
+}
+
+export interface PaymentsDevWebhookSignatureTestParams {
+  idempotencyKey?: string;
+}
 
 export class PaymentsDevApi {
   private client: HttpClient;
@@ -13,13 +21,25 @@ export class PaymentsDevApi {
 
 
 /** Sandbox event trigger (dev config). */
-  async sandboxTrigger(body: SandboxTriggerCommand): Promise<SdkWorkAsyncData> {
-    return this.client.post<SdkWorkAsyncData>(backendApiPath(`/payments/dev/sandbox_trigger`), body, undefined, undefined, 'application/json');
+  async sandboxTrigger(body: SandboxTriggerCommand, params?: PaymentsDevSandboxTriggerParams): Promise<SdkWorkAsyncData> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<SdkWorkAsyncData>(backendApiPath(`/payments/dev/sandbox_trigger`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Webhook signature verification test (dev config). */
-  async webhookSignatureTest(body: WebhookSignatureTestCommand): Promise<WebhookSignatureTestResult> {
-    return this.client.post<WebhookSignatureTestResult>(backendApiPath(`/payments/dev/webhook_signature_test`), body, undefined, undefined, 'application/json');
+  async webhookSignatureTest(body: WebhookSignatureTestCommand, params?: PaymentsDevWebhookSignatureTestParams): Promise<WebhookSignatureTestResult> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<WebhookSignatureTestResult>(backendApiPath(`/payments/dev/webhook_signature_test`), body, undefined, requestHeaders, 'application/json');
   }
 }
 
@@ -31,6 +51,10 @@ export interface PaymentsReconciliationRunsListParams {
   status?: 'pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
   providerCode?: string;
   providerAccountId?: string;
+}
+
+export interface PaymentsReconciliationRunsCreateParams {
+  idempotencyKey?: string;
 }
 
 export class PaymentsReconciliationRunsApi {
@@ -56,8 +80,14 @@ export class PaymentsReconciliationRunsApi {
   }
 
 /** Reconciliation run create. */
-  async create(body: CreateReconciliationRunCommand): Promise<ReconciliationRun> {
-    return this.client.post<ReconciliationRun>(backendApiPath(`/payments/reconciliation_runs`), body, undefined, undefined, 'application/json');
+  async create(body: CreateReconciliationRunCommand, params?: PaymentsReconciliationRunsCreateParams): Promise<ReconciliationRun> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<ReconciliationRun>(backendApiPath(`/payments/reconciliation_runs`), body, undefined, requestHeaders, 'application/json');
   }
 }
 
@@ -94,7 +124,7 @@ export class PaymentsWebhookEventsApi {
   }
 
 /** Webhook event replay. */
-  async replay(eventId: string, body?: PaymentsWebhookEventsReplayRequest): Promise<SdkWorkCommandData> {
+  async replay(eventId: string, body?: WebhookEventsReplayRequest): Promise<SdkWorkCommandData> {
     return this.client.post<SdkWorkCommandData>(backendApiPath(`/payments/webhook_events/${serializePathParameter(eventId, { name: 'eventId', style: 'simple', explode: false })}/replay`), body, undefined, undefined, 'application/json');
   }
 }
@@ -142,6 +172,10 @@ export interface PaymentsCertificatesListParams {
   expiringWithinDays?: number;
 }
 
+export interface PaymentsCertificatesCreateParams {
+  idempotencyKey?: string;
+}
+
 export class PaymentsCertificatesApi {
   private client: HttpClient;
 
@@ -165,8 +199,14 @@ export class PaymentsCertificatesApi {
   }
 
 /** Certificate create (upload/register PEM). */
-  async create(body: CreateCertificateCommand): Promise<Certificate> {
-    return this.client.post<Certificate>(backendApiPath(`/payments/certificates`), body, undefined, undefined, 'application/json');
+  async create(body: CreateCertificateCommand, params?: PaymentsCertificatesCreateParams): Promise<Certificate> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<Certificate>(backendApiPath(`/payments/certificates`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Certificate retrieve. */
@@ -188,6 +228,14 @@ export interface PaymentsSubMerchantsListParams {
   providerAccountId?: string;
   providerCode?: string;
   status?: 'active' | 'inactive' | 'suspended' | 'deprecated';
+}
+
+export interface PaymentsSubMerchantsCreateParams {
+  idempotencyKey?: string;
+}
+
+export interface PaymentsSubMerchantsUpdateParams {
+  idempotencyKey?: string;
 }
 
 export class PaymentsSubMerchantsApi {
@@ -213,8 +261,14 @@ export class PaymentsSubMerchantsApi {
   }
 
 /** Sub-merchant create (ISV/partner mode only). */
-  async create(body: CreateSubMerchantCommand): Promise<SubMerchant> {
-    return this.client.post<SubMerchant>(backendApiPath(`/payments/sub_merchants`), body, undefined, undefined, 'application/json');
+  async create(body: CreateSubMerchantCommand, params?: PaymentsSubMerchantsCreateParams): Promise<SubMerchant> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<SubMerchant>(backendApiPath(`/payments/sub_merchants`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Sub-merchant retrieve. */
@@ -223,8 +277,14 @@ export class PaymentsSubMerchantsApi {
   }
 
 /** Sub-merchant update. */
-  async update(subMerchantId: string, body: UpdateSubMerchantCommand): Promise<SubMerchant> {
-    return this.client.patch<SubMerchant>(backendApiPath(`/payments/sub_merchants/${serializePathParameter(subMerchantId, { name: 'subMerchantId', style: 'simple', explode: false })}`), body, undefined, undefined, 'application/json');
+  async update(subMerchantId: string, body: UpdateSubMerchantCommand, params?: PaymentsSubMerchantsUpdateParams): Promise<SubMerchant> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.patch<SubMerchant>(backendApiPath(`/payments/sub_merchants/${serializePathParameter(subMerchantId, { name: 'subMerchantId', style: 'simple', explode: false })}`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Sub-merchant delete. */
@@ -240,6 +300,14 @@ export interface PaymentsRouteRulesListParams {
   q?: string;
   status?: 'active' | 'inactive' | 'deprecated';
   channelId?: string;
+}
+
+export interface PaymentsRouteRulesCreateParams {
+  idempotencyKey?: string;
+}
+
+export interface PaymentsRouteRulesUpdateParams {
+  idempotencyKey?: string;
 }
 
 export class PaymentsRouteRulesApi {
@@ -264,13 +332,25 @@ export class PaymentsRouteRulesApi {
   }
 
 /** Route rule create. */
-  async create(body: CreateRouteRuleCommand): Promise<RouteRule> {
-    return this.client.post<RouteRule>(backendApiPath(`/payments/route_rules`), body, undefined, undefined, 'application/json');
+  async create(body: CreateRouteRuleCommand, params?: PaymentsRouteRulesCreateParams): Promise<RouteRule> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<RouteRule>(backendApiPath(`/payments/route_rules`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Route rule update. */
-  async update(routeRuleId: string, body: UpdateRouteRuleCommand): Promise<RouteRule> {
-    return this.client.patch<RouteRule>(backendApiPath(`/payments/route_rules/${serializePathParameter(routeRuleId, { name: 'routeRuleId', style: 'simple', explode: false })}`), body, undefined, undefined, 'application/json');
+  async update(routeRuleId: string, body: UpdateRouteRuleCommand, params?: PaymentsRouteRulesUpdateParams): Promise<RouteRule> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.patch<RouteRule>(backendApiPath(`/payments/route_rules/${serializePathParameter(routeRuleId, { name: 'routeRuleId', style: 'simple', explode: false })}`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Route rule delete. */
@@ -287,6 +367,10 @@ export interface PaymentsChannelsListParams {
   providerCode?: string;
   sceneCode?: 'app' | 'web' | 'mini_program' | 'api';
   status?: 'active' | 'inactive' | 'deprecated';
+}
+
+export interface PaymentsChannelsCreateParams {
+  idempotencyKey?: string;
 }
 
 export class PaymentsChannelsApi {
@@ -312,9 +396,19 @@ export class PaymentsChannelsApi {
   }
 
 /** Payment channel create. */
-  async create(body: CreatePaymentChannelCommand): Promise<PaymentChannel> {
-    return this.client.post<PaymentChannel>(backendApiPath(`/payments/channels`), body, undefined, undefined, 'application/json');
+  async create(body: CreatePaymentChannelCommand, params?: PaymentsChannelsCreateParams): Promise<PaymentChannel> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<PaymentChannel>(backendApiPath(`/payments/channels`), body, undefined, requestHeaders, 'application/json');
   }
+}
+
+export interface PaymentsProviderAccountsCredentialsRotateParams {
+  idempotencyKey?: string;
 }
 
 export class PaymentsProviderAccountsCredentialsApi {
@@ -326,8 +420,14 @@ export class PaymentsProviderAccountsCredentialsApi {
 
 
 /** Provider account credential rotation. */
-  async rotate(providerAccountId: string, body: CredentialRotateCommand): Promise<ProviderAccount> {
-    return this.client.post<ProviderAccount>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}/credentials/rotate`), body, undefined, undefined, 'application/json');
+  async rotate(providerAccountId: string, body: CredentialRotateCommand, params?: PaymentsProviderAccountsCredentialsRotateParams): Promise<ProviderAccount> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<ProviderAccount>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}/credentials/rotate`), body, undefined, requestHeaders, 'application/json');
   }
 }
 
@@ -340,6 +440,18 @@ export interface PaymentsProviderAccountsListParams {
   environment?: 'development' | 'sandbox' | 'production';
   accountMode?: 'direct' | 'partner';
   status?: 'active' | 'inactive' | 'suspended' | 'deprecated';
+}
+
+export interface PaymentsProviderAccountsCreateParams {
+  idempotencyKey?: string;
+}
+
+export interface PaymentsProviderAccountsUpdateParams {
+  idempotencyKey?: string;
+}
+
+export interface PaymentsProviderAccountsTestParams {
+  idempotencyKey?: string;
 }
 
 export class PaymentsProviderAccountsApi {
@@ -368,18 +480,36 @@ export class PaymentsProviderAccountsApi {
   }
 
 /** Provider account create. */
-  async create(body: CreateProviderAccountCommand): Promise<ProviderAccount> {
-    return this.client.post<ProviderAccount>(backendApiPath(`/payments/provider_accounts`), body, undefined, undefined, 'application/json');
+  async create(body: CreateProviderAccountCommand, params?: PaymentsProviderAccountsCreateParams): Promise<ProviderAccount> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<ProviderAccount>(backendApiPath(`/payments/provider_accounts`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Provider account update. */
-  async update(providerAccountId: string, body: UpdateProviderAccountCommand): Promise<ProviderAccount> {
-    return this.client.patch<ProviderAccount>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}`), body, undefined, undefined, 'application/json');
+  async update(providerAccountId: string, body: UpdateProviderAccountCommand, params?: PaymentsProviderAccountsUpdateParams): Promise<ProviderAccount> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.patch<ProviderAccount>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Provider account credential connectivity test. */
-  async test(providerAccountId: string, body?: ProviderAccountTestCommand): Promise<ProviderAccountTestResult> {
-    return this.client.post<ProviderAccountTestResult>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}/test`), body, undefined, undefined, 'application/json');
+  async test(providerAccountId: string, body?: ProviderAccountTestCommand, params?: PaymentsProviderAccountsTestParams): Promise<ProviderAccountTestResult> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<ProviderAccountTestResult>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}/test`), body, undefined, requestHeaders, 'application/json');
   }
 }
 
@@ -389,6 +519,14 @@ export interface PaymentsMethodsListParams {
   sort?: string;
   q?: string;
   status?: 'active' | 'inactive' | 'deprecated';
+}
+
+export interface PaymentsMethodsCreateParams {
+  idempotencyKey?: string;
+}
+
+export interface PaymentsMethodsUpdateParams {
+  idempotencyKey?: string;
 }
 
 export class PaymentsMethodsApi {
@@ -412,13 +550,25 @@ export class PaymentsMethodsApi {
   }
 
 /** Payment method create. */
-  async create(body: CreatePaymentMethodCommand): Promise<PaymentMethod> {
-    return this.client.post<PaymentMethod>(backendApiPath(`/payments/methods`), body, undefined, undefined, 'application/json');
+  async create(body: CreatePaymentMethodCommand, params?: PaymentsMethodsCreateParams): Promise<PaymentMethod> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<PaymentMethod>(backendApiPath(`/payments/methods`), body, undefined, requestHeaders, 'application/json');
   }
 
 /** Payment method update. */
-  async update(methodKey: string, body: UpdatePaymentMethodCommand): Promise<PaymentMethod> {
-    return this.client.patch<PaymentMethod>(backendApiPath(`/payments/methods/${serializePathParameter(methodKey, { name: 'methodKey', style: 'simple', explode: false })}`), body, undefined, undefined, 'application/json');
+  async update(methodKey: string, body: UpdatePaymentMethodCommand, params?: PaymentsMethodsUpdateParams): Promise<PaymentMethod> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.patch<PaymentMethod>(backendApiPath(`/payments/methods/${serializePathParameter(methodKey, { name: 'methodKey', style: 'simple', explode: false })}`), body, undefined, requestHeaders, 'application/json');
   }
 }
 
@@ -725,4 +875,79 @@ function encodeQueryValue(value: string, allowReserved: boolean): string {
     .replace(/%2C/gi, ',')
     .replace(/%3B/gi, ';')
     .replace(/%3D/gi, '=');
+}
+function buildRequestHeaders(
+  headers: Record<string, HeaderParameterSpec | undefined>,
+  cookies: Record<string, HeaderParameterSpec | undefined> = {},
+): Record<string, string> | undefined {
+  const requestHeaders: Record<string, string> = {};
+
+  for (const [name, parameter] of Object.entries(headers)) {
+    const serialized = serializeParameterValue(parameter);
+    if (serialized !== undefined) {
+      requestHeaders[name] = serialized;
+    }
+  }
+
+  const cookieHeader = buildCookieHeader(cookies);
+  if (cookieHeader) {
+    requestHeaders.Cookie = requestHeaders.Cookie
+      ? `${requestHeaders.Cookie}; ${cookieHeader}`
+      : cookieHeader;
+  }
+
+  return Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined;
+}
+
+interface HeaderParameterSpec {
+  value: unknown;
+  style: string;
+  explode: boolean;
+  contentType?: string;
+}
+
+function buildCookieHeader(cookies: Record<string, HeaderParameterSpec | undefined>): string | undefined {
+  const pairs: string[] = [];
+  for (const [name, parameter] of Object.entries(cookies)) {
+    const serialized = serializeParameterValue(parameter);
+    if (serialized !== undefined) {
+      pairs.push(`${encodeURIComponent(name)}=${encodeURIComponent(serialized)}`);
+    }
+  }
+  return pairs.length > 0 ? pairs.join('; ') : undefined;
+}
+
+function serializeParameterValue(parameter: HeaderParameterSpec | undefined): string | undefined {
+  const value = parameter?.value;
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (parameter?.contentType) {
+    return JSON.stringify(value);
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeHeaderPrimitive(item)).join(',');
+  }
+  if (typeof value === 'object' && value !== null) {
+    return serializeHeaderObject(value as Record<string, unknown>, parameter?.explode === true);
+  }
+  return serializeHeaderPrimitive(value);
+}
+
+function serializeHeaderObject(value: Record<string, unknown>, explode: boolean): string {
+  const entries = Object.entries(value).filter(([, entryValue]) => entryValue !== undefined && entryValue !== null);
+  if (explode) {
+    return entries.map(([key, entryValue]) => `${key}=${serializeHeaderPrimitive(entryValue)}`).join(',');
+  }
+  return entries.flatMap(([key, entryValue]) => [key, serializeHeaderPrimitive(entryValue)]).join(',');
+}
+
+function serializeHeaderPrimitive(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  return String(value);
 }

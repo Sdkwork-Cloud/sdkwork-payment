@@ -142,8 +142,8 @@
   ],
   "backendOperationIds": {
     "payments": [
-      "payments.webhookEvents.list",
-      "payments.webhookEvents.replay"
+      "webhookEvents.list",
+      "webhookEvents.replay"
     ]
   },
   "cashierUrl": {

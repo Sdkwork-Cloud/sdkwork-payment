@@ -1896,6 +1896,7 @@ dependencies = [
  "sdkwork-database-sqlx",
  "sdkwork-iam-context-service",
  "sdkwork-iam-web-adapter",
+ "sdkwork-payment-providers",
  "sdkwork-payment-repository-sqlx",
  "sdkwork-payment-service",
  "sdkwork-payment-service-host",
@@ -1905,8 +1906,10 @@ dependencies = [
  "sdkwork-web-core",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
+ "tower",
 ]
 
 [[package]]

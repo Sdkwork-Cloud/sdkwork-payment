@@ -16,7 +16,7 @@
   ],
   "tags": [
     {
-      "name": "commerce",
+      "name": "payments",
       "description": "Payment admin API resources.",
       "x-sdk-nested-resource-surface": true
     }
@@ -30,9 +30,9 @@
   "paths": {
     "/backend/v3/api/payments/intents": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Payment intents list.",
-        "operationId": "payments.intents.list",
+        "operationId": "intents.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -66,9 +66,9 @@
     },
     "/backend/v3/api/payments/intents/{paymentIntentId}": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Payment intent retrieve.",
-        "operationId": "payments.intents.retrieve",
+        "operationId": "intents.retrieve",
         "parameters": [
           { "name": "paymentIntentId", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -97,9 +97,9 @@
     },
     "/backend/v3/api/payments/methods": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Payment methods list.",
-        "operationId": "payments.methods.list",
+        "operationId": "methods.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -129,10 +129,10 @@
         "x-sdkwork-permission": "commerce.payments.methods.read"
       },
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Payment method create.",
-        "operationId": "payments.methods.create",
-        "parameters": [],
+        "operationId": "methods.create",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatePaymentMethodCommand" } } } },
         "responses": {
           "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentMethodResponse" } } } },
@@ -161,11 +161,12 @@
     },
     "/backend/v3/api/payments/methods/{methodKey}": {
       "patch": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Payment method update.",
-        "operationId": "payments.methods.update",
+        "operationId": "methods.update",
         "parameters": [
-          { "name": "methodKey", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "methodKey", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdatePaymentMethodCommand" } } } },
         "responses": {
@@ -196,9 +197,9 @@
     },
     "/backend/v3/api/payments/provider_accounts": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Provider accounts list.",
-        "operationId": "payments.providerAccounts.list",
+        "operationId": "providerAccounts.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -231,10 +232,10 @@
         "x-sdkwork-permission": "commerce.payments.provider_accounts.read"
       },
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Provider account create.",
-        "operationId": "payments.providerAccounts.create",
-        "parameters": [],
+        "operationId": "providerAccounts.create",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateProviderAccountCommand" } } } },
         "responses": {
           "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProviderAccountResponse" } } } },
@@ -263,11 +264,12 @@
     },
     "/backend/v3/api/payments/provider_accounts/{providerAccountId}": {
       "patch": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Provider account update.",
-        "operationId": "payments.providerAccounts.update",
+        "operationId": "providerAccounts.update",
         "parameters": [
-          { "name": "providerAccountId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "providerAccountId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateProviderAccountCommand" } } } },
         "responses": {
@@ -298,12 +300,13 @@
     },
     "/backend/v3/api/payments/provider_accounts/{providerAccountId}/test": {
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Provider account credential connectivity test.",
         "description": "Dev config: verifies provider credentials by invoking the lowest-cost PSP API (e.g., Stripe /balance, Alipay sandbox ping, WeChat Pay rate limit query). Updates last_tested_at and last_test_status on the provider account.",
-        "operationId": "payments.providerAccounts.test",
+        "operationId": "providerAccounts.test",
         "parameters": [
-          { "name": "providerAccountId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "providerAccountId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProviderAccountTestCommand" } } } },
         "responses": {
@@ -335,12 +338,13 @@
     },
     "/backend/v3/api/payments/provider_accounts/{providerAccountId}/credentials/rotate": {
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Provider account credential rotation.",
         "description": "Dev config: rotates the secret_ref/webhook_secret_ref/certificate_ref pointers for a provider account. Does not revoke the underlying env secret; only updates the pointer used at runtime resolution.",
-        "operationId": "payments.providerAccounts.credentials.rotate",
+        "operationId": "providerAccounts.credentials.rotate",
         "parameters": [
-          { "name": "providerAccountId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "providerAccountId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CredentialRotateCommand" } } } },
         "responses": {
@@ -371,9 +375,9 @@
     },
     "/backend/v3/api/payments/channels": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Payment channels list.",
-        "operationId": "payments.channels.list",
+        "operationId": "channels.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -405,10 +409,10 @@
         "x-sdkwork-permission": "commerce.payments.channels.read"
       },
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Payment channel create.",
-        "operationId": "payments.channels.create",
-        "parameters": [],
+        "operationId": "channels.create",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatePaymentChannelCommand" } } } },
         "responses": {
           "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentChannelResponse" } } } },
@@ -437,9 +441,9 @@
     },
     "/backend/v3/api/payments/route_rules": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Route rules list.",
-        "operationId": "payments.routeRules.list",
+        "operationId": "routeRules.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -470,10 +474,10 @@
         "x-sdkwork-permission": "commerce.payments.route_rules.read"
       },
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Route rule create.",
-        "operationId": "payments.routeRules.create",
-        "parameters": [],
+        "operationId": "routeRules.create",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRouteRuleCommand" } } } },
         "responses": {
           "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RouteRuleResponse" } } } },
@@ -502,11 +506,12 @@
     },
     "/backend/v3/api/payments/route_rules/{routeRuleId}": {
       "patch": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Route rule update.",
-        "operationId": "payments.routeRules.update",
+        "operationId": "routeRules.update",
         "parameters": [
-          { "name": "routeRuleId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "routeRuleId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateRouteRuleCommand" } } } },
         "responses": {
@@ -535,9 +540,9 @@
         "x-sdkwork-idempotent": true
       },
       "delete": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Route rule delete.",
-        "operationId": "payments.routeRules.delete",
+        "operationId": "routeRules.delete",
         "parameters": [
           { "name": "routeRuleId", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -567,10 +572,10 @@
     },
     "/backend/v3/api/payments/sub_merchants": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Sub-merchants list (ISV/partner mode only).",
         "description": "Lists sub-merchants under a partner (service provider) provider account. Each sub-merchant maps to Alipay sub_appid, WeChat Pay sub_mch_id, or Stripe connected account id.",
-        "operationId": "payments.subMerchants.list",
+        "operationId": "subMerchants.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -602,10 +607,10 @@
         "x-sdkwork-permission": "commerce.payments.sub_merchants.read"
       },
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Sub-merchant create (ISV/partner mode only).",
-        "operationId": "payments.subMerchants.create",
-        "parameters": [],
+        "operationId": "subMerchants.create",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateSubMerchantCommand" } } } },
         "responses": {
           "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SubMerchantResponse" } } } },
@@ -634,9 +639,9 @@
     },
     "/backend/v3/api/payments/sub_merchants/{subMerchantId}": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Sub-merchant retrieve.",
-        "operationId": "payments.subMerchants.retrieve",
+        "operationId": "subMerchants.retrieve",
         "parameters": [
           { "name": "subMerchantId", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -663,11 +668,12 @@
         "x-sdkwork-permission": "commerce.payments.sub_merchants.read"
       },
       "patch": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Sub-merchant update.",
-        "operationId": "payments.subMerchants.update",
+        "operationId": "subMerchants.update",
         "parameters": [
-          { "name": "subMerchantId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "subMerchantId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
         ],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateSubMerchantCommand" } } } },
         "responses": {
@@ -696,9 +702,9 @@
         "x-sdkwork-idempotent": true
       },
       "delete": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Sub-merchant delete.",
-        "operationId": "payments.subMerchants.delete",
+        "operationId": "subMerchants.delete",
         "parameters": [
           { "name": "subMerchantId", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -728,10 +734,10 @@
     },
     "/backend/v3/api/payments/certificates": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Certificates list.",
         "description": "Dev config: lists PEM certificate references (Alipay public key, WeChat platform cert, merchant private key) with expiry metadata.",
-        "operationId": "payments.certificates.list",
+        "operationId": "certificates.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -763,11 +769,11 @@
         "x-sdkwork-permission": "commerce.payments.certificates.read"
       },
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Certificate create (upload/register PEM).",
         "description": "Dev config: registers a PEM certificate by storing its env var name reference (certificate_ref) and parsed expiry. The PEM content itself is stored in env/secrets manager, never in the database.",
-        "operationId": "payments.certificates.create",
-        "parameters": [],
+        "operationId": "certificates.create",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateCertificateCommand" } } } },
         "responses": {
           "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CertificateResponse" } } } },
@@ -796,9 +802,9 @@
     },
     "/backend/v3/api/payments/certificates/{certificateId}": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Certificate retrieve.",
-        "operationId": "payments.certificates.retrieve",
+        "operationId": "certificates.retrieve",
         "parameters": [
           { "name": "certificateId", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -825,9 +831,9 @@
         "x-sdkwork-permission": "commerce.payments.certificates.read"
       },
       "delete": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Certificate delete.",
-        "operationId": "payments.certificates.delete",
+        "operationId": "certificates.delete",
         "parameters": [
           { "name": "certificateId", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -857,9 +863,9 @@
     },
     "/backend/v3/api/payments/attempts": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Payment attempts list.",
-        "operationId": "payments.attempts.list",
+        "operationId": "attempts.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -893,9 +899,9 @@
     },
     "/backend/v3/api/payments/webhook_events": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Webhook events list.",
-        "operationId": "payments.webhookEvents.list",
+        "operationId": "webhookEvents.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -929,10 +935,10 @@
     },
     "/backend/v3/api/payments/webhook_events/{eventId}/replay": {
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Webhook event replay.",
         "description": "Re-applies stored payment attempt status from the webhook event payload. Replays are capped at WEBHOOK_STORED_REPLAY_MAX_RETRIES (5). Returns 409 when limit exceeded, 404 when event missing.",
-        "operationId": "payments.webhookEvents.replay",
+        "operationId": "webhookEvents.replay",
         "parameters": [
           { "name": "eventId", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -964,9 +970,9 @@
     },
     "/backend/v3/api/payments/reconciliation_runs": {
       "get": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Reconciliation runs list.",
-        "operationId": "payments.reconciliationRuns.list",
+        "operationId": "reconciliationRuns.list",
         "parameters": [
           { "$ref": "#/components/parameters/Page" },
           { "$ref": "#/components/parameters/PageSize" },
@@ -998,10 +1004,10 @@
         "x-sdkwork-permission": "commerce.payments.reconciliation_runs.read"
       },
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Reconciliation run create.",
-        "operationId": "payments.reconciliationRuns.create",
-        "parameters": [],
+        "operationId": "reconciliationRuns.create",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateReconciliationRunCommand" } } } },
         "responses": {
           "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReconciliationRunResponse" } } } },
@@ -1030,11 +1036,11 @@
     },
     "/backend/v3/api/payments/dev/sandbox_trigger": {
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Sandbox event trigger (dev config).",
         "description": "Dev config: simulates a PSP webhook event for local/sandbox integration testing. Only available when the target provider account environment is development or sandbox. Aligned with Stripe CLI `trigger` semantics.",
-        "operationId": "payments.dev.sandboxTrigger",
-        "parameters": [],
+        "operationId": "dev.sandboxTrigger",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SandboxTriggerCommand" } } } },
         "responses": {
           "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SandboxTriggerAsyncResponse" } } } },
@@ -1064,11 +1070,11 @@
     },
     "/backend/v3/api/payments/dev/webhook_signature_test": {
       "post": {
-        "tags": ["commerce"],
+        "tags": ["payments"],
         "summary": "Webhook signature verification test (dev config).",
         "description": "Dev config: verifies a webhook signature against the configured webhook_secret_ref for a provider account. Accepts the raw payload, signature header, and timestamp; returns whether verification succeeded and diagnostic info. Aligned with Stripe CLI `listen` verify semantics.",
-        "operationId": "payments.dev.webhookSignatureTest",
-        "parameters": [],
+        "operationId": "dev.webhookSignatureTest",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookSignatureTestCommand" } } } },
         "responses": {
           "200": { "description": "Success", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookSignatureTestResultResponse" } } } },
@@ -1112,6 +1118,11 @@
       }
     },
     "parameters": {
+      "IdempotencyKey": {
+        "name": "Idempotency-Key", "in": "header", "required": false,
+        "description": "Client retry key for retriable payment create, update, command, or async operations. The server scopes the key by tenant, principal, method, and path.",
+        "schema": { "type": "string", "minLength": 8, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" }
+      },
       "Page": {
         "name": "page", "in": "query", "required": false,
         "schema": { "type": "integer", "minimum": 1, "default": 1 }

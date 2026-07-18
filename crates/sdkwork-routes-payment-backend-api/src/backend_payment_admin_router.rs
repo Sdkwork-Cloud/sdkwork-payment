@@ -128,7 +128,7 @@ struct BackendPaymentMethodListParams {
     status: Option<String>,
     #[serde(default)]
     page: Option<i64>,
-    #[serde(default)]
+    #[serde(default, rename = "page_size")]
     page_size: Option<i64>,
 }
 
@@ -137,7 +137,7 @@ struct BackendPaymentMethodListParams {
 struct BackendListQueryParams {
     #[serde(default)]
     page: Option<i64>,
-    #[serde(default)]
+    #[serde(default, rename = "page_size")]
     page_size: Option<i64>,
 }
 
@@ -2467,6 +2467,7 @@ fn pg_total_count(rows: &[PgRow]) -> i64 {
         .unwrap_or(0)
 }
 
+#[allow(clippy::result_large_err)]
 fn require_trimmed_string(
     ctx: Option<&WebRequestContext>,
     value: Option<String>,
@@ -2509,7 +2510,6 @@ fn backend_write_header_error(
     error: WriteCommandHeaderError,
 ) -> Response {
     let message = match error {
-        WriteCommandHeaderError::MissingHeader(name) => format!("{name} header is required"),
         WriteCommandHeaderError::InvalidHeader(message) => message.to_owned(),
     };
     validation(ctx, message)

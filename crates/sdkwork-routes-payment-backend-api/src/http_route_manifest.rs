@@ -32,216 +32,216 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/intents",
-        "commerce",
-        "payments.intents.list",
+        "payments",
+        "intents.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/intents/{paymentIntentId}",
-        "commerce",
-        "payments.intents.retrieve",
+        "payments",
+        "intents.retrieve",
     ),
     // === Payment Method ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/methods",
-        "commerce",
-        "payments.methods.list",
+        "payments",
+        "methods.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/methods",
-        "commerce",
-        "payments.methods.create",
+        "payments",
+        "methods.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Patch,
         "/backend/v3/api/payments/methods/{methodKey}",
-        "commerce",
-        "payments.methods.update",
+        "payments",
+        "methods.update",
     )
     .with_idempotent(true),
     // === Provider Account ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/provider_accounts",
-        "commerce",
-        "payments.providerAccounts.list",
+        "payments",
+        "providerAccounts.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/provider_accounts",
-        "commerce",
-        "payments.providerAccounts.create",
+        "payments",
+        "providerAccounts.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Patch,
         "/backend/v3/api/payments/provider_accounts/{providerAccountId}",
-        "commerce",
-        "payments.providerAccounts.update",
+        "payments",
+        "providerAccounts.update",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/provider_accounts/{providerAccountId}/test",
-        "commerce",
-        "payments.providerAccounts.test",
+        "payments",
+        "providerAccounts.test",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/provider_accounts/{providerAccountId}/credentials/rotate",
-        "commerce",
-        "payments.providerAccounts.credentials.rotate",
+        "payments",
+        "providerAccounts.credentials.rotate",
     )
     .with_idempotent(true),
     // === Channel ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/channels",
-        "commerce",
-        "payments.channels.list",
+        "payments",
+        "channels.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/channels",
-        "commerce",
-        "payments.channels.create",
+        "payments",
+        "channels.create",
     )
     .with_idempotent(true),
     // === Route Rule ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/route_rules",
-        "commerce",
-        "payments.routeRules.list",
+        "payments",
+        "routeRules.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/route_rules",
-        "commerce",
-        "payments.routeRules.create",
+        "payments",
+        "routeRules.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Patch,
         "/backend/v3/api/payments/route_rules/{routeRuleId}",
-        "commerce",
-        "payments.routeRules.update",
+        "payments",
+        "routeRules.update",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Delete,
         "/backend/v3/api/payments/route_rules/{routeRuleId}",
-        "commerce",
-        "payments.routeRules.delete",
+        "payments",
+        "routeRules.delete",
     ),
     // === Partner sub-merchants ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/sub_merchants",
-        "commerce",
-        "payments.subMerchants.list",
+        "payments",
+        "subMerchants.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/sub_merchants",
-        "commerce",
-        "payments.subMerchants.create",
+        "payments",
+        "subMerchants.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
-        "commerce",
-        "payments.subMerchants.retrieve",
+        "payments",
+        "subMerchants.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Patch,
         "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
-        "commerce",
-        "payments.subMerchants.update",
+        "payments",
+        "subMerchants.update",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Delete,
         "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
-        "commerce",
-        "payments.subMerchants.delete",
+        "payments",
+        "subMerchants.delete",
     ),
     // === Provider certificates ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/certificates",
-        "commerce",
-        "payments.certificates.list",
+        "payments",
+        "certificates.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/certificates",
-        "commerce",
-        "payments.certificates.create",
+        "payments",
+        "certificates.create",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/certificates/{certificateId}",
-        "commerce",
-        "payments.certificates.retrieve",
+        "payments",
+        "certificates.retrieve",
     ),
     HttpRoute::dual_token(
         HttpMethod::Delete,
         "/backend/v3/api/payments/certificates/{certificateId}",
-        "commerce",
-        "payments.certificates.delete",
+        "payments",
+        "certificates.delete",
     ),
     // === Attempt / Webhook / Reconciliation ===
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/attempts",
-        "commerce",
-        "payments.attempts.list",
+        "payments",
+        "attempts.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/webhook_events",
-        "commerce",
-        "payments.webhookEvents.list",
+        "payments",
+        "webhookEvents.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/webhook_events/{eventId}/replay",
-        "commerce",
-        "payments.webhookEvents.replay",
+        "payments",
+        "webhookEvents.replay",
     ),
     HttpRoute::dual_token(
         HttpMethod::Get,
         "/backend/v3/api/payments/reconciliation_runs",
-        "commerce",
-        "payments.reconciliationRuns.list",
+        "payments",
+        "reconciliationRuns.list",
     ),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/reconciliation_runs",
-        "commerce",
-        "payments.reconciliationRuns.create",
+        "payments",
+        "reconciliationRuns.create",
     )
     .with_idempotent(true),
     // === Development diagnostics ===
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/dev/sandbox_trigger",
-        "commerce",
-        "payments.dev.sandboxTrigger",
+        "payments",
+        "dev.sandboxTrigger",
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/dev/webhook_signature_test",
-        "commerce",
-        "payments.dev.webhookSignatureTest",
+        "payments",
+        "dev.webhookSignatureTest",
     )
     .with_idempotent(true),
 ];
@@ -312,13 +312,13 @@ mod tests {
             .map(|route| route.operation_id)
             .collect();
         // 鏍稿績鍐欐搷浣滃繀椤绘爣璁板箓绛?
-        assert!(idempotent_write_routes.contains(&"payments.methods.create"));
-        assert!(idempotent_write_routes.contains(&"payments.methods.update"));
-        assert!(idempotent_write_routes.contains(&"payments.providerAccounts.create"));
-        assert!(idempotent_write_routes.contains(&"payments.channels.create"));
-        assert!(idempotent_write_routes.contains(&"payments.routeRules.create"));
-        assert!(idempotent_write_routes.contains(&"payments.routeRules.update"));
-        assert!(idempotent_write_routes.contains(&"payments.reconciliationRuns.create"));
+        assert!(idempotent_write_routes.contains(&"methods.create"));
+        assert!(idempotent_write_routes.contains(&"methods.update"));
+        assert!(idempotent_write_routes.contains(&"providerAccounts.create"));
+        assert!(idempotent_write_routes.contains(&"channels.create"));
+        assert!(idempotent_write_routes.contains(&"routeRules.create"));
+        assert!(idempotent_write_routes.contains(&"routeRules.update"));
+        assert!(idempotent_write_routes.contains(&"reconciliationRuns.create"));
     }
 
     #[test]
@@ -331,8 +331,8 @@ mod tests {
             .map(|route| route.operation_id)
             .collect();
         // DELETE 鏈韩骞傜瓑锛宺eplay 鏄€掑 retries 鐨勫姩浣滐紝鍧囦笉浣跨敤骞傜瓑澶?
-        assert!(non_idempotent.contains(&"payments.routeRules.delete"));
-        assert!(non_idempotent.contains(&"payments.webhookEvents.replay"));
+        assert!(non_idempotent.contains(&"routeRules.delete"));
+        assert!(non_idempotent.contains(&"webhookEvents.replay"));
     }
 
     #[test]

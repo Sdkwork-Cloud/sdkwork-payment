@@ -76,7 +76,7 @@ struct BackendPaymentIntentListQueryParams {
     status: Option<String>,
     #[serde(default)]
     page: Option<i64>,
-    #[serde(default)]
+    #[serde(default, rename = "page_size")]
     page_size: Option<i64>,
 }
 

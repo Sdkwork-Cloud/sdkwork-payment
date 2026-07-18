@@ -20,6 +20,16 @@ use sdkwork_utils_rust::{
 use sdkwork_web_core::WebRequestContext;
 use serde::Serialize;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SdkWorkAsyncCommandData {
+    pub accepted: bool,
+    pub operation_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll_url: Option<String>,
+}
+
 /// 解析 trace_id：优先从请求上下文提取，否则生成新 uuid。
 pub fn resolve_trace_id(context: Option<&WebRequestContext>) -> String {
     context
@@ -109,6 +119,27 @@ pub fn accepted_command(
         status,
     };
     let envelope = SdkWorkApiResponse::success(command, trace_id.clone());
+    attach_trace_header(
+        (StatusCode::ACCEPTED, Json(envelope)).into_response(),
+        &trace_id,
+    )
+}
+
+/// Build the canonical HTTP 202 response for an accepted asynchronous operation.
+pub fn accepted_async_command(
+    context: Option<&WebRequestContext>,
+    operation_id: String,
+    status: impl Into<String>,
+    poll_url: Option<String>,
+) -> Response {
+    let trace_id = resolve_trace_id(context);
+    let data = SdkWorkAsyncCommandData {
+        accepted: true,
+        operation_id,
+        status: status.into(),
+        poll_url,
+    };
+    let envelope = SdkWorkApiResponse::success(data, trace_id.clone());
     attach_trace_header(
         (StatusCode::ACCEPTED, Json(envelope)).into_response(),
         &trace_id,
@@ -288,5 +319,14 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
         assert!(payload["code"].is_number());
         assert!(payload["traceId"].is_string());
+    }
+
+    #[test]
+    fn create_and_delete_helpers_use_standard_http_statuses() {
+        assert_eq!(
+            success_created_item(None, serde_json::json!({"id": "method-1"})).status(),
+            StatusCode::CREATED,
+        );
+        assert_eq!(success_no_content(None).status(), StatusCode::NO_CONTENT);
     }
 }

@@ -232,7 +232,7 @@ pub struct PaymentAppRouterMountOptions {
 impl PaymentAppRouterMountOptions {
     pub fn standalone() -> Self {
         Self {
-            include_order_payments_list: true,
+            include_order_payments_list: false,
         }
     }
 
@@ -1504,17 +1504,6 @@ fn payment_system_response(
     map_service_error(context, error)
 }
 
-fn unauthorized_response(context: Option<&WebRequestContext>, message: String) -> Response {
-    unauthorized(context, message)
-}
-
-fn validation_response(
-    context: Option<&WebRequestContext>,
-    message: impl Into<String>,
-) -> Response {
-    validation(context, message)
-}
-
 #[cfg(test)]
 mod mount_options_tests {
     use super::*;
@@ -1533,7 +1522,7 @@ mod mount_options_tests {
         unsafe {
             std::env::remove_var(FEDERATED_COMMERCE_ENV);
         }
-        assert!(resolve_payment_app_router_mount_options_from_env().include_order_payments_list);
+        assert!(!resolve_payment_app_router_mount_options_from_env().include_order_payments_list);
 
         // SAFETY: single-threaded unit test with env restore.
         unsafe {

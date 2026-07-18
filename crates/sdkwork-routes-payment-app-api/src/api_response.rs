@@ -298,6 +298,12 @@ mod tests {
     }
 
     #[test]
+    fn success_created_item_uses_http_201() {
+        let response = success_created_item(None, serde_json::json!({"id": "pi-1"}));
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    #[test]
     fn provider_unavailable_maps_to_service_unavailable() {
         let response = map_service_error(
             None,

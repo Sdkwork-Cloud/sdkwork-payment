@@ -61,4 +61,4 @@ export type { SandboxTriggerAsyncResponse } from './sandbox-trigger-async-respon
 export type { WebhookSignatureTestCommand } from './webhook-signature-test-command';
 export type { WebhookSignatureTestResult } from './webhook-signature-test-result';
 export type { WebhookSignatureTestResultResponse } from './webhook-signature-test-result-response';
-export type { PaymentsWebhookEventsReplayRequest } from './payments-webhook-events-replay-request';
+export type { WebhookEventsReplayRequest } from './webhook-events-replay-request';
