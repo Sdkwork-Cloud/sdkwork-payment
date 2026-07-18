@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.component.spec",
+  "component": {
+    "name": "sdkwork-routes-payment-backend-api",
+    "type": "rust-crate",
+    "root": "sdkwork-payment/crates/sdkwork-routes-payment-backend-api",
+    "domain": "commerce",
+    "capability": "payment",
+    "surface": "backend-api",
+    "languages": ["rust"],
+    "generated": false,
+    "manifests": ["Cargo.toml"]
+  },
+  "canonicalSpecs": [
+    { "file": "API_SPEC.md", "path": "../../../../sdkwork-specs/API_SPEC.md", "purpose": "HTTP and OpenAPI contract semantics." },
+    { "file": "PAGINATION_SPEC.md", "path": "../../../../sdkwork-specs/PAGINATION_SPEC.md", "purpose": "Store-level list pagination." },
+    { "file": "WEB_BACKEND_SPEC.md", "path": "../../../../sdkwork-specs/WEB_BACKEND_SPEC.md", "purpose": "Rust route and handler boundaries." },
+    { "file": "WEB_FRAMEWORK_SPEC.md", "path": "../../../../sdkwork-specs/WEB_FRAMEWORK_SPEC.md", "purpose": "Request context and problem mapping." }
+  ],
+  "contracts": {
+    "apiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml",
+    "apiPrefix": "/backend/v3/api",
+    "routeManifest": "sdkwork_routes_payment_backend_api::gateway_route_manifest",
+    "runtimeEntrypoints": ["sdkwork_routes_payment_backend_api::gateway_mount_business"],
+    "requestContext": "WebRequestContext",
+    "authMode": "dual-token",
+    "wireProtocol": "sdkwork-v3"
+  },
+  "verification": {
+    "commands": [
+      "cargo test -p sdkwork-routes-payment-backend-api",
+      "node ../sdkwork-specs/tools/check-api-operation-patterns.mjs --workspace .",
+      "node ../sdkwork-specs/tools/check-api-response-envelope.mjs --workspace .",
+      "node ../sdkwork-specs/tools/check-pagination.mjs --workspace ."
+    ]
+  }
+}
