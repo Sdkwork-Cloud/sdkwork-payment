@@ -36,6 +36,7 @@ import { WebhookDebugger } from "../components/WebhookDebugger";
 import type {
   PaymentCertificateDraft,
   PaymentDevConfigAdminController,
+  PaymentDevConfigAdminSection,
   PaymentDevConfigAdminState,
   PaymentDevSandboxTriggerDraft,
   PaymentDevWebhookSignatureTestDraft,
@@ -47,9 +48,8 @@ export interface PaymentDevConfigAdminWorkspaceProps {
   controller: PaymentDevConfigAdminController;
   title?: string;
   description?: string;
+  section?: PaymentDevConfigAdminSection;
 }
-
-type TabKind = "environment" | "webhook" | "certificates" | "logs";
 
 export function PaymentDevConfigAdminWorkspace(
   props: PaymentDevConfigAdminWorkspaceProps,
@@ -58,7 +58,7 @@ export function PaymentDevConfigAdminWorkspace(
   const [state, setState] = React.useState<PaymentDevConfigAdminState>(() =>
     controller.getState(),
   );
-  const [tab, setTab] = React.useState<TabKind>("environment");
+  const [tab, setTab] = React.useState<PaymentDevConfigAdminSection>("environment");
 
   React.useEffect(() => {
     return controller.subscribe(() => {
@@ -67,10 +67,10 @@ export function PaymentDevConfigAdminWorkspace(
   }, [controller]);
 
   React.useEffect(() => {
-    void controller.load().then(setState).catch(() => {
+    void controller.load(props.section).then(setState).catch(() => {
       // error already surfaced via controller state.lastError
     });
-  }, [controller]);
+  }, [controller, props.section]);
 
   const busy =
     state.status === "loading" ||
@@ -135,6 +135,52 @@ export function PaymentDevConfigAdminWorkspace(
     await controller.replayWebhookEvent(eventId);
   }
 
+  const sections: Record<PaymentDevConfigAdminSection, React.ReactNode> = {
+    environment: (
+      <EnvironmentSwitcher
+        accounts={state.providerAccounts}
+        pageInfo={state.listPageInfo?.providerAccounts}
+        busy={busy}
+        lastTestResult={state.lastTestResult}
+        onSwitchEnvironment={handleSwitchEnvironment}
+        onTest={handleTestProviderAccount}
+        onLoadMore={() => void controller.loadMoreProviderAccounts()}
+      />
+    ),
+    webhook: (
+      <WebhookDebugger
+        accounts={state.providerAccounts}
+        recentEvents={state.webhookEvents}
+        busy={busy}
+        lastSandboxTriggerResult={state.lastSandboxTriggerResult}
+        lastSignatureTestResult={state.lastSignatureTestResult}
+        onSandboxTrigger={handleSandboxTrigger}
+        onSignatureTest={handleSignatureTest}
+      />
+    ),
+    certificates: (
+      <CertificateManager
+        certificates={state.certificates}
+        pageInfo={state.listPageInfo?.certificates}
+        busy={busy}
+        onCreate={handleCreateCertificate}
+        onDelete={handleDeleteCertificate}
+        onLoadMore={() => void controller.loadMoreCertificates()}
+      />
+    ),
+    logs: (
+      <IntegrationLogs
+        events={state.webhookEvents}
+        pageInfo={state.listPageInfo?.webhookEvents}
+        busy={busy}
+        lastReplayResult={state.lastReplayResult}
+        onApplyFilter={handleApplyWebhookFilter}
+        onLoadMore={() => void controller.loadMoreWebhookEvents()}
+        onReplay={handleReplayWebhook}
+      />
+    ),
+  };
+
   return (
     <PaymentAdminI18nBoundary>
       <PaymentAdminWorkspace
@@ -143,7 +189,7 @@ export function PaymentDevConfigAdminWorkspace(
         error={state.lastError}
         title={props.title ?? "Payment integration configuration"}
       >
-        <Tabs value={tab} onValueChange={(value) => setTab(value as TabKind)}>
+        {props.section ? sections[props.section] : <Tabs value={tab} onValueChange={(value) => setTab(value as PaymentDevConfigAdminSection)}>
           <PaymentAdminTabsList aria-label="Payment developer tool sections">
             <PaymentAdminTabsTrigger value="environment">Environment &amp; Test</PaymentAdminTabsTrigger>
             <PaymentAdminTabsTrigger value="webhook">Webhook Debugger</PaymentAdminTabsTrigger>
@@ -152,52 +198,21 @@ export function PaymentDevConfigAdminWorkspace(
           </PaymentAdminTabsList>
 
           <PaymentAdminTabsContent value="environment">
-            <EnvironmentSwitcher
-              accounts={state.providerAccounts}
-              pageInfo={state.listPageInfo?.providerAccounts}
-              busy={busy}
-              lastTestResult={state.lastTestResult}
-              onSwitchEnvironment={handleSwitchEnvironment}
-              onTest={handleTestProviderAccount}
-              onLoadMore={() => void controller.loadMoreProviderAccounts()}
-            />
+            {sections.environment}
           </PaymentAdminTabsContent>
 
           <PaymentAdminTabsContent value="webhook">
-            <WebhookDebugger
-              accounts={state.providerAccounts}
-              recentEvents={state.webhookEvents}
-              busy={busy}
-              lastSandboxTriggerResult={state.lastSandboxTriggerResult}
-              lastSignatureTestResult={state.lastSignatureTestResult}
-              onSandboxTrigger={handleSandboxTrigger}
-              onSignatureTest={handleSignatureTest}
-            />
+            {sections.webhook}
           </PaymentAdminTabsContent>
 
           <PaymentAdminTabsContent value="certificates">
-            <CertificateManager
-              certificates={state.certificates}
-              pageInfo={state.listPageInfo?.certificates}
-              busy={busy}
-              onCreate={handleCreateCertificate}
-              onDelete={handleDeleteCertificate}
-              onLoadMore={() => void controller.loadMoreCertificates()}
-            />
+            {sections.certificates}
           </PaymentAdminTabsContent>
 
           <PaymentAdminTabsContent value="logs">
-            <IntegrationLogs
-              events={state.webhookEvents}
-              pageInfo={state.listPageInfo?.webhookEvents}
-              busy={busy}
-              lastReplayResult={state.lastReplayResult}
-              onApplyFilter={handleApplyWebhookFilter}
-              onLoadMore={() => void controller.loadMoreWebhookEvents()}
-              onReplay={handleReplayWebhook}
-            />
+            {sections.logs}
           </PaymentAdminTabsContent>
-        </Tabs>
+        </Tabs>}
       </PaymentAdminWorkspace>
     </PaymentAdminI18nBoundary>
   );

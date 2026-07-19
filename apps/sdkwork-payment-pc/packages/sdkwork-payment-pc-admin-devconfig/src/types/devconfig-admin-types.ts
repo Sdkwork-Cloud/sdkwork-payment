@@ -245,6 +245,12 @@ export type PaymentDevConfigStatus =
   | "testing"
   | "error";
 
+export type PaymentDevConfigAdminSection =
+  | "environment"
+  | "webhook"
+  | "certificates"
+  | "logs";
+
 export interface PaymentDevConfigAdminState {
   /** Lightweight provider account list for environment switcher + credential test. */
   readonly providerAccounts: readonly PaymentProviderAccountView[];
@@ -268,7 +274,7 @@ export interface PaymentDevConfigAdminState {
 export interface PaymentDevConfigAdminController {
   getState(): PaymentDevConfigAdminState;
   subscribe(listener: () => void): () => void;
-  load(): Promise<PaymentDevConfigAdminState>;
+  load(section?: PaymentDevConfigAdminSection): Promise<PaymentDevConfigAdminState>;
   loadMoreCertificates(): Promise<readonly PaymentCertificateView[]>;
   loadMoreWebhookEvents(filter?: PaymentWebhookEventListFilter): Promise<readonly PaymentWebhookEventView[]>;
   loadMoreProviderAccounts(): Promise<readonly PaymentProviderAccountView[]>;

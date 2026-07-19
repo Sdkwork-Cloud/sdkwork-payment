@@ -100,7 +100,7 @@ pub struct BackendPaymentIntentView {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendPaymentIntentResponse {
-    payment_intent_id: String,
+    id: String,
     tenant_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     organization_id: Option<String>,
@@ -442,7 +442,7 @@ fn map_payment_intent_row_pg(row: &PgRow) -> BackendPaymentIntentView {
 
 fn map_payment_intent(value: BackendPaymentIntentView) -> BackendPaymentIntentResponse {
     BackendPaymentIntentResponse {
-        payment_intent_id: value.payment_intent_id,
+        id: value.payment_intent_id,
         tenant_id: value.tenant_id,
         organization_id: value.organization_id,
         owner_user_id: value.owner_user_id,
@@ -455,6 +455,34 @@ fn map_payment_intent(value: BackendPaymentIntentView) -> BackendPaymentIntentRe
         status: value.status,
         created_at: value.created_at,
         updated_at: value.updated_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{map_payment_intent, BackendPaymentIntentView};
+
+    #[test]
+    fn payment_intent_response_uses_the_openapi_id_field() {
+        let response = map_payment_intent(BackendPaymentIntentView {
+            payment_intent_id: "intent-1".to_owned(),
+            tenant_id: "100001".to_owned(),
+            organization_id: Some("100002".to_owned()),
+            owner_user_id: "1".to_owned(),
+            order_id: "order-1".to_owned(),
+            payment_intent_no: "PI-1".to_owned(),
+            payment_method: "sandbox_test".to_owned(),
+            provider_code: "sandbox".to_owned(),
+            amount: "9.99".to_owned(),
+            currency_code: "CNY".to_owned(),
+            status: "succeeded".to_owned(),
+            created_at: "2026-07-20T00:00:00Z".to_owned(),
+            updated_at: "2026-07-20T00:00:01Z".to_owned(),
+        });
+        let value = serde_json::to_value(response).expect("serialize payment intent response");
+
+        assert_eq!(value["id"], "intent-1");
+        assert!(value.get("paymentIntentId").is_none());
     }
 }
 

@@ -33,6 +33,7 @@ import type {
   PaymentCertificateDraft,
   PaymentCertificateView,
   PaymentDevConfigAdminController,
+  PaymentDevConfigAdminSection,
   PaymentDevConfigAdminState,
   PaymentDevConfigStatus,
   PaymentDevSandboxTriggerDraft,
@@ -360,17 +361,26 @@ export function createPaymentDevConfigAdminController(
       };
     },
 
-    async load() {
+    async load(section?: PaymentDevConfigAdminSection) {
       setStatus("loading", undefined);
-      sessions.providerAccounts.reset();
-      sessions.certificates.reset();
-      sessions.webhookEvents.reset();
-      sessions.webhookEventsFilter = undefined;
+      const loadProviderAccounts = !section || section === "environment" || section === "webhook";
+      const loadCertificates = !section || section === "certificates";
+      const loadWebhookEvents = !section || section === "webhook" || section === "logs";
+      if (loadProviderAccounts) {
+        sessions.providerAccounts.reset();
+      }
+      if (loadCertificates) {
+        sessions.certificates.reset();
+      }
+      if (loadWebhookEvents) {
+        sessions.webhookEvents.reset();
+        sessions.webhookEventsFilter = undefined;
+      }
       try {
         await Promise.all([
-          sessions.providerAccounts.list(),
-          sessions.certificates.list(),
-          sessions.webhookEvents.list(),
+          ...(loadProviderAccounts ? [sessions.providerAccounts.list()] : []),
+          ...(loadCertificates ? [sessions.certificates.list()] : []),
+          ...(loadWebhookEvents ? [sessions.webhookEvents.list()] : []),
         ]);
         setState({
           status: "ready",

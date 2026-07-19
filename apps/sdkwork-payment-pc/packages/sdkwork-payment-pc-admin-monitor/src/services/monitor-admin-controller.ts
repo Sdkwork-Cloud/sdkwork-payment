@@ -68,7 +68,7 @@ function mapIntent(value: unknown): PaymentIntentView | undefined {
     return undefined;
   }
   const record = value as Record<string, unknown>;
-  const id = asString(record.id);
+  const id = asString(record.id ?? record.paymentIntentId ?? record.payment_intent_id);
   if (!id) {
     return undefined;
   }

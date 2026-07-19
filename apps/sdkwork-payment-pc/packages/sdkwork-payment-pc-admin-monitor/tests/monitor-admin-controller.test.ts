@@ -59,4 +59,32 @@ describe("createPaymentMonitorAdminController", () => {
     expect(controller.getState().intents).toHaveLength(1);
     expect(controller.getState().status).toBe("ready");
   });
+
+  it("keeps payment records returned by a rolling-upgrade backend id alias", async () => {
+    const intentsList = vi.fn().mockResolvedValue({
+      items: [{
+        amount: "19.90",
+        createdAt: "2026-07-20T00:00:00.000Z",
+        currencyCode: "CNY",
+        orderId: "order-legacy-1",
+        ownerUserId: "user-1",
+        paymentIntentId: "intent-legacy-1",
+        paymentIntentNo: "PI-LEGACY-1",
+        paymentMethod: "sandbox_test",
+        providerCode: "sandbox",
+        status: "succeeded",
+        updatedAt: "2026-07-20T00:01:00.000Z",
+      }],
+      pageInfo: { hasMore: false, mode: "offset", totalItems: "1" },
+    });
+    const controller = createPaymentMonitorAdminController({
+      service: createBackendService(intentsList),
+    });
+
+    await controller.load();
+
+    expect(controller.getState().intents).toEqual([
+      expect.objectContaining({ id: "intent-legacy-1" }),
+    ]);
+  });
 });
