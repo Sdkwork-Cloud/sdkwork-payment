@@ -25,10 +25,11 @@
                                          "locales":  {},
                                          "common":  [
                                                         "001_payment_method_catalog.sql",
-                                                        "002_production_templates.sql",
-                                                        "006_upgrade_bootstrap_templates.sql",
-                                                        "003_development_templates.sql"
-                                                    ]
+                                                         "002_production_templates.sql",
+                                                         "006_upgrade_bootstrap_templates.sql",
+                                                         "003_development_templates.sql",
+                                                         "007_development_demo_data.sql"
+                                                     ]
                                      },
                      "test":  {
                                   "locales":  {},

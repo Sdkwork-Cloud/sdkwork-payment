@@ -34,7 +34,7 @@ explicitly opts in.
 
 | Runtime | Profile | Initial state |
 | --- | --- | --- |
-| Development | `development` | Complete catalog and an active local sandbox method/channel; external PSP templates remain inactive. |
+| Development | `development` | Complete catalog, an active local sandbox method/channel, and credential-free demo data for every Payment admin workflow; external PSP templates remain inactive. |
 | Test/CI | `test` | Complete catalog and an active isolated test sandbox method/channel; external PSP templates remain inactive. |
 | Production | `production` or `standard` | Complete catalog and channels are pre-wired; provider accounts are inactive and act as the routing gate. |
 

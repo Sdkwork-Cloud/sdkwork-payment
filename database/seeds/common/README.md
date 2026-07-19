@@ -3,7 +3,9 @@
 Locale-agnostic payment bootstrap data. The seed manifest explicitly selects one
 of the following environment profiles; directory ordering is never used.
 
-- `development`: complete payment catalog plus an active local sandbox channel.
+- `development`: complete payment catalog, an active local sandbox channel, and
+  organization-scoped demo records covering the full admin workflow. Demo rows
+  contain no usable credentials or private certificate material.
 - `test`: complete payment catalog plus an active isolated test sandbox channel.
 - `production` / `standard`: complete payment catalog and editable PSP templates.
   Catalog methods and channels are pre-wired and active, but remain hidden from
@@ -15,11 +17,12 @@ of the following environment profiles; directory ordering is never used.
   database-backed write-only credentials, then activate the account; no schema, method, or
   adapter code changes are required for a live WeChat Pay connection.
 
-All records are scoped to the platform bootstrap tenant `100001` and organization
-`0`, matching the shared commerce bootstrap scope. Catalog/template scripts
-insert only missing business records. `006_upgrade_bootstrap_templates.sql`
-repairs only inactive rows that still carry the bootstrap/mock marker, so real
-administrator-owned configurations are not overwritten.
+All records are scoped to the platform bootstrap tenant `100001`. Backend-admin
+records use the stable bootstrap administrator organization `100002`; IAM
+organization id `0` is a tenant-login sentinel and is not a valid organization
+session scope. Catalog/template scripts insert only missing business records.
+`006_upgrade_bootstrap_templates.sql` repairs only bootstrap-marked rows, so
+real administrator-owned configurations are not overwritten.
 
 Keep JSON literals inside the target table's `INSERT ... VALUES` context. Moving
 them into an untyped CTE makes PostgreSQL infer `text`, which cannot be assigned
