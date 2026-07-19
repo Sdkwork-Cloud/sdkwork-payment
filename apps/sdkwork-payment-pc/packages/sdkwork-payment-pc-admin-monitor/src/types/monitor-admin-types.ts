@@ -312,6 +312,7 @@ export interface PaymentMonitorAdminController {
   getState(): PaymentMonitorAdminState;
   subscribe(listener: () => void): () => void;
   load(): Promise<PaymentMonitorAdminState>;
+  refreshIntents(): Promise<readonly PaymentIntentView[]>;
   loadMoreIntents(): Promise<readonly PaymentIntentView[]>;
   loadMoreAttempts(): Promise<readonly PaymentAttemptView[]>;
   loadMoreWebhookEvents(): Promise<readonly PaymentWebhookEventView[]>;

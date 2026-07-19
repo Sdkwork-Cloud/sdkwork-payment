@@ -49,9 +49,10 @@ export interface PaymentProviderAccountView {
   readonly environment: PaymentProviderEnvironment;
   readonly countryCode?: string;
   readonly settlementCurrency: string;
-  readonly secretRef: string;
-  readonly webhookSecretRef?: string;
-  readonly certificateRef?: string;
+  readonly hasPrimarySecret: boolean;
+  readonly hasWebhookSecret: boolean;
+  readonly hasCertificate: boolean;
+  readonly credentialStorage: "database_encrypted" | "legacy_reference" | "none";
   readonly status: PaymentProviderAccountStatus;
   readonly metadata: Record<string, unknown>;
   readonly certificateExpiresAt?: string;
@@ -86,17 +87,15 @@ export type PaymentCertificateStatus = "active" | "expired" | "revoked" | "pendi
 /**
  * Read-only certificate view (mirrors OpenAPI `Certificate` schema).
  *
- * The PEM content itself is never stored in the DB; only the env var reference
- * (`certificateRef`) and parsed metadata (`subject`, `issuer`, `fingerprint`,
- * `expiresAt`) are persisted. The backend parses these from `pemContent` at
- * create time when provided.
+ * PEM content is write-only and encrypted before database persistence.
  */
 export interface PaymentCertificateView {
   readonly id: string;
   readonly certificateNo: string;
   readonly providerCode?: PaymentProviderCode;
   readonly certificateType: PaymentCertificateKind;
-  readonly certificateRef: string;
+  readonly hasContent: boolean;
+  readonly credentialStorage: "database_encrypted" | "legacy_reference";
   readonly subject?: string;
   readonly issuer?: string;
   readonly fingerprint?: string;
@@ -110,17 +109,13 @@ export interface PaymentCertificateView {
 /**
  * Create certificate command (mirrors OpenAPI `CreateCertificateCommand`).
  *
- * When `pemContent` (base64 PEM) is provided, the backend parses
- * subject/issuer/fingerprint/expiresAt server-side and returns them in the
- * created `Certificate` view. This mirrors Stripe Dashboard's "paste the key
- * and we'll fill in the details" UX.
+ * Certificate content is never returned by the backend.
  */
 export interface PaymentCertificateDraft {
   readonly certificateNo: string;
   readonly providerCode?: PaymentProviderCode;
   readonly certificateType: PaymentCertificateKind;
-  readonly certificateRef: string;
-  readonly pemContent?: string;
+  readonly certificate: string;
   readonly metadata?: Record<string, unknown>;
 }
 

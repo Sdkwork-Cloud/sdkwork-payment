@@ -63,9 +63,10 @@ Errors use HTTP 4xx/5xx `application/problem+json` (`SdkWorkProblemDetail`) with
 | `alipay` | `trade.precreate` → `qrCodeUrl` | `trade.query` | `trade.close` | `trade.refund` | RSA2 form sign |
 | `wechat_pay` | Native → `code_url` | out-trade-no query | close | domestic refund | platform RSA + AES-GCM |
 
-- Registry: `PaymentProviderRegistry::from_env()` reads deployment env vars; tenant-scoped `commerce_payment_provider_account` rows override per provider via `secret_ref` (env var name), `webhook_secret_ref`, `certificate_ref`, and `metadata` JSON.
+- Registry: tenant-scoped `commerce_payment_provider_account` rows load encrypted, versioned credentials from `commerce_payment_provider_credential`; the adapter receives plaintext only in memory. `PaymentProviderRegistry::from_env()` remains a migration fallback for legacy deployments.
+- Routability: catalog methods and channels may be pre-enabled, but a channel bound to a provider account is returned and accepted only while that account is active. Multiple active accounts for the same tenant/organization/provider fail closed until deterministic channel routing is configured.
 - Pay flow: after repository persists intent/attempt, shared `enrich_owner_order_payment_*` (`owner_order_checkout.rs`) calls the configured PSP and merges `providerTransactionId` / `providerStatus` into attempt `callback_payload` for later close/cancel.
-- Reconcile (app): `POST /payments:reconcile` is a **lookup** command that returns the latest payment record for `orderId` or `outTradeNo`; PSP status repair is not performed inline (use backend webhook replay or order settlement).
+- Reconcile (app): `POST /payments/reconcile` is a **lookup** command that returns the latest payment record for `orderId` or `outTradeNo`; PSP status repair is not performed inline (use backend webhook replay or order settlement).
 - Close: `POST /payments/{paymentId}/close` marks attempt/intent `canceled` in the database first, then best-effort PSP cancel (Stripe uses `providerTransactionId` from attempt `callback_payload` when present).
 - Refund: `POST /refunds` persists the refund row, then submits `create_refund` to the PSP with up to three transient retries; terminal PSP failure marks the refund `failed` in DB and returns an error response.
 - Checkout polling: `GET /payments/checkout/{paymentId}` re-enriches pending attempts via PSP for cashier/QR parameters.
@@ -115,7 +116,7 @@ DDL baselines: `database/ddl/baseline/sqlite/` and `database/ddl/baseline/postgr
 
 ## Production hardening
 
-### PSP environment variables
+### Legacy PSP environment-variable fallback
 
 | Variable | Provider | Purpose |
 | --- | --- | --- |
@@ -135,15 +136,19 @@ DDL baselines: `database/ddl/baseline/sqlite/` and `database/ddl/baseline/postgr
 
 ### Tenant provider accounts (`commerce_payment_provider_account`)
 
-Backend admin upserts (methods, provider accounts, channels, route rules) and reconciliation run creation use `success_command_accepted` (`data.accepted` + optional `resourceId`). Provider accounts use `secretRef` pointing to an **environment variable name** (never plaintext secrets in DB). At runtime pay/close/refund resolve the active account for `(tenant_id, organization_id, provider_code)` and merge credentials into the PSP registry.
+Backend admin upserts (methods, provider accounts, channels, route rules) and reconciliation run creation use `success_command_accepted` (`data.accepted` + optional `resourceId`). Provider credential inputs are write-only and encrypted before database persistence. At runtime pay/close/refund resolve the active account for `(tenant_id, organization_id, provider_code)`, decrypt its active credential versions, and merge them into the PSP registry.
 
 | Field | Purpose |
 | --- | --- |
-| `secret_ref` | Env var for primary secret (Stripe secret key, Alipay/WeChat private key PEM) |
-| `webhook_secret_ref` | Env var for webhook secret (Stripe) or WeChat API v3 key |
-| `certificate_ref` | Env var for Alipay public key or WeChat platform cert PEM |
+| `commerce_payment_provider_credential` / `primary_secret` | Encrypted Stripe secret key or Alipay/WeChat merchant private key PEM |
+| `commerce_payment_provider_credential` / `webhook_secret` | Encrypted Stripe webhook secret or WeChat API v3 key |
+| `commerce_payment_provider_credential` / `certificate` | Encrypted Alipay public key or WeChat platform certificate PEM |
 | `merchant_id` | Alipay `app_id` or WeChat `mch_id` |
-| `metadata` | JSON extras: `appId`, `merchantSerialNo`, `returnUrl` |
+| `metadata` | JSON extras: `appId`, `merchantSerialNo`, `notifyUrl`, `returnUrl`; production seeds start with explicit mock identifiers that can be replaced without changing adapter code |
+
+WeChat product routing uses `paymentMethod` as the upstream V3 product key. `wechat_jsapi` requires `payerOpenId`; `wechat_h5` requires `clientIp`; Native and App do not require those payer fields. `paymentScene` remains a client/channel scene selector and is not substituted for the provider product key.
+
+Credential envelopes use `PaymentCredentialCipher` with AES-256-GCM and an HKDF context bound to tenant, provider account, and credential kind. The standalone host creates its wrapping key once at `.runtime/payment/credential-master.key`, which is excluded from source control; federated production hosts may install a KMS-backed implementation through `install_payment_credential_cipher`. The wrapping key is never stored in the payment database. Back up or centrally manage that key before running multiple replicas, because losing it makes stored credentials intentionally undecryptable.
 
 - CORS: `PAYMENT_API_CORS_ORIGINS` whitelist (no `*`)
 - Graceful shutdown, 30s request timeout, 1 MiB body limit

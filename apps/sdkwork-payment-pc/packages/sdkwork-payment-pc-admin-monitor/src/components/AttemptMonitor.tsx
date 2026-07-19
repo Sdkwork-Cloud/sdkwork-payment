@@ -36,6 +36,7 @@ import type {
   PaymentProviderCode,
   PaymentStatus,
 } from "../types/monitor-admin-types";
+import { usePaymentRecordsMessages } from "../i18n";
 
 export interface AttemptMonitorProps {
   attempts: readonly PaymentAttemptView[];
@@ -45,15 +46,14 @@ export interface AttemptMonitorProps {
   onLoadMore(): void;
 }
 
-const STATUS_OPTIONS: ReadonlyArray<{ label: string; value: PaymentStatus | "" }> = [
-  { label: "All statuses", value: "" },
-  { label: "Created", value: "created" },
-  { label: "Pending", value: "pending" },
-  { label: "Processing", value: "processing" },
-  { label: "Succeeded", value: "succeeded" },
-  { label: "Failed", value: "failed" },
-  { label: "Canceled", value: "canceled" },
-  { label: "Closed", value: "closed" },
+const FILTER_STATUS_VALUES: readonly PaymentStatus[] = [
+  "created",
+  "pending",
+  "processing",
+  "succeeded",
+  "failed",
+  "canceled",
+  "closed",
 ];
 
 const STATUS_VARIANT: Record<PaymentStatus, "default" | "success" | "warning" | "danger" | "secondary"> = {
@@ -69,6 +69,19 @@ const STATUS_VARIANT: Record<PaymentStatus, "default" | "success" | "warning" | 
 };
 
 export function AttemptMonitor(props: AttemptMonitorProps) {
+  const messages = usePaymentRecordsMessages();
+  const operations = messages.operations;
+  const statusOptions = [
+    { label: operations.filters.allStatuses, value: "" },
+    ...FILTER_STATUS_VALUES.map((value) => ({
+      label: operations.attempts.status[value],
+      value,
+    })),
+  ];
+  const providerOptions = ADMIN_PROVIDER_FILTER_OPTIONS.map((option) => ({
+    ...option,
+    label: option.value ? option.label : operations.filters.allProviders,
+  }));
   const [status, setStatus] = React.useState<string>("");
   const [providerCode, setProviderCode] = React.useState<string>("");
   const [paymentIntentId, setPaymentIntentId] = React.useState("");
@@ -85,7 +98,7 @@ export function AttemptMonitor(props: AttemptMonitorProps) {
       ...(q.trim() ? { q: q.trim() } : {}),
     };
     Promise.resolve(props.onApplyFilter(filter)).catch((err) => {
-      setError(err instanceof Error ? err.message : "Failed to apply filter.");
+      setError(err instanceof Error ? err.message : operations.validation.applyFilterFailed);
     });
   }
 
@@ -96,7 +109,7 @@ export function AttemptMonitor(props: AttemptMonitorProps) {
     setQ("");
     setError(undefined);
     Promise.resolve(props.onApplyFilter({})).catch((err) => {
-      setError(err instanceof Error ? err.message : "Failed to clear filters.");
+      setError(err instanceof Error ? err.message : operations.validation.clearFiltersFailed);
     });
   }
 
@@ -106,53 +119,53 @@ export function AttemptMonitor(props: AttemptMonitorProps) {
         className="grid grid-cols-1 gap-3 rounded-md border border-[var(--sdk-color-border-subtle)] p-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={handleApply}
       >
-        <AdminFieldLabel label="Status" htmlFor="attempt-filter-status">
+        <AdminFieldLabel label={operations.filters.status} htmlFor="attempt-filter-status">
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger id="attempt-filter-status">
-              <SelectValue placeholder="All statuses" />
+              <SelectValue placeholder={operations.filters.allStatuses} />
             </SelectTrigger>
             <SelectContent>
-              {STATUS_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={option.value}>
+              {statusOptions.map((option) => (
+                <SelectItem key={option.value || "all"} value={option.value}>
                   {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Provider" htmlFor="attempt-filter-provider">
+        <AdminFieldLabel label={operations.filters.provider} htmlFor="attempt-filter-provider">
           <Select value={providerCode} onValueChange={setProviderCode}>
             <SelectTrigger id="attempt-filter-provider">
-              <SelectValue placeholder="All providers" />
+              <SelectValue placeholder={operations.filters.allProviders} />
             </SelectTrigger>
             <SelectContent>
-              {ADMIN_PROVIDER_FILTER_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={option.value}>
+              {providerOptions.map((option) => (
+                <SelectItem key={option.value || "all"} value={option.value}>
                   {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Intent ID" htmlFor="attempt-filter-intent">
+        <AdminFieldLabel label={operations.attempts.intentIdentifier} htmlFor="attempt-filter-intent">
           <Input
             id="attempt-filter-intent"
             value={paymentIntentId}
             onChange={(event) => setPaymentIntentId(event.target.value)}
-            placeholder="Filter by intent"
+            placeholder={operations.attempts.intentPlaceholder}
           />
         </AdminFieldLabel>
-        <AdminFieldLabel label="Search" htmlFor="attempt-filter-q">
+        <AdminFieldLabel label={operations.filters.search} htmlFor="attempt-filter-q">
           <Input
             id="attempt-filter-q"
             value={q}
             onChange={(event) => setQ(event.target.value)}
-            placeholder="Free-text search"
+            placeholder={operations.filters.searchPlaceholder}
           />
         </AdminFieldLabel>
         <div className="col-span-full flex justify-end">
-          <Button type="submit" size="sm" disabled={props.busy} title={props.busy ? "Cannot apply filter while another operation is in progress" : "Apply the current filter"}>
-            Apply filter
+          <Button type="submit" size="sm" disabled={props.busy} title={operations.availability.applyFilter}>
+            {operations.actions.applyFilter}
           </Button>
         </div>
       </form>
@@ -168,10 +181,10 @@ export function AttemptMonitor(props: AttemptMonitorProps) {
 
       {props.attempts.length === 0 ? (
         <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-8 text-center text-sm text-[var(--sdk-color-text-secondary)]">
-          No payment attempts found. Adjust the filter or wait for new transactions.
+          {operations.attempts.empty}
           <div className="mt-3">
             <Button type="button" variant="ghost" size="sm" onClick={handleResetFilter} disabled={props.busy}>
-              Clear filters
+              {operations.actions.clearFilters}
             </Button>
           </div>
         </div>
@@ -186,36 +199,36 @@ export function AttemptMonitor(props: AttemptMonitorProps) {
                 <Badge variant="outline" className="font-mono">
                   {ADMIN_PROVIDER_LABEL[attempt.providerCode]}
                 </Badge>
-                <Badge variant={STATUS_VARIANT[attempt.status]}>{attempt.status}</Badge>
+                <Badge variant={STATUS_VARIANT[attempt.status]}>{operations.attempts.status[attempt.status]}</Badge>
               </div>
               <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] sm:grid-cols-4">
                 <div>
-                  <dt className="inline">Intent:</dt>{" "}
+                  <dt className="inline">{operations.attempts.fields.intent}:</dt>{" "}
                   <dd className="inline font-mono">{attempt.paymentIntentId || "—"}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Channel:</dt>{" "}
+                  <dt className="inline">{operations.attempts.fields.channel}:</dt>{" "}
                   <dd className="inline font-mono">{attempt.channelId || "—"}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Amount:</dt>{" "}
+                  <dt className="inline">{operations.attempts.fields.amount}:</dt>{" "}
                   <dd className="inline">
                     {formatAdminAmount(attempt.amount, attempt.currencyCode)}
                   </dd>
                 </div>
                 <div>
-                  <dt className="inline">PSP tx:</dt>{" "}
+                  <dt className="inline">{operations.attempts.fields.providerTransaction}:</dt>{" "}
                   <dd className="inline font-mono">{attempt.providerTransactionId ?? "—"}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Out trade no:</dt>{" "}
+                  <dt className="inline">{operations.attempts.fields.outTradeNumber}:</dt>{" "}
                   <dd className="inline font-mono">{attempt.outTradeNo ?? "—"}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Paid at:</dt> <dd className="inline">{attempt.paidAt ? formatAdminTimestamp(attempt.paidAt) : "—"}</dd>
+                  <dt className="inline">{operations.attempts.fields.paidAt}:</dt> <dd className="inline">{attempt.paidAt ? formatAdminTimestamp(attempt.paidAt) : "—"}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Created:</dt> <dd className="inline">{formatAdminRelativeTime(attempt.createdAt)}</dd>
+                  <dt className="inline">{operations.attempts.fields.created}:</dt> <dd className="inline">{formatAdminRelativeTime(attempt.createdAt)}</dd>
                 </div>
               </dl>
             </li>
@@ -225,8 +238,12 @@ export function AttemptMonitor(props: AttemptMonitorProps) {
 
       <SdkworkPaymentListPaginationControls
         busy={props.busy ?? false}
+        label={operations.actions.loadMore}
         onLoadMore={props.onLoadMore}
         pageInfo={props.pageInfo}
+        summary={props.pageInfo?.totalItems
+          ? messages.table.paginationSummary(props.attempts.length, props.pageInfo.totalItems)
+          : undefined}
       />
     </div>
   );

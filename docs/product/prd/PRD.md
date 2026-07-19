@@ -66,6 +66,8 @@ The system supports 15 payment method keys across 4 providers, defined in `admin
 | `wechat_jsapi` | WeChat Pay JSAPI | wechat_pay | `/v3/pay/transactions/jsapi` — Official Account / Mini Program (requires openid) |
 | `wechat_h5` | WeChat Pay H5 | wechat_pay | `/v3/pay/transactions/h5` — mobile browser (requires client_ip) |
 | `wechat_app` | WeChat Pay App | wechat_pay | `/v3/pay/transactions/app` — native App SDK |
+
+For payment creation, `wechat_jsapi` requires `payerOpenId` and `wechat_h5` requires `clientIp`. The selected payment method, rather than the generic UI/client scene, determines the upstream WeChat V3 endpoint.
 | `sandbox_test` | Sandbox Test | sandbox | Local cashier URL — no external HTTP |
 
 ## 6. Webhook Event Management
@@ -76,7 +78,7 @@ Inbound PSP webhook events are stored and managed through the backend admin API:
 - **Signature verification**: events carry `signatureStatus` (`valid` / `invalid` / `unverified` / `unknown`) mirroring Stripe Dashboard's webhook signature indicator
 - **Replay**: `POST /backend/v3/api/payments/webhook_events/{eventId}/replay` re-applies stored event payload; capped at `WEBHOOK_STORED_ADMIN_WEBHOOK_REPLAY_MAX_RETRIES` (5)
 - **Sandbox trigger**: `POST /backend/v3/api/payments/dev/sandbox_trigger` simulates a PSP webhook event for development/sandbox environments
-- **Signature test**: `POST /backend/v3/api/payments/dev/webhook_signature_test` verifies a raw payload + signature against the configured `webhook_secret_ref`
+- **Signature test**: `POST /backend/v3/api/payments/dev/webhook_signature_test` verifies a raw payload + signature against the provider account's encrypted database credential
 
 ## 7. Reconciliation
 
@@ -86,7 +88,7 @@ Reconciliation runs compare internal payment records against PSP settlement repo
 - **Run status lifecycle**: `pending` → `queued` → `running` → `succeeded` / `failed` / `canceled`
 - **Metrics**: `matchedCount`, `mismatchedCount`, `unmatchedCount`, `totalDifferenceAmount`
 - **Create**: `POST /backend/v3/api/payments/reconciliation_runs` creates a new reconciliation run
-- **App reconcile lookup**: `POST /app/v3/api/payments:reconcile` is a lookup command that returns the latest payment record for an `orderId` or `outTradeNo` (PSP status repair is not performed inline)
+- **App reconcile lookup**: `POST /app/v3/api/payments/reconcile` is a lookup command that returns the latest payment record for an `orderId` or `outTradeNo` (PSP status repair is not performed inline)
 
 ## 8. User Scenarios
 

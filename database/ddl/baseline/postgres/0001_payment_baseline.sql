@@ -363,7 +363,44 @@ CREATE INDEX IF NOT EXISTS idx_commerce_payment_provider_account_cert_expiry
     WHERE deleted_at IS NULL AND certificate_expires_at IS NOT NULL;
 
 -- =============================================================================
--- 7.1 commerce_payment_sub_merchant
+-- 7.1 commerce_payment_provider_credential
+-- =============================================================================
+-- Write-only provider credential material. ciphertext is an AES-256-GCM envelope;
+-- the wrapping key is owned by the runtime key provider and is never stored here.
+-- API projections may expose only kind, status, fingerprint suffix and timestamps.
+CREATE TABLE IF NOT EXISTS commerce_payment_provider_credential (
+    id                       TEXT PRIMARY KEY,
+    tenant_id                TEXT NOT NULL,
+    organization_id          TEXT,
+    provider_account_id      TEXT NOT NULL,
+    credential_kind          TEXT NOT NULL
+                             CHECK (credential_kind IN ('primary_secret', 'webhook_secret', 'certificate')),
+    ciphertext               TEXT NOT NULL,
+    encryption_key_id        TEXT NOT NULL,
+    encryption_algorithm     TEXT NOT NULL,
+    fingerprint_sha256       TEXT NOT NULL,
+    status                   TEXT NOT NULL DEFAULT 'active'
+                             CHECK (status IN ('active', 'superseded', 'revoked')),
+    version                  BIGINT NOT NULL DEFAULT 1,
+    rotated_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at               TIMESTAMPTZ,
+    CONSTRAINT fk_commerce_payment_provider_credential_account
+        FOREIGN KEY (provider_account_id) REFERENCES commerce_payment_provider_account(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_provider_credential_active
+    ON commerce_payment_provider_credential
+       (tenant_id, COALESCE(organization_id, ''), provider_account_id, credential_kind)
+    WHERE status = 'active' AND deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_provider_credential_history
+    ON commerce_payment_provider_credential
+       (tenant_id, provider_account_id, credential_kind, version DESC);
+
+-- =============================================================================
+-- 7.2 commerce_payment_sub_merchant
 -- =============================================================================
 -- Sub-merchant records under a partner/ISV provider account.
 -- Maps to: Alipay sub_appid (offline merchant expansion), WeChat sub_mch_id (sub-merchant
@@ -406,10 +443,8 @@ CREATE INDEX IF NOT EXISTS idx_commerce_payment_sub_merchant_sub_mch_id
 -- 7.2 commerce_payment_certificate
 -- =============================================================================
 -- Certificate store: PEM-encoded public/private certificates used by provider accounts.
--- certificate_ref on provider_account points to an env var name; this table stores the
--- metadata (subject, issuer, serial, expires_at, fingerprint) and a content_ref (env var
--- or secret store path) for the PEM itself. Private keys MUST never be persisted as plaintext;
--- use the env var indirection via content_ref. Status tracks lifecycle (active/expired/revoked).
+-- This table stores metadata plus AES-256-GCM encrypted PEM content. content_ref is a
+-- non-secret storage-mode marker retained for schema compatibility.
 CREATE TABLE IF NOT EXISTS commerce_payment_certificate (
     id                TEXT PRIMARY KEY,
     tenant_id         TEXT NOT NULL,
@@ -423,6 +458,9 @@ CREATE TABLE IF NOT EXISTS commerce_payment_certificate (
     serial_number     TEXT,
     fingerprint_sha256 TEXT,
     content_ref       TEXT NOT NULL,
+    ciphertext        TEXT,
+    encryption_key_id TEXT,
+    encryption_algorithm TEXT,
     valid_from        TIMESTAMPTZ,
     valid_until       TIMESTAMPTZ,
     status            TEXT NOT NULL DEFAULT 'active'

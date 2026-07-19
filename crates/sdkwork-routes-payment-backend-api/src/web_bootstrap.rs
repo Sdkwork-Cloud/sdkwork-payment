@@ -9,7 +9,7 @@
 
 use axum::Router;
 use sdkwork_iam_web_adapter::IamWebRequestContextResolver;
-use sdkwork_web_axum::{with_web_request_context, WebFrameworkLayer};
+use sdkwork_web_axum::with_web_request_context;
 use sdkwork_web_core::WebRequestContextProfile;
 
 use crate::http_route_manifest::{
@@ -26,12 +26,18 @@ pub fn wrap_router_with_web_framework(
         .validate_public_path_prefixes(&payment_backend_api_public_path_prefixes())
         .expect("payment backend-api public prefixes must not cover protected manifest routes");
 
-    let layer = WebFrameworkLayer::new(resolver)
-        .with_profile(WebRequestContextProfile {
-            public_path_prefixes: payment_backend_api_public_path_prefixes(),
-            ..WebRequestContextProfile::default()
-        })
-        .with_route_manifest(route_manifest);
+    let (environment, security_policy) = payment_web_security_policy_from_env();
+    let layer = sdkwork_iam_web_adapter::build_web_framework_layer(
+        resolver,
+        route_manifest,
+        payment_backend_api_public_path_prefixes(),
+    )
+    .with_profile(WebRequestContextProfile {
+        public_path_prefixes: payment_backend_api_public_path_prefixes(),
+        environment,
+        ..WebRequestContextProfile::default()
+    })
+    .with_security_policy(security_policy);
     with_web_request_context(router, layer)
 }
 
@@ -39,4 +45,41 @@ pub fn wrap_router_with_web_framework(
 pub async fn wrap_router_with_web_framework_from_env(router: Router) -> Router {
     let resolver = sdkwork_iam_web_adapter::iam_web_request_context_resolver_from_env().await;
     wrap_router_with_web_framework(resolver, router)
+}
+
+fn payment_web_security_policy_from_env() -> (
+    sdkwork_web_core::WebEnvironment,
+    sdkwork_web_core::SecurityPolicy,
+) {
+    sdkwork_web_bootstrap::application_security_policy_from_env(
+        &[
+            "SDKWORK_ENVIRONMENT",
+            "SDKWORK_PAYMENT_ENVIRONMENT",
+            "PAYMENT_ENVIRONMENT",
+            "SDKWORK_ENV",
+        ],
+        &[
+            "SDKWORK_CORS_ALLOWED_ORIGINS",
+            "SDKWORK_PAYMENT_CORS_ALLOWED_ORIGINS",
+            "PAYMENT_API_CORS_ORIGINS",
+        ],
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payment_backend_framework_injects_authenticated_iam_context() {
+        let resolver = IamWebRequestContextResolver::new(None);
+        let route_manifest = backend_route_manifest();
+        let layer = sdkwork_iam_web_adapter::build_web_framework_layer(
+            resolver,
+            route_manifest,
+            payment_backend_api_public_path_prefixes(),
+        );
+
+        assert_eq!(layer.runtime().domain_injectors.len(), 1);
+    }
 }

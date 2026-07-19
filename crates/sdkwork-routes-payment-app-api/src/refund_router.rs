@@ -17,7 +17,9 @@ use sdkwork_payment_providers::{
 use sdkwork_payment_repository_sqlx::{
     load_active_provider_account_postgres, load_active_provider_account_sqlite,
     load_payment_attempt_provider_context_by_id_postgres,
-    load_payment_attempt_provider_context_by_id_sqlite, PaymentProviderAccountRecord,
+    load_payment_attempt_provider_context_by_id_sqlite,
+    load_provider_account_for_existing_payment_postgres,
+    load_provider_account_for_existing_payment_sqlite, PaymentProviderAccountRecord,
     PostgresCommerceRefundStore, SqliteCommerceRefundStore,
 };
 use sdkwork_payment_service::{
@@ -112,6 +114,9 @@ fn provider_account_binding(record: &PaymentProviderAccountRecord) -> ProviderAc
         secret_ref: record.secret_ref.clone(),
         webhook_secret_ref: record.webhook_secret_ref.clone(),
         certificate_ref: record.certificate_ref.clone(),
+        primary_secret: record.primary_secret.clone(),
+        webhook_secret: record.webhook_secret.clone(),
+        certificate: record.certificate.clone(),
         metadata: record.metadata.clone(),
     }
 }
@@ -178,9 +183,31 @@ async fn submit_provider_refund(
             "payment attempt provider context was not found for refund submission",
         ));
     };
-    let account =
-        load_active_provider_account_sqlite(pool, tenant_id, organization_id, &ctx.provider_code)
-            .await?;
+    let account = match ctx.provider_account_id.as_deref() {
+        Some(provider_account_id) => load_provider_account_for_existing_payment_sqlite(
+            pool,
+            tenant_id,
+            organization_id,
+            provider_account_id,
+        )
+        .await?
+        .map(Some)
+        .ok_or_else(|| {
+            CommerceServiceError::conflict(
+                "original payment provider account is unavailable for refund",
+            )
+        })?,
+        None if ctx.channel_id.is_some() => None,
+        None => {
+            load_active_provider_account_sqlite(
+                pool,
+                tenant_id,
+                organization_id,
+                &ctx.provider_code,
+            )
+            .await?
+        }
+    };
     let registry = provider_registry_for_account(
         credentials,
         account.map(|record| provider_account_binding(&record)),
@@ -215,9 +242,31 @@ async fn submit_provider_refund_postgres(
             "payment attempt provider context was not found for refund submission",
         ));
     };
-    let account =
-        load_active_provider_account_postgres(pool, tenant_id, organization_id, &ctx.provider_code)
-            .await?;
+    let account = match ctx.provider_account_id.as_deref() {
+        Some(provider_account_id) => load_provider_account_for_existing_payment_postgres(
+            pool,
+            tenant_id,
+            organization_id,
+            provider_account_id,
+        )
+        .await?
+        .map(Some)
+        .ok_or_else(|| {
+            CommerceServiceError::conflict(
+                "original payment provider account is unavailable for refund",
+            )
+        })?,
+        None if ctx.channel_id.is_some() => None,
+        None => {
+            load_active_provider_account_postgres(
+                pool,
+                tenant_id,
+                organization_id,
+                &ctx.provider_code,
+            )
+            .await?
+        }
+    };
     let registry = provider_registry_for_account(
         credentials,
         account.map(|record| provider_account_binding(&record)),

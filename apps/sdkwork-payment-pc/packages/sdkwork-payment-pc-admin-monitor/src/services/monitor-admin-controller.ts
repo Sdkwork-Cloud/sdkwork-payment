@@ -460,6 +460,21 @@ export function createPaymentMonitorAdminController(
       }
     },
 
+    async refreshIntents() {
+      setStatus("loading", undefined);
+      try {
+        await reload("intents");
+        setState({ status: "ready", lastError: undefined });
+        return sessions.intents.getItems();
+      } catch (error) {
+        setStatus(
+          "error",
+          error instanceof Error ? error.message : "Failed to refresh payment records.",
+        );
+        throw error;
+      }
+    },
+
     async loadMoreAttempts() {
       try {
         return await sessions.attempts.loadMore();

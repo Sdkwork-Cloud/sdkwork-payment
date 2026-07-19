@@ -14,8 +14,9 @@ use sdkwork_payment_service::{
 use sqlx::{PgPool, Pool, Sqlite};
 
 use crate::provider_account::{
-    load_active_provider_account_postgres, load_active_provider_account_sqlite,
-    PaymentProviderAccountRecord,
+    load_active_provider_account_for_channel_postgres,
+    load_active_provider_account_for_channel_sqlite, load_active_provider_account_postgres,
+    load_active_provider_account_sqlite, PaymentProviderAccountRecord,
 };
 
 pub fn provider_account_binding(record: &PaymentProviderAccountRecord) -> ProviderAccountBinding {
@@ -26,6 +27,9 @@ pub fn provider_account_binding(record: &PaymentProviderAccountRecord) -> Provid
         secret_ref: record.secret_ref.clone(),
         webhook_secret_ref: record.webhook_secret_ref.clone(),
         certificate_ref: record.certificate_ref.clone(),
+        primary_secret: record.primary_secret.clone(),
+        webhook_secret: record.webhook_secret.clone(),
+        certificate: record.certificate.clone(),
         metadata: record.metadata.clone(),
     }
 }
@@ -45,6 +49,7 @@ pub struct OwnerOrderPaymentEnrichmentContext<'a> {
     pub order_id: &'a str,
     pub idempotency_key: &'a str,
     pub payment_scene: Option<&'a str>,
+    pub payment_metadata: Option<&'a serde_json::Value>,
 }
 
 pub fn payment_record_is_checkout_eligible(status: &str) -> bool {
@@ -85,6 +90,7 @@ pub async fn enrich_payment_record_checkout_sqlite(
             order_id: &record.order_id,
             idempotency_key: &idempotency_key,
             payment_scene: None,
+            payment_metadata: Some(&ctx.payment_metadata),
         },
         outcome,
     )
@@ -125,6 +131,7 @@ pub async fn enrich_payment_record_checkout_postgres(
             order_id: &record.order_id,
             idempotency_key: &idempotency_key,
             payment_scene: None,
+            payment_metadata: Some(&ctx.payment_metadata),
         },
         outcome,
     )
@@ -147,6 +154,9 @@ fn payment_record_to_pay_outcome(
     let mut payment_params =
         owner_order_payment_params(&provider_code, &record.order_no, None, &out_trade_no);
     if let Some(ctx) = provider_ctx {
+        if let Some(channel_id) = ctx.channel_id.as_deref() {
+            payment_params.insert("channelId".to_owned(), channel_id.to_owned());
+        }
         if let Some(native_id) = ctx.provider_transaction_id.as_deref() {
             payment_params.insert("providerTransactionId".to_owned(), native_id.to_owned());
         }
@@ -172,13 +182,27 @@ pub async fn enrich_owner_order_payment_sqlite(
         .get("providerCode")
         .cloned()
         .unwrap_or_else(|| "sandbox".to_owned());
-    let account = load_active_provider_account_sqlite(
-        pool,
-        context.tenant_id,
-        context.organization_id,
-        &provider_code,
-    )
-    .await?;
+    let account = match outcome.payment_params.get("channelId") {
+        Some(channel_id) => {
+            load_active_provider_account_for_channel_sqlite(
+                pool,
+                context.tenant_id,
+                context.organization_id,
+                channel_id,
+                &provider_code,
+            )
+            .await?
+        }
+        None => {
+            load_active_provider_account_sqlite(
+                pool,
+                context.tenant_id,
+                context.organization_id,
+                &provider_code,
+            )
+            .await?
+        }
+    };
     let enriched = enrich_owner_order_payment_outcome(
         &context,
         account.as_ref().map(provider_account_binding),
@@ -206,13 +230,27 @@ pub async fn enrich_owner_order_payment_postgres(
         .get("providerCode")
         .cloned()
         .unwrap_or_else(|| "sandbox".to_owned());
-    let account = load_active_provider_account_postgres(
-        pool,
-        context.tenant_id,
-        context.organization_id,
-        &provider_code,
-    )
-    .await?;
+    let account = match outcome.payment_params.get("channelId") {
+        Some(channel_id) => {
+            load_active_provider_account_for_channel_postgres(
+                pool,
+                context.tenant_id,
+                context.organization_id,
+                channel_id,
+                &provider_code,
+            )
+            .await?
+        }
+        None => {
+            load_active_provider_account_postgres(
+                pool,
+                context.tenant_id,
+                context.organization_id,
+                &provider_code,
+            )
+            .await?
+        }
+    };
     let enriched = enrich_owner_order_payment_outcome(
         &context,
         account.as_ref().map(provider_account_binding),
@@ -303,6 +341,7 @@ async fn enrich_owner_order_payment_outcome(
         idempotency_key: context.idempotency_key.to_owned(),
         notify_url,
         payment_scene: context.payment_scene.map(str::to_owned),
+        payment_metadata: context.payment_metadata.cloned(),
     };
     enrich_pay_owner_order_outcome(&registry, &context, outcome).await
 }

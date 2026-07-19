@@ -1,38 +1,37 @@
-/**
- * Payment intent monitor.
- *
- * Lists payment intents with filter (status / providerCode / ownerUserId / orderId / currencyCode / createdAt range / q) and
- * click-to-retrieve detail dialog. Mirrors PSP "Payments" console views
- * (Stripe Dashboard → Payments, Alipay merchant platform → transaction list).
- *
- * API matrix: list + retrieve. No create/update/delete (intents are created
- * by the order capability, not admin).
- */
-
 import * as React from "react";
+import {
+  CalendarDays,
+  Eye,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import {
   Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
+  DataTable,
+  FilterBar,
+  FilterBarActions,
+  FilterBarSection,
   Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  type DataTableColumn,
 } from "@sdkwork/ui-pc-react";
 import {
   AdminFieldLabel,
-  ADMIN_PROVIDER_FILTER_OPTIONS,
+  ADMIN_PROVIDER_FORM_OPTIONS,
   formatAdminAmount,
   formatAdminRelativeTime,
   formatAdminTimestamp,
   SdkworkPaymentListPaginationControls,
 } from "@sdkwork/payment-pc-admin-core";
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
+import { usePaymentRecordsMessages } from "../i18n";
 import type {
   PaymentIntentDetail,
   PaymentIntentListFilter,
@@ -40,6 +39,12 @@ import type {
   PaymentProviderCode,
   PaymentStatus,
 } from "../types/monitor-admin-types";
+import { PaymentRecordDetailDrawer } from "./PaymentRecordDetailDrawer";
+import { PaymentRecordsOverview } from "./PaymentRecordsOverview";
+import {
+  formatPaymentProvider,
+  PAYMENT_STATUS_BADGE_VARIANT,
+} from "./payment-record-presentation";
 
 export interface IntentMonitorProps {
   intents: readonly PaymentIntentView[];
@@ -48,335 +53,443 @@ export interface IntentMonitorProps {
   selectedIntent?: PaymentIntentDetail;
   onApplyFilter(filter: PaymentIntentListFilter): Promise<void> | void;
   onLoadMore(): void;
+  onRefresh(): Promise<void> | void;
   onSelect(intent: PaymentIntentView): Promise<void> | void;
 }
 
-const STATUS_OPTIONS: ReadonlyArray<{ label: string; value: PaymentStatus | "" }> = [
-  { label: "All statuses", value: "" },
-  { label: "Created", value: "created" },
-  { label: "Pending", value: "pending" },
-  { label: "Processing", value: "processing" },
-  { label: "Succeeded", value: "succeeded" },
-  { label: "Failed", value: "failed" },
-  { label: "Canceled", value: "canceled" },
-  { label: "Closed", value: "closed" },
+type StatusFilter = PaymentStatus | "all";
+type ProviderFilter = PaymentProviderCode | "all";
+
+const FILTERABLE_STATUS_VALUES: readonly PaymentStatus[] = [
+  "created",
+  "pending",
+  "processing",
+  "succeeded",
+  "failed",
+  "canceled",
+  "closed",
 ];
 
-const STATUS_VARIANT: Record<PaymentStatus, "default" | "success" | "warning" | "danger" | "secondary"> = {
-  created: "default",
-  pending: "warning",
-  processing: "warning",
-  succeeded: "success",
-  failed: "danger",
-  canceled: "secondary",
-  closed: "secondary",
-  refunding: "warning",
-  refunded: "success",
-};
+function toDateTimeLocalValue(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    "-",
+    pad(date.getMonth() + 1),
+    "-",
+    pad(date.getDate()),
+    "T",
+    pad(date.getHours()),
+    ":",
+    pad(date.getMinutes()),
+  ].join("");
+}
 
 export function IntentMonitor(props: IntentMonitorProps) {
-  const [status, setStatus] = React.useState<string>("");
+  const messages = usePaymentRecordsMessages();
+  const [status, setStatus] = React.useState<StatusFilter>("all");
+  const [providerCode, setProviderCode] = React.useState<ProviderFilter>("all");
   const [ownerUserId, setOwnerUserId] = React.useState("");
   const [orderId, setOrderId] = React.useState("");
-  const [q, setQ] = React.useState("");
-  // Additional filters: providerCode / currencyCode / created-at range
-  const [providerCode, setProviderCode] = React.useState<string>("");
   const [currencyCode, setCurrencyCode] = React.useState("");
   const [createdAtFrom, setCreatedAtFrom] = React.useState("");
   const [createdAtTo, setCreatedAtTo] = React.useState("");
-  const [error, setError] = React.useState<string | undefined>();
-  const [selectedId, setSelectedId] = React.useState<string | undefined>();
+  const [q, setQ] = React.useState("");
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [error, setError] = React.useState<string>();
+  const [selectedId, setSelectedId] = React.useState<string>();
+
+  React.useEffect(() => {
+    if (!props.selectedIntent) {
+      setSelectedId(undefined);
+    }
+  }, [props.selectedIntent]);
+
+  const activeFilterCount = [
+    status !== "all",
+    providerCode !== "all",
+    Boolean(ownerUserId.trim()),
+    Boolean(orderId.trim()),
+    Boolean(currencyCode.trim()),
+    Boolean(createdAtFrom),
+    Boolean(createdAtTo),
+    Boolean(q.trim()),
+  ].filter(Boolean).length;
+
+  async function applyFilter(filter: PaymentIntentListFilter) {
+    setError(undefined);
+    try {
+      await props.onApplyFilter(filter);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : messages.validation.refreshFailed);
+    }
+  }
 
   function handleApply(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
-    // filter includes only non-empty fields; empty strings / unselected values are not sent to the backend
-    const filter: PaymentIntentListFilter = {
-      ...(status ? { status: status as PaymentStatus } : {}),
+    const from = createdAtFrom ? new Date(createdAtFrom) : undefined;
+    const to = createdAtTo ? new Date(createdAtTo) : undefined;
+    if (from && to && to <= from) {
+      setError(messages.validation.invalidDateRange);
+      return;
+    }
+    void applyFilter({
+      ...(status !== "all" ? { status } : {}),
+      ...(providerCode !== "all" ? { providerCode } : {}),
       ...(ownerUserId.trim() ? { ownerUserId: ownerUserId.trim() } : {}),
       ...(orderId.trim() ? { orderId: orderId.trim() } : {}),
-      ...(providerCode ? { providerCode: providerCode as PaymentProviderCode } : {}),
-      ...(currencyCode.trim() ? { currencyCode: currencyCode.trim() } : {}),
-      ...(createdAtFrom ? { createdAtFrom: new Date(createdAtFrom).toISOString() } : {}),
-      ...(createdAtTo ? { createdAtTo: new Date(createdAtTo).toISOString() } : {}),
+      ...(currencyCode.trim() ? { currencyCode: currencyCode.trim().toUpperCase() } : {}),
+      ...(from ? { createdAtFrom: from.toISOString() } : {}),
+      ...(to ? { createdAtTo: to.toISOString() } : {}),
       ...(q.trim() ? { q: q.trim() } : {}),
-    };
-    Promise.resolve(props.onApplyFilter(filter)).catch((err) => {
-      setError(err instanceof Error ? err.message : "Failed to apply filter.");
     });
   }
 
   function handleResetFilter() {
-    setStatus("");
+    setStatus("all");
+    setProviderCode("all");
     setOwnerUserId("");
     setOrderId("");
-    setQ("");
-    setProviderCode("");
     setCurrencyCode("");
     setCreatedAtFrom("");
     setCreatedAtTo("");
+    setQ("");
     setError(undefined);
-    Promise.resolve(props.onApplyFilter({})).catch((err) => {
-      setError(err instanceof Error ? err.message : "Failed to clear filters.");
-    });
+    void applyFilter({});
+  }
+
+  function applyDatePreset(days: number) {
+    const end = new Date();
+    const start = new Date(end);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - Math.max(0, days - 1));
+    setCreatedAtFrom(toDateTimeLocalValue(start));
+    setCreatedAtTo(toDateTimeLocalValue(end));
+  }
+
+  async function handleRefresh() {
+    setError(undefined);
+    try {
+      await props.onRefresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : messages.validation.refreshFailed);
+    }
   }
 
   async function handleSelect(intent: PaymentIntentView) {
     setSelectedId(intent.id);
+    setError(undefined);
     try {
       await props.onSelect(intent);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load intent detail.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : messages.validation.loadDetailFailed);
     }
   }
 
+  const columns: DataTableColumn<PaymentIntentView>[] = [
+    {
+      id: "payment",
+      header: messages.table.payment,
+      width: "22%",
+      cell: (intent) => (
+        <div className="min-w-[11rem] space-y-1">
+          <div className="break-all font-mono text-sm font-semibold text-[var(--sdk-color-text-primary)]">
+            {intent.paymentIntentNo}
+          </div>
+          <div className="text-xs text-[var(--sdk-color-text-muted)]">
+            {intent.attempts?.length ?? 0} {messages.detail.attempts.toLowerCase()}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "references",
+      header: messages.table.references,
+      width: "22%",
+      headerProps: { className: "hidden lg:!table-cell" },
+      cellProps: { className: "hidden lg:!table-cell" },
+      cell: (intent) => (
+        <div className="min-w-[10rem] space-y-1 text-xs">
+          <div className="truncate font-mono text-[var(--sdk-color-text-primary)]" title={intent.orderId}>
+            {intent.orderId || "--"}
+          </div>
+          <div className="truncate font-mono text-[var(--sdk-color-text-muted)]" title={intent.ownerUserId}>
+            {intent.ownerUserId || "--"}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "provider",
+      header: messages.table.providerAndMethod,
+      width: "18%",
+      cell: (intent) => (
+        <div className="min-w-[8rem] space-y-1">
+          <span className="text-sm font-medium text-[var(--sdk-color-text-primary)]">
+            {formatPaymentProvider(intent.providerCode)}
+          </span>
+          <div className="text-xs text-[var(--sdk-color-text-muted)]">{intent.paymentMethod || "--"}</div>
+        </div>
+      ),
+    },
+    {
+      align: "right",
+      id: "amount",
+      header: messages.table.amount,
+      width: "14%",
+      cell: (intent) => (
+        <div className="min-w-[7rem] text-right text-sm font-semibold tabular-nums text-[var(--sdk-color-text-primary)]">
+          {formatAdminAmount(intent.amount, intent.currencyCode)}
+        </div>
+      ),
+    },
+    {
+      id: "status",
+      header: messages.table.status,
+      width: "12%",
+      cell: (intent) => (
+        <Badge variant={PAYMENT_STATUS_BADGE_VARIANT[intent.status]}>
+          {messages.status[intent.status]}
+        </Badge>
+      ),
+    },
+    {
+      id: "createdAt",
+      header: messages.table.createdAt,
+      width: "12%",
+      headerProps: { className: "hidden lg:!table-cell" },
+      cellProps: { className: "hidden lg:!table-cell" },
+      cell: (intent) => (
+        <div className="min-w-[8rem] text-xs">
+          <div className="text-[var(--sdk-color-text-primary)]">{formatAdminRelativeTime(intent.createdAt)}</div>
+          <div className="mt-1 text-[var(--sdk-color-text-muted)]">{formatAdminTimestamp(intent.createdAt)}</div>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4" data-slot="payment-intent-monitor">
-      <form
-        className="grid grid-cols-1 gap-3 rounded-md border border-[var(--sdk-color-border-subtle)] p-3 sm:grid-cols-2 lg:grid-cols-4"
-        onSubmit={handleApply}
-      >
-        <AdminFieldLabel label="Status" htmlFor="intent-filter-status">
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger id="intent-filter-status">
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={String(option.value)}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Provider" htmlFor="intent-filter-provider">
-          <Select value={providerCode} onValueChange={setProviderCode}>
-            <SelectTrigger id="intent-filter-provider">
-              <SelectValue placeholder="All providers" />
-            </SelectTrigger>
-            <SelectContent>
-              {ADMIN_PROVIDER_FILTER_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Owner user ID" htmlFor="intent-filter-owner">
-          <Input
-            id="intent-filter-owner"
-            value={ownerUserId}
-            onChange={(event) => setOwnerUserId(event.target.value)}
-            placeholder="Filter by owner"
-          />
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Order ID" htmlFor="intent-filter-order">
-          <Input
-            id="intent-filter-order"
-            value={orderId}
-            onChange={(event) => setOrderId(event.target.value)}
-            placeholder="Filter by order"
-          />
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Currency" htmlFor="intent-filter-currency">
-          <Input
-            id="intent-filter-currency"
-            value={currencyCode}
-            onChange={(event) => setCurrencyCode(event.target.value)}
-            placeholder="e.g., CNY"
-          />
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Created from" htmlFor="intent-filter-created-from">
-          <Input
-            id="intent-filter-created-from"
-            type="datetime-local"
-            value={createdAtFrom}
-            onChange={(event) => setCreatedAtFrom(event.target.value)}
-          />
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Created to" htmlFor="intent-filter-created-to">
-          <Input
-            id="intent-filter-created-to"
-            type="datetime-local"
-            value={createdAtTo}
-            onChange={(event) => setCreatedAtTo(event.target.value)}
-          />
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Search" htmlFor="intent-filter-q">
-          <Input
-            id="intent-filter-q"
-            value={q}
-            onChange={(event) => setQ(event.target.value)}
-            placeholder="Free-text search"
-          />
-        </AdminFieldLabel>
-        <div className="col-span-full flex justify-end">
-          <Button type="submit" size="sm" disabled={props.busy} title={props.busy ? "Cannot apply filter while another operation is in progress" : "Apply the current filter"}>
-            Apply filter
-          </Button>
-        </div>
+      <PaymentRecordsOverview intents={props.intents} pageInfo={props.pageInfo} />
+
+      <form onSubmit={handleApply}>
+        <FilterBar
+          description={messages.filters.description}
+          summary={activeFilterCount > 0 ? messages.filters.activeSummary(activeFilterCount) : undefined}
+          title={messages.filters.title}
+        >
+          <FilterBarSection className="min-w-full xl:min-w-0" grow>
+            <AdminFieldLabel
+              className="min-w-[16rem] flex-[2]"
+              htmlFor="payment-record-filter-search"
+              label={messages.filters.search}
+            >
+              <div className="relative">
+                <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sdk-color-text-muted)]" />
+                <Input
+                  className="pl-9"
+                  id="payment-record-filter-search"
+                  placeholder={messages.filters.searchPlaceholder}
+                  value={q}
+                  onChange={(event) => setQ(event.target.value)}
+                />
+              </div>
+            </AdminFieldLabel>
+            <AdminFieldLabel
+              className="min-w-[11rem] flex-1"
+              htmlFor="payment-record-filter-status"
+              label={messages.filters.status}
+            >
+              <Select value={status} onValueChange={(value) => setStatus(value as StatusFilter)}>
+                <SelectTrigger id="payment-record-filter-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{messages.filters.allStatuses}</SelectItem>
+                  {FILTERABLE_STATUS_VALUES.map((value) => (
+                    <SelectItem key={value} value={value}>{messages.status[value]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </AdminFieldLabel>
+            <AdminFieldLabel
+              className="min-w-[11rem] flex-1"
+              htmlFor="payment-record-filter-provider"
+              label={messages.filters.provider}
+            >
+              <Select value={providerCode} onValueChange={(value) => setProviderCode(value as ProviderFilter)}>
+                <SelectTrigger id="payment-record-filter-provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{messages.filters.allProviders}</SelectItem>
+                  {ADMIN_PROVIDER_FORM_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </AdminFieldLabel>
+          </FilterBarSection>
+
+          <FilterBarActions>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setAdvancedOpen((open) => !open)}
+            >
+              <SlidersHorizontal aria-hidden="true" className="mr-2 h-4 w-4" />
+              {advancedOpen ? messages.actions.hideAdvanced : messages.actions.showAdvanced}
+            </Button>
+            <Button type="button" variant="ghost" disabled={props.busy || activeFilterCount === 0} onClick={handleResetFilter}>
+              <X aria-hidden="true" className="mr-2 h-4 w-4" />
+              {messages.actions.clearFilters}
+            </Button>
+            <Button type="submit" disabled={props.busy}>
+              <Search aria-hidden="true" className="mr-2 h-4 w-4" />
+              {messages.actions.applyFilters}
+            </Button>
+          </FilterBarActions>
+
+          {advancedOpen ? (
+            <div className="w-full space-y-3 border-t border-[var(--sdk-color-border-subtle)] pt-3">
+              <p className="text-xs text-[var(--sdk-color-text-secondary)]">{messages.filters.advancedDescription}</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:!grid-cols-5">
+                <AdminFieldLabel htmlFor="payment-record-filter-order" label={messages.filters.orderIdentifier}>
+                  <Input
+                    id="payment-record-filter-order"
+                    placeholder={messages.filters.orderPlaceholder}
+                    value={orderId}
+                    onChange={(event) => setOrderId(event.target.value)}
+                  />
+                </AdminFieldLabel>
+                <AdminFieldLabel htmlFor="payment-record-filter-owner" label={messages.filters.ownerIdentifier}>
+                  <Input
+                    id="payment-record-filter-owner"
+                    placeholder={messages.filters.ownerPlaceholder}
+                    value={ownerUserId}
+                    onChange={(event) => setOwnerUserId(event.target.value)}
+                  />
+                </AdminFieldLabel>
+                <AdminFieldLabel htmlFor="payment-record-filter-currency" label={messages.filters.currency}>
+                  <Input
+                    id="payment-record-filter-currency"
+                    maxLength={3}
+                    placeholder={messages.filters.currencyPlaceholder}
+                    value={currencyCode}
+                    onChange={(event) => setCurrencyCode(event.target.value)}
+                  />
+                </AdminFieldLabel>
+                <AdminFieldLabel htmlFor="payment-record-filter-from" label={messages.filters.createdFrom}>
+                  <Input
+                    id="payment-record-filter-from"
+                    type="datetime-local"
+                    value={createdAtFrom}
+                    onChange={(event) => setCreatedAtFrom(event.target.value)}
+                  />
+                </AdminFieldLabel>
+                <AdminFieldLabel htmlFor="payment-record-filter-to" label={messages.filters.createdTo}>
+                  <Input
+                    id="payment-record-filter-to"
+                    type="datetime-local"
+                    value={createdAtTo}
+                    onChange={(event) => setCreatedAtTo(event.target.value)}
+                  />
+                </AdminFieldLabel>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <CalendarDays aria-hidden="true" className="h-4 w-4 text-[var(--sdk-color-text-muted)]" />
+                <Button type="button" size="sm" variant="outline" onClick={() => applyDatePreset(1)}>{messages.filters.today}</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => applyDatePreset(7)}>{messages.filters.last7Days}</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => applyDatePreset(30)}>{messages.filters.last30Days}</Button>
+              </div>
+            </div>
+          ) : null}
+        </FilterBar>
       </form>
 
       {error ? (
         <div
+          className="border-l-2 border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] px-3 py-2 text-sm text-[var(--sdk-color-text-error)]"
           role="alert"
-          className="rounded-md border border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] p-3 text-sm text-[var(--sdk-color-text-error)]"
         >
           {error}
         </div>
       ) : null}
 
-      {props.intents.length === 0 ? (
-        <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-8 text-center text-sm text-[var(--sdk-color-text-secondary)]">
-          No payment intents found. Adjust the filter or wait for new transactions.
-          <div className="mt-3">
-            <Button type="button" variant="ghost" size="sm" onClick={handleResetFilter} disabled={props.busy}>
-              Clear filters
+      <DataTable
+        columns={columns}
+        density="compact"
+        description={messages.table.resultDescription(props.intents.length)}
+        emptyState={(
+          <div className="space-y-3 py-6 text-center">
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--sdk-color-text-primary)]">{messages.empty.title}</h3>
+              <p className="mt-1 text-sm text-[var(--sdk-color-text-secondary)]">{messages.empty.description}</p>
+            </div>
+            <Button type="button" size="sm" variant="outline" disabled={props.busy} onClick={handleResetFilter}>
+              <X aria-hidden="true" className="mr-2 h-4 w-4" />
+              {messages.actions.clearFilters}
             </Button>
           </div>
-        </div>
-      ) : (
-        <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
-          {props.intents.map((intent) => (
-            <li
-              key={intent.id}
-              className={
-                "flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between " +
-                (selectedId === intent.id ? "bg-[var(--sdk-color-bg-subtle)]" : "")
-              }
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-sm font-medium text-[var(--sdk-color-text)]">
-                    {intent.paymentIntentNo}
-                  </span>
-                  <Badge variant="outline" className="font-mono">
-                    {intent.providerCode}
-                  </Badge>
-                  <Badge variant={STATUS_VARIANT[intent.status]}>{intent.status}</Badge>
-                  <Badge variant="outline">{intent.attempts?.length ?? 0} attempts</Badge>
-                </div>
-                <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] sm:grid-cols-4">
-                  <div>
-                    <dt className="inline">Order:</dt> <dd className="inline">{intent.orderId || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="inline">Owner:</dt> <dd className="inline">{intent.ownerUserId || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="inline">Amount:</dt>{" "}
-                    <dd className="inline">
-                      {formatAdminAmount(intent.amount, intent.currencyCode)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="inline">Method:</dt>{" "}
-                    <dd className="inline">{intent.paymentMethod || "—"}</dd>
-                  </div>
-                </dl>
-                <p className="mt-1 text-xs text-[var(--sdk-color-text-muted)]">
-                  Created {formatAdminRelativeTime(intent.createdAt)} · Updated {formatAdminRelativeTime(intent.updatedAt)}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void handleSelect(intent)}
-                  disabled={props.busy}
-                  title={props.busy ? "Cannot view detail while another operation is in progress" : "View payment intent detail"}
-                >
-                  View detail
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <SdkworkPaymentListPaginationControls
-        busy={props.busy ?? false}
-        onLoadMore={props.onLoadMore}
-        pageInfo={props.pageInfo}
+        )}
+        footer={(
+          <SdkworkPaymentListPaginationControls
+            busy={props.busy ?? false}
+            label={messages.actions.loadMore}
+            onLoadMore={props.onLoadMore}
+            pageInfo={props.pageInfo}
+            summary={props.pageInfo?.totalItems
+              ? messages.table.paginationSummary(props.intents.length, props.pageInfo.totalItems)
+              : undefined}
+          />
+        )}
+        getRowId={(intent) => intent.id}
+        getRowProps={(intent) => ({
+          className: selectedId === intent.id ? "bg-[var(--sdk-color-bg-subtle)]" : undefined,
+        })}
+        loading={props.busy && props.intents.length === 0}
+        loadingLabel={messages.table.loading}
+        rowActions={(intent) => (
+          <Button
+            aria-label={`${messages.actions.viewDetails}: ${intent.paymentIntentNo}`}
+            size="icon"
+            title={messages.actions.viewDetails}
+            type="button"
+            variant="ghost"
+            onClick={() => void handleSelect(intent)}
+          >
+            <Eye aria-hidden="true" className="h-4 w-4" />
+          </Button>
+        )}
+        rowActionsLabel=""
+        rows={Array.from(props.intents)}
+        stickyHeader
+        title={messages.table.title}
+        toolbar={(
+          <Button
+            aria-label={messages.actions.refresh}
+            disabled={props.busy}
+            size="icon"
+            title={messages.actions.refresh}
+            type="button"
+            variant="outline"
+            onClick={() => void handleRefresh()}
+          >
+            <RefreshCw aria-hidden="true" className={`h-4 w-4 ${props.busy ? "animate-spin" : ""}`} />
+          </Button>
+        )}
       />
 
-      <Dialog
-        open={Boolean(props.selectedIntent)}
+      <PaymentRecordDetailDrawer
+        detail={props.selectedIntent}
+        open={Boolean(selectedId && props.selectedIntent)}
         onOpenChange={(open) => {
-          if (!open) setSelectedId(undefined);
+          if (!open) {
+            setSelectedId(undefined);
+          }
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Payment intent detail</DialogTitle>
-          </DialogHeader>
-          {props.selectedIntent ? <IntentDetail detail={props.selectedIntent} /> : null}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-function IntentDetail({ detail }: { detail: PaymentIntentDetail }) {
-  return (
-    <div className="space-y-4">
-      <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <DetailRow label="Intent No" value={detail.paymentIntentNo} mono />
-        <DetailRow label="Status" value={detail.status} />
-        <DetailRow label="Order ID" value={detail.orderId || "—"} mono />
-        <DetailRow label="Owner user ID" value={detail.ownerUserId || "—"} mono />
-        <DetailRow label="Payment method" value={detail.paymentMethod || "—"} />
-        <DetailRow label="Provider" value={detail.providerCode} />
-        <DetailRow label="Amount" value={formatAdminAmount(detail.amount, detail.currencyCode)} />
-        <DetailRow label="Created at" value={formatAdminRelativeTime(detail.createdAt)} />
-        <DetailRow label="Updated at" value={formatAdminTimestamp(detail.updatedAt)} />
-      </dl>
-      <div>
-        <h4 className="mb-2 text-sm font-semibold text-[var(--sdk-color-text)]">Attempts</h4>
-        {detail.attempts && detail.attempts.length > 0 ? (
-          <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)] text-xs">
-            {detail.attempts.map((attempt) => (
-              <li key={attempt.id} className="grid grid-cols-2 gap-2 p-2 sm:grid-cols-4">
-                <span className="font-mono">{attempt.attemptNo}</span>
-                <Badge variant="outline" className="font-mono">
-                  {attempt.providerCode}
-                </Badge>
-                <Badge variant={STATUS_VARIANT[attempt.status]}>{attempt.status}</Badge>
-                <span>
-                  {formatAdminAmount(attempt.amount, attempt.currencyCode)}
-                </span>
-                {attempt.providerTransactionId ? (
-                  <span className="col-span-2 text-[var(--sdk-color-text-muted)]">
-                    PSP tx: {attempt.providerTransactionId}
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-xs text-[var(--sdk-color-text-secondary)]">No attempts recorded for this intent.</p>
-        )}
-      </div>
-      {detail.metadata && Object.keys(detail.metadata).length > 0 ? (
-        <div>
-          <h4 className="mb-2 text-sm font-semibold text-[var(--sdk-color-text)]">Metadata</h4>
-          <pre className="overflow-x-auto rounded-md border border-[var(--sdk-color-border-subtle)] bg-[var(--sdk-color-bg-subtle)] p-3 text-xs text-[var(--sdk-color-text-secondary)]">
-            {JSON.stringify(detail.metadata, null, 2)}
-          </pre>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div>
-      <dt className="text-xs text-[var(--sdk-color-text-muted)]">{label}</dt>
-      <dd className={mono ? "font-mono text-sm" : "text-sm"}>{value}</dd>
+      />
     </div>
   );
 }

@@ -6,6 +6,7 @@ export interface SdkworkPaymentListPaginationControlsProps {
   label?: string;
   onLoadMore?: () => void | Promise<void>;
   pageInfo?: SdkWorkPageInfo;
+  summary?: string;
 }
 
 export function SdkworkPaymentListPaginationControls({
@@ -13,6 +14,7 @@ export function SdkworkPaymentListPaginationControls({
   label = "Load more",
   onLoadMore,
   pageInfo,
+  summary,
 }: SdkworkPaymentListPaginationControlsProps) {
   if (!pageInfo?.hasMore || !onLoadMore) {
     return null;
@@ -20,14 +22,16 @@ export function SdkworkPaymentListPaginationControls({
 
   const totalItems = pageInfo.totalItems ? Number(pageInfo.totalItems) : undefined;
   const loadedCount = pageInfo.page && pageInfo.pageSize ? pageInfo.page * pageInfo.pageSize : undefined;
-  const summary =
+  const defaultSummary =
     totalItems !== undefined && Number.isFinite(totalItems)
       ? `Showing ${Math.min(loadedCount ?? totalItems, totalItems)} of ${totalItems}`
       : undefined;
 
   return (
     <div className="flex flex-wrap items-center gap-3 pt-2">
-      {summary ? <span className="text-sm text-[var(--sdk-color-text-muted)]">{summary}</span> : null}
+      {summary || defaultSummary ? (
+        <span className="text-sm text-[var(--sdk-color-text-muted)]">{summary ?? defaultSummary}</span>
+      ) : null}
       <Button disabled={busy} onClick={() => void onLoadMore()} type="button" variant="outline">
         {label}
       </Button>

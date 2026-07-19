@@ -143,6 +143,50 @@ CREATE TABLE IF NOT EXISTS commerce_payment_method (
     deleted_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS commerce_payment_provider_account (
+    id TEXT NOT NULL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    organization_id TEXT,
+    provider_code TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    deleted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS commerce_payment_channel (
+    id TEXT NOT NULL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    organization_id TEXT,
+    provider_account_id TEXT,
+    method_id TEXT,
+    provider_code TEXT NOT NULL,
+    scene_code TEXT NOT NULL DEFAULT 'api',
+    currency_code TEXT NOT NULL DEFAULT 'CNY',
+    status TEXT NOT NULL DEFAULT 'active',
+    priority INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS commerce_payment_route_rule (
+    id TEXT NOT NULL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    organization_id TEXT,
+    priority INTEGER NOT NULL DEFAULT 0,
+    purchase_type TEXT,
+    country_code TEXT,
+    currency_code TEXT,
+    client_platform TEXT,
+    amount_min TEXT,
+    amount_max TEXT,
+    user_segment TEXT,
+    risk_level TEXT,
+    channel_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    starts_at TEXT,
+    ends_at TEXT,
+    deleted_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS commerce_payment_webhook_event (
     id TEXT NOT NULL PRIMARY KEY,
     tenant_id TEXT NOT NULL,

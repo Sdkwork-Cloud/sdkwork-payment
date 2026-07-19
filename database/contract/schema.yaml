@@ -9,33 +9,45 @@ engines:
   - sqlite
 table_prefix: commerce_
 tables:
-  - name: commerce_payment_intent
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
-  - name: commerce_payment_attempt
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
   - name: commerce_payment_method
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
+    lifecycle_status: active
+    owner: sdkwork-payment
+  - name: is
+    lifecycle_status: active
+    owner: sdkwork-payment
+  - name: commerce_payment_intent
+    lifecycle_status: active
+    owner: sdkwork-payment
+  - name: commerce_payment_attempt
+    lifecycle_status: active
+    owner: sdkwork-payment
+  - name: commerce_refund
+    lifecycle_status: active
+    owner: sdkwork-payment
+  - name: commerce_refund_event
+    lifecycle_status: active
+    owner: sdkwork-payment
   - name: commerce_payment_channel
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
+    lifecycle_status: active
+    owner: sdkwork-payment
   - name: commerce_payment_provider_account
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
+    lifecycle_status: active
+    owner: sdkwork-payment
+  - name: commerce_payment_provider_credential
+    lifecycle_status: active
+    owner: sdkwork-payment
   - name: commerce_payment_sub_merchant
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
+    lifecycle_status: active
+    owner: sdkwork-payment
   - name: commerce_payment_certificate
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
+    lifecycle_status: active
+    owner: sdkwork-payment
   - name: commerce_payment_route_rule
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
+    lifecycle_status: active
+    owner: sdkwork-payment
   - name: commerce_payment_webhook_event
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
+    lifecycle_status: active
+    owner: sdkwork-payment
   - name: commerce_payment_reconciliation_run
-    write_owner: sdkwork-commerce-platform
-    reference_only: true
+    lifecycle_status: active
+    owner: sdkwork-payment

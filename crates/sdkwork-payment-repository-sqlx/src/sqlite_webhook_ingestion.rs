@@ -600,6 +600,7 @@ mod sqlite_webhook_ingestion_tests {
             payment_method: "wechat_pay".to_owned(),
             payment_scene: None,
             payment_attempt_callback_payload: None,
+            payment_metadata: serde_json::json!({}),
             request_no: "req-pay-1".to_owned(),
             idempotency_key: "idem-pay-1".to_owned(),
         })

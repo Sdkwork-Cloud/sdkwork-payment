@@ -9,6 +9,7 @@ use sdkwork_payment_service::{
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::order_reference::{load_order_payment_reference_sqlite, order_status_is_payable};
+use crate::payment_channel::select_payment_channel_sqlite;
 
 #[derive(Debug, Clone)]
 struct ResolvedPaymentMethod {
@@ -285,6 +286,17 @@ impl SqliteCommercePaymentIntentStore {
             return Err(CommerceServiceError::conflict("order is not payable"));
         }
 
+        let channel = select_payment_channel_sqlite(
+            &mut tx,
+            &command.tenant_id,
+            command.organization_id.as_deref(),
+            &intent.payment_method,
+            &intent.currency_code,
+            intent.amount.as_str(),
+            None,
+        )
+        .await?;
+
         let now = current_timestamp_string();
         let attempt_id = payment_attempt_id(&command);
         let out_trade_no = format!(
@@ -298,10 +310,10 @@ impl SqliteCommercePaymentIntentStore {
             r#"
             INSERT INTO commerce_payment_attempt
                 (id, tenant_id, organization_id, owner_user_id, payment_intent_id, order_id,
-                 payment_method, provider_code, out_trade_no, amount, currency_code, status,
+                 payment_method, provider_code, channel_id, out_trade_no, amount, currency_code, status,
                  callback_payload, created_at, paid_at, updated_at)
             VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, NULL, ?)
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, NULL, ?)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -312,7 +324,8 @@ impl SqliteCommercePaymentIntentStore {
         .bind(&command.payment_intent_id)
         .bind(&intent.order_id)
         .bind(&intent.payment_method)
-        .bind(&intent.provider_code)
+        .bind(&channel.provider_code)
+        .bind(channel.channel_id.as_deref())
         .bind(&out_trade_no)
         .bind(intent.amount.as_str())
         .bind(&intent.currency_code)
@@ -327,7 +340,7 @@ impl SqliteCommercePaymentIntentStore {
             let row = sqlx::query(
                 r#"
                 SELECT id, payment_intent_id, order_id, out_trade_no, CAST(amount AS TEXT) AS amount,
-                       payment_method, provider_code, status
+                       payment_method, provider_code, channel_id, status
                 FROM commerce_payment_attempt
                 WHERE tenant_id = CAST(? AS TEXT)
                   AND owner_user_id = CAST(? AS TEXT)
@@ -376,6 +389,10 @@ impl SqliteCommercePaymentIntentStore {
             .await
             .map_err(|error| store_error("failed to commit payment attempt transaction", error))?;
 
+        let mut payment_params = std::collections::BTreeMap::new();
+        if let Some(channel_id) = channel.channel_id {
+            payment_params.insert("channelId".to_owned(), channel_id);
+        }
         Ok(CreateOwnerPaymentAttemptOutcome {
             attempt_id,
             payment_intent_id: command.payment_intent_id,
@@ -383,9 +400,9 @@ impl SqliteCommercePaymentIntentStore {
             out_trade_no,
             amount: intent.amount,
             payment_method: intent.payment_method,
-            provider_code: intent.provider_code,
+            provider_code: channel.provider_code,
             status: pending.to_owned(),
-            payment_params: std::collections::BTreeMap::new(),
+            payment_params,
         })
     }
 
@@ -422,7 +439,7 @@ impl SqliteCommercePaymentIntentStore {
         let row = sqlx::query(
             r#"
             SELECT id, payment_intent_id, order_id, out_trade_no, CAST(amount AS TEXT) AS amount,
-                   payment_method, status
+                   payment_method, provider_code, channel_id, status
             FROM commerce_payment_attempt
             WHERE tenant_id = CAST(? AS TEXT)
               AND owner_user_id = CAST(? AS TEXT)
@@ -451,6 +468,35 @@ async fn load_payment_method_for_intent(
         FROM commerce_payment_method
         WHERE method_key = ?
           AND status = 'active'
+          AND (
+                NOT EXISTS (
+                    SELECT 1
+                    FROM commerce_payment_channel c0
+                    WHERE c0.tenant_id = commerce_payment_method.tenant_id
+                      AND (c0.method_id = commerce_payment_method.id
+                           OR (c0.method_id IS NULL AND c0.provider_code = commerce_payment_method.provider_code))
+                      AND c0.deleted_at IS NULL
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM commerce_payment_channel c
+                    LEFT JOIN commerce_payment_provider_account a
+                      ON a.id = c.provider_account_id AND a.deleted_at IS NULL
+                    WHERE c.tenant_id = commerce_payment_method.tenant_id
+                      AND (c.method_id = commerce_payment_method.id
+                           OR (c.method_id IS NULL AND c.provider_code = commerce_payment_method.provider_code))
+                      AND c.status = 'active'
+                      AND c.deleted_at IS NULL
+                      AND (c.provider_account_id IS NULL OR (
+                          a.status = 'active'
+                          AND LOWER(a.provider_code) = LOWER(commerce_payment_method.provider_code)
+                          AND a.tenant_id = commerce_payment_method.tenant_id
+                          AND (a.organization_id IS NULL
+                               OR commerce_payment_method.organization_id IS NULL
+                               OR a.organization_id = commerce_payment_method.organization_id)
+                      ))
+                )
+          )
           AND (
                 (tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT))
              OR (tenant_id = CAST(? AS TEXT) AND organization_id IS NULL)
@@ -482,7 +528,7 @@ async fn load_reusable_payment_attempt(
     let row = sqlx::query(
         r#"
         SELECT id, payment_intent_id, order_id, out_trade_no, CAST(amount AS TEXT) AS amount,
-               payment_method, status
+               payment_method, provider_code, channel_id, status
         FROM commerce_payment_attempt
         WHERE tenant_id = CAST(? AS TEXT)
           AND owner_user_id = CAST(? AS TEXT)
@@ -521,6 +567,11 @@ fn map_payment_intent_row(
 fn map_payment_attempt_row(
     row: sqlx::sqlite::SqliteRow,
 ) -> Result<CreateOwnerPaymentAttemptOutcome, CommerceServiceError> {
+    let mut payment_params = std::collections::BTreeMap::new();
+    let channel_id = string_cell(&row, "channel_id");
+    if !channel_id.trim().is_empty() {
+        payment_params.insert("channelId".to_owned(), channel_id);
+    }
     Ok(CreateOwnerPaymentAttemptOutcome {
         attempt_id: string_cell(&row, "id"),
         payment_intent_id: string_cell(&row, "payment_intent_id"),
@@ -531,7 +582,7 @@ fn map_payment_attempt_row(
         payment_method: string_cell(&row, "payment_method"),
         provider_code: string_cell(&row, "provider_code"),
         status: string_cell(&row, "status"),
-        payment_params: std::collections::BTreeMap::new(),
+        payment_params,
     })
 }
 

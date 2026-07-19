@@ -57,6 +57,7 @@ import type {
   WebhookReplayResult,
   WebhookSignatureStatus,
 } from "../types/monitor-admin-types";
+import { usePaymentRecordsMessages } from "../i18n";
 
 export interface WebhookEventMonitorProps {
   events: readonly PaymentWebhookEventView[];
@@ -69,13 +70,12 @@ export interface WebhookEventMonitorProps {
   onReplay(eventId: string): Promise<void> | void;
 }
 
-const STATUS_OPTIONS: ReadonlyArray<{ label: string; value: WebhookEventStatus | "" }> = [
-  { label: "All statuses", value: "" },
-  { label: "Queued", value: "queued" },
-  { label: "Processing", value: "processing" },
-  { label: "Processed", value: "processed" },
-  { label: "Failed", value: "failed" },
-  { label: "Dead", value: "dead" },
+const FILTER_STATUS_VALUES: readonly WebhookEventStatus[] = [
+  "queued",
+  "processing",
+  "processed",
+  "failed",
+  "dead",
 ];
 
 const STATUS_VARIANT: Record<WebhookEventStatus, "default" | "success" | "warning" | "danger" | "secondary"> = {
@@ -86,19 +86,11 @@ const STATUS_VARIANT: Record<WebhookEventStatus, "default" | "success" | "warnin
   dead: "danger",
 };
 
-// Signature status badge — aligns with the Stripe Dashboard "Signature verified" indicator
 const SIGNATURE_VARIANT: Record<WebhookSignatureStatus, "success" | "danger" | "secondary" | "warning"> = {
   valid: "success",
   invalid: "danger",
   unverified: "secondary",
   unknown: "warning",
-};
-
-const SIGNATURE_LABEL: Record<WebhookSignatureStatus, string> = {
-  valid: "Signature verified",
-  invalid: "Signature invalid",
-  unverified: "Signature unchecked",
-  unknown: "Signature unknown",
 };
 
 function formatPayloadJson(payload: unknown): string {
@@ -110,6 +102,19 @@ function formatPayloadJson(payload: unknown): string {
 }
 
 export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
+  const messages = usePaymentRecordsMessages();
+  const operations = messages.operations;
+  const statusOptions = [
+    { label: operations.filters.allStatuses, value: "" },
+    ...FILTER_STATUS_VALUES.map((value) => ({
+      label: operations.webhooks.status[value],
+      value,
+    })),
+  ];
+  const providerOptions = ADMIN_PROVIDER_FILTER_OPTIONS.map((option) => ({
+    ...option,
+    label: option.value ? option.label : operations.filters.allProviders,
+  }));
   const [status, setStatus] = React.useState<string>("");
   const [providerCode, setProviderCode] = React.useState<string>("");
   const [eventType, setEventType] = React.useState("");
@@ -128,7 +133,7 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
       ...(q.trim() ? { q: q.trim() } : {}),
     };
     Promise.resolve(props.onApplyFilter(filter)).catch((err) => {
-      setError(err instanceof Error ? err.message : "Failed to apply filter.");
+      setError(err instanceof Error ? err.message : operations.validation.applyFilterFailed);
     });
   }
 
@@ -139,7 +144,7 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
     setQ("");
     setError(undefined);
     Promise.resolve(props.onApplyFilter({})).catch((err) => {
-      setError(err instanceof Error ? err.message : "Failed to clear filters.");
+      setError(err instanceof Error ? err.message : operations.validation.clearFiltersFailed);
     });
   }
 
@@ -150,7 +155,7 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
     try {
       await props.onReplay(eventId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to replay webhook event.");
+      setError(err instanceof Error ? err.message : operations.validation.replayFailed);
     }
     setPendingReplay(null);
   }
@@ -166,53 +171,53 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
         className="grid grid-cols-1 gap-3 rounded-md border border-[var(--sdk-color-border-subtle)] p-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={handleApply}
       >
-        <AdminFieldLabel label="Status" htmlFor="webhook-filter-status">
+        <AdminFieldLabel label={operations.filters.status} htmlFor="webhook-filter-status">
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger id="webhook-filter-status">
-              <SelectValue placeholder="All statuses" />
+              <SelectValue placeholder={operations.filters.allStatuses} />
             </SelectTrigger>
             <SelectContent>
-              {STATUS_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={option.value}>
+              {statusOptions.map((option) => (
+                <SelectItem key={option.value || "all"} value={option.value}>
                   {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Provider" htmlFor="webhook-filter-provider">
+        <AdminFieldLabel label={operations.filters.provider} htmlFor="webhook-filter-provider">
           <Select value={providerCode} onValueChange={setProviderCode}>
             <SelectTrigger id="webhook-filter-provider">
-              <SelectValue placeholder="All providers" />
+              <SelectValue placeholder={operations.filters.allProviders} />
             </SelectTrigger>
             <SelectContent>
-              {ADMIN_PROVIDER_FILTER_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={option.value}>
+              {providerOptions.map((option) => (
+                <SelectItem key={option.value || "all"} value={option.value}>
                   {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Event type" htmlFor="webhook-filter-event-type">
+        <AdminFieldLabel label={operations.webhooks.eventType} htmlFor="webhook-filter-event-type">
           <Input
             id="webhook-filter-event-type"
             value={eventType}
             onChange={(event) => setEventType(event.target.value)}
-            placeholder="e.g., payment_intent.succeeded"
+            placeholder={operations.webhooks.eventTypePlaceholder}
           />
         </AdminFieldLabel>
-        <AdminFieldLabel label="Search" htmlFor="webhook-filter-q">
+        <AdminFieldLabel label={operations.filters.search} htmlFor="webhook-filter-q">
           <Input
             id="webhook-filter-q"
             value={q}
             onChange={(event) => setQ(event.target.value)}
-            placeholder="Free-text search"
+            placeholder={operations.filters.searchPlaceholder}
           />
         </AdminFieldLabel>
         <div className="col-span-full flex justify-end">
-          <Button type="submit" size="sm" disabled={props.busy} title={props.busy ? "Cannot apply filter while another operation is in progress" : "Apply the current filter"}>
-            Apply filter
+          <Button type="submit" size="sm" disabled={props.busy} title={operations.availability.applyFilter}>
+            {operations.actions.applyFilter}
           </Button>
         </div>
       </form>
@@ -236,19 +241,21 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
               : "border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] text-[var(--sdk-color-text-error)]")
           }
         >
-          Replay {props.lastReplayResult.ok ? "accepted" : "rejected"} for event{" "}
-          <span className="font-mono">{props.lastReplayResult.eventId}</span> at{" "}
-          {formatAdminTimestamp(props.lastReplayResult.replayedAt)}
+          {operations.webhooks.replayResult(
+            props.lastReplayResult.ok,
+            props.lastReplayResult.eventId,
+            formatAdminTimestamp(props.lastReplayResult.replayedAt),
+          )}
           {props.lastReplayResult.diagnostic ? ` — ${props.lastReplayResult.diagnostic}` : ""}
         </div>
       ) : null}
 
       {props.events.length === 0 ? (
         <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-8 text-center text-sm text-[var(--sdk-color-text-secondary)]">
-          No webhook events found. Adjust the filter or wait for incoming events.
+          {operations.webhooks.empty}
           <div className="mt-3">
             <Button type="button" variant="ghost" size="sm" onClick={handleResetFilter} disabled={props.busy}>
-              Clear filters
+              {operations.actions.clearFilters}
             </Button>
           </div>
         </div>
@@ -266,38 +273,38 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
                       type="button"
                       className="font-mono text-sm font-medium text-[var(--sdk-color-text)] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sdk-color-border-focus)] focus-visible:ring-offset-2"
                       onClick={() => setViewingEvent(event)}
-                      title="View webhook event payload and details"
+                      title={operations.availability.openDetails}
                     >
                       {event.eventType}
                     </button>
                     <Badge variant="outline" className="font-mono">
                       {ADMIN_PROVIDER_LABEL[event.providerCode]}
                     </Badge>
-                    <Badge variant={STATUS_VARIANT[event.status]}>{event.status}</Badge>
+                    <Badge variant={STATUS_VARIANT[event.status]}>{operations.webhooks.status[event.status]}</Badge>
                     <Badge
                       variant={SIGNATURE_VARIANT[signatureStatus]}
-                      title={SIGNATURE_LABEL[signatureStatus]}
+                      title={operations.webhooks.signature[signatureStatus]}
                     >
-                      {SIGNATURE_LABEL[signatureStatus]}
+                      {operations.webhooks.signature[signatureStatus]}
                     </Badge>
-                    <Badge variant="secondary">retries: {event.retries}/{ADMIN_WEBHOOK_REPLAY_MAX_RETRIES}</Badge>
+                    <Badge variant="secondary">{operations.webhooks.fields.retries}: {event.retries}/{ADMIN_WEBHOOK_REPLAY_MAX_RETRIES}</Badge>
                   </div>
                   <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] sm:grid-cols-3">
                     <div>
-                      <dt className="inline">Event ID:</dt>{" "}
+                      <dt className="inline">{operations.webhooks.fields.eventIdentifier}:</dt>{" "}
                       <dd className="inline font-mono">{event.eventId ?? "—"}</dd>
                     </div>
                     <div>
-                      <dt className="inline">Received:</dt> <dd className="inline">{formatAdminRelativeTime(event.receivedAt)}</dd>
+                      <dt className="inline">{operations.webhooks.fields.received}:</dt> <dd className="inline">{formatAdminRelativeTime(event.receivedAt)}</dd>
                     </div>
                     <div>
-                      <dt className="inline">Processed:</dt>{" "}
+                      <dt className="inline">{operations.webhooks.fields.processed}:</dt>{" "}
                       <dd className="inline">{event.processedAt ? formatAdminTimestamp(event.processedAt) : "—"}</dd>
                     </div>
                   </dl>
                   {event.lastError ? (
                     <p className="mt-1 text-xs text-[var(--sdk-color-text-error)]">
-                      Last error: {event.lastError}
+                      {operations.webhooks.fields.lastError}: {event.lastError}
                     </p>
                   ) : null}
                 </div>
@@ -308,9 +315,9 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
                     size="sm"
                     onClick={() => setViewingEvent(event)}
                     disabled={props.busy}
-                    title={props.busy ? "Cannot open details while another operation is in progress" : "View webhook event payload and details"}
+                    title={operations.availability.openDetails}
                   >
-                    View
+                    {operations.actions.view}
                   </Button>
                   {props.canReplay ? (
                     <Button
@@ -321,11 +328,11 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
                       disabled={props.busy || replayDisabled}
                       title={
                         replayDisabled
-                          ? "Replay disabled: max retries reached or event marked dead"
-                          : "Replay this webhook event"
+                          ? operations.availability.replayDisabled
+                          : operations.availability.replay
                       }
                     >
-                      Replay
+                      {operations.actions.replay}
                     </Button>
                   ) : null}
                 </div>
@@ -337,8 +344,12 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
 
       <SdkworkPaymentListPaginationControls
         busy={props.busy ?? false}
+        label={operations.actions.loadMore}
         onLoadMore={props.onLoadMore}
         pageInfo={props.pageInfo}
+        summary={props.pageInfo?.totalItems
+          ? messages.table.paginationSummary(props.events.length, props.pageInfo.totalItems)
+          : undefined}
       />
 
       {/* Webhook event detail Drawer — payload viewer + headers, mirroring Stripe Dashboard event detail */}
@@ -369,13 +380,16 @@ export function WebhookEventMonitor(props: WebhookEventMonitorProps) {
 
       <ConfirmDialog
         open={props.canReplay && pendingReplay !== null}
-        title="Replay webhook event?"
+        title={operations.webhooks.confirmationTitle}
         description={
           pendingReplay
-            ? `Replay ${pendingReplay.eventType} (${pendingReplay.eventId ?? pendingReplay.id})? This will re-send the webhook notification to all registered endpoints, which may trigger downstream side effects (e.g., duplicate order fulfillment).`
+            ? operations.webhooks.confirmationDescription(
+              pendingReplay.eventType,
+              pendingReplay.eventId ?? pendingReplay.id,
+            )
             : ""
         }
-        confirmLabel="Replay"
+        confirmLabel={operations.actions.replay}
         variant="warning"
         busy={props.busy}
         onConfirm={handleReplay}
@@ -401,6 +415,7 @@ interface WebhookEventDetailProps {
 
 function WebhookEventDetail(props: WebhookEventDetailProps) {
   const { event } = props;
+  const operations = usePaymentRecordsMessages().operations;
   const signatureStatus = event.signatureStatus ?? "unverified";
   const payloadJson = event.payload ? formatPayloadJson(event.payload) : null;
   const headerEntries = event.headers ? Object.entries(event.headers) : [];
@@ -410,42 +425,44 @@ function WebhookEventDetail(props: WebhookEventDetailProps) {
       <DrawerHeader>
         <DrawerTitle className="font-mono">{event.eventType}</DrawerTitle>
         <DrawerDescription>
-          Webhook event <span className="font-mono">{event.eventId ?? event.id}</span> from{" "}
-          {ADMIN_PROVIDER_LABEL[event.providerCode]}
+          {operations.webhooks.detailDescription(
+            event.eventId ?? event.id,
+            ADMIN_PROVIDER_LABEL[event.providerCode],
+          )}
         </DrawerDescription>
       </DrawerHeader>
       <DrawerBody className="space-y-6">
         <DescriptionList columns={2}>
           <DescriptionItem>
-            <DescriptionTerm>Event ID</DescriptionTerm>
+            <DescriptionTerm>{operations.webhooks.fields.eventIdentifier}</DescriptionTerm>
             <DescriptionDetails mono>{event.eventId ?? "—"}</DescriptionDetails>
           </DescriptionItem>
           <DescriptionItem>
-            <DescriptionTerm>Provider</DescriptionTerm>
+            <DescriptionTerm>{operations.webhooks.fields.provider}</DescriptionTerm>
             <DescriptionDetails>{ADMIN_PROVIDER_LABEL[event.providerCode]}</DescriptionDetails>
           </DescriptionItem>
           <DescriptionItem>
-            <DescriptionTerm>Status</DescriptionTerm>
+            <DescriptionTerm>{operations.webhooks.fields.status}</DescriptionTerm>
             <DescriptionDetails>
-              <Badge variant={STATUS_VARIANT[event.status]}>{event.status}</Badge>
+              <Badge variant={STATUS_VARIANT[event.status]}>{operations.webhooks.status[event.status]}</Badge>
             </DescriptionDetails>
           </DescriptionItem>
           <DescriptionItem>
-            <DescriptionTerm>Signature</DescriptionTerm>
+            <DescriptionTerm>{operations.webhooks.fields.signature}</DescriptionTerm>
             <DescriptionDetails>
-              <Badge variant={SIGNATURE_VARIANT[signatureStatus]}>{SIGNATURE_LABEL[signatureStatus]}</Badge>
+              <Badge variant={SIGNATURE_VARIANT[signatureStatus]}>{operations.webhooks.signature[signatureStatus]}</Badge>
             </DescriptionDetails>
           </DescriptionItem>
           <DescriptionItem>
-            <DescriptionTerm>Retries</DescriptionTerm>
+            <DescriptionTerm>{operations.webhooks.fields.retries}</DescriptionTerm>
             <DescriptionDetails>{event.retries} / {ADMIN_WEBHOOK_REPLAY_MAX_RETRIES}</DescriptionDetails>
           </DescriptionItem>
           <DescriptionItem>
-            <DescriptionTerm>Received</DescriptionTerm>
+            <DescriptionTerm>{operations.webhooks.fields.received}</DescriptionTerm>
             <DescriptionDetails>{formatAdminTimestamp(event.receivedAt)}</DescriptionDetails>
           </DescriptionItem>
           <DescriptionItem>
-            <DescriptionTerm>Processed</DescriptionTerm>
+            <DescriptionTerm>{operations.webhooks.fields.processed}</DescriptionTerm>
             <DescriptionDetails>{event.processedAt ? formatAdminTimestamp(event.processedAt) : "—"}</DescriptionDetails>
           </DescriptionItem>
         </DescriptionList>
@@ -455,7 +472,7 @@ function WebhookEventDetail(props: WebhookEventDetailProps) {
             role="alert"
             className="rounded-md border border-[var(--sdk-color-border-error)] bg-[var(--sdk-color-bg-error-subtle)] p-3 text-sm text-[var(--sdk-color-text-error)]"
           >
-            <div className="font-medium">Last error</div>
+            <div className="font-medium">{operations.webhooks.fields.lastError}</div>
             <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-xs">{event.lastError}</pre>
           </div>
         ) : null}
@@ -463,7 +480,7 @@ function WebhookEventDetail(props: WebhookEventDetailProps) {
         {payloadJson ? (
           <section className="space-y-2">
             <h4 className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--sdk-color-text-muted)]">
-              Payload
+              {operations.webhooks.fields.payload}
             </h4>
             <pre
               className="max-h-[24rem] overflow-auto rounded-md border border-[var(--sdk-color-border-default)] bg-[var(--sdk-color-surface-panel-muted)] p-3 font-mono text-xs leading-relaxed text-[var(--sdk-color-text-primary)]"
@@ -474,14 +491,14 @@ function WebhookEventDetail(props: WebhookEventDetailProps) {
           </section>
         ) : (
           <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-4 text-center text-sm text-[var(--sdk-color-text-secondary)]">
-            No payload captured for this event.
+            {operations.webhooks.noPayload}
           </div>
         )}
 
         {headerEntries.length > 0 ? (
           <section className="space-y-2">
             <h4 className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--sdk-color-text-muted)]">
-              Request headers
+              {operations.webhooks.fields.headers}
             </h4>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-1 rounded-md border border-[var(--sdk-color-border-default)] bg-[var(--sdk-color-surface-panel-muted)] p-3 sm:grid-cols-2">
               {headerEntries.map(([key, value]) => (
@@ -504,11 +521,11 @@ function WebhookEventDetail(props: WebhookEventDetailProps) {
             disabled={props.busy || props.replayDisabled}
             title={
               props.replayDisabled
-                ? "Replay disabled: max retries reached or event marked dead"
-                : "Replay this webhook event"
+                ? operations.availability.replayDisabled
+                : operations.availability.replay
             }
           >
-            Replay
+            {operations.actions.replay}
           </Button>
         ) : null}
       </DrawerFooter>

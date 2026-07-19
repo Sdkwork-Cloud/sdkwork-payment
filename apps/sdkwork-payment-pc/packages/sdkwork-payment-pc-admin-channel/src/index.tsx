@@ -3,6 +3,7 @@ export { createPaymentChannelAdminController } from "./services/channel-admin-co
 export {
   PaymentChannelAdminWorkspace,
   type PaymentChannelAdminCapabilities,
+  type PaymentChannelAdminSection,
   type PaymentChannelAdminWorkspaceProps,
 } from "./pages/ChannelAdminWorkspace";
 export { PaymentMethodManager } from "./components/PaymentMethodManager";

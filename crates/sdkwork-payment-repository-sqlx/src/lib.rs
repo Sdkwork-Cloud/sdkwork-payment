@@ -3,6 +3,7 @@ mod owner_order_checkout;
 mod owner_order_payment_port;
 mod owner_payment_params;
 mod payment_attempt_context;
+mod payment_channel;
 mod payment_method;
 pub mod postgres_owner_order_payment;
 pub mod postgres_payment;
@@ -10,6 +11,7 @@ pub mod postgres_payment_intent;
 pub mod postgres_refund;
 pub mod postgres_webhook_ingestion;
 mod provider_account;
+mod provider_credential;
 mod shared;
 pub mod sqlite_owner_order_payment;
 pub mod sqlite_payment;
@@ -45,9 +47,18 @@ pub use postgres_payment_intent::PostgresCommercePaymentIntentStore;
 pub use postgres_refund::PostgresCommerceRefundStore;
 pub use postgres_webhook_ingestion::ingest_provider_webhook_postgres;
 pub use provider_account::{
+    load_active_provider_account_by_id_postgres, load_active_provider_account_by_id_sqlite,
     load_active_provider_account_by_merchant_id_postgres,
-    load_active_provider_account_by_merchant_id_sqlite, load_active_provider_account_postgres,
-    load_active_provider_account_sqlite, PaymentProviderAccountRecord,
+    load_active_provider_account_by_merchant_id_sqlite,
+    load_active_provider_account_for_channel_postgres,
+    load_active_provider_account_for_channel_sqlite, load_active_provider_account_postgres,
+    load_active_provider_account_sqlite, load_provider_account_for_existing_payment_postgres,
+    load_provider_account_for_existing_payment_sqlite, PaymentProviderAccountRecord,
+};
+pub use provider_credential::{
+    load_provider_credentials_postgres, load_provider_credentials_sqlite,
+    rotate_provider_credentials_postgres, rotate_provider_credentials_sqlite,
+    ProviderCredentialSet, ProviderCredentialWrite,
 };
 pub use sdkwork_payment_service::ConfirmOwnerOrderPaymentOutcome;
 pub use sqlite_owner_order_payment::SqliteCommerceOwnerOrderPaymentStore;

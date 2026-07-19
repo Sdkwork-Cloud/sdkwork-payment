@@ -11,3 +11,4 @@ path = "src/lib.rs"
 
 [dependencies]
 sdkwork_contract_service.workspace = true
+serde_json.workspace = true

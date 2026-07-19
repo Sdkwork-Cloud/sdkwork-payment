@@ -27,6 +27,11 @@
       "file": "BACKEND_UI_SPEC.md",
       "path": "../../../../../sdkwork-specs/BACKEND_UI_SPEC.md",
       "purpose": "Backend-admin runtime composition and backend SDK inventory."
+    },
+    {
+      "file": "I18N_SPEC.md",
+      "path": "../../../../../sdkwork-specs/I18N_SPEC.md",
+      "purpose": "Package-local operator message fragments and locale parity."
     }
   ],
   "contracts": {

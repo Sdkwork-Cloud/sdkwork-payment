@@ -1,5 +1,11 @@
 {
-    "prefixes":  [
-                     "commerce_"
-                 ]
+  "schemaVersion": 1,
+  "kind": "sdkwork.database.prefix-registry",
+  "prefixes": [
+    {
+      "prefix": "commerce_",
+      "owner": "sdkwork-payment",
+      "domain": "payment"
+    }
+  ]
 }

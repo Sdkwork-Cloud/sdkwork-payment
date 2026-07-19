@@ -2,7 +2,7 @@
  * Certificate manager.
  *
  * Lists PEM certificate references with expiry metadata. The PEM content itself
- * is never stored in the DB; only the env var reference (`certificateRef`) and
+ * is encrypted in the DB; only configuration status and
  * parsed metadata (subject, issuer, fingerprint, expiry) are persisted. This
  * view surfaces:
  *   - Expiry warnings (yellow when within 30 days, red when expired)
@@ -190,8 +190,8 @@ export function CertificateManager(props: CertificateManagerProps) {
                       </dd>
                     </div>
                     <div>
-                      <dt className="inline">Env var:</dt>{" "}
-                      <dd className="inline font-mono">{certificate.certificateRef}</dd>
+                      <dt className="inline">Content:</dt>{" "}
+                      <dd className="inline">{certificate.hasContent ? "Encrypted" : "Missing"}</dd>
                     </div>
                     <div>
                       <dt className="inline">Fingerprint:</dt>{" "}
@@ -277,8 +277,7 @@ interface CertificateFormState {
   certificateNo: string;
   providerCode: string;
   certificateType: PaymentCertificateKind;
-  certificateRef: string;
-  pemContent: string;
+  certificate: string;
 }
 
 function CertificateForm(props: CertificateFormProps) {
@@ -286,8 +285,7 @@ function CertificateForm(props: CertificateFormProps) {
     certificateNo: "",
     providerCode: "",
     certificateType: "merchant_private_key",
-    certificateRef: "",
-    pemContent: "",
+    certificate: "",
   });
   const [formError, setFormError] = React.useState<string | undefined>();
 
@@ -298,17 +296,15 @@ function CertificateForm(props: CertificateFormProps) {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(undefined);
-    if (!state.certificateNo.trim() || !state.certificateRef.trim()) {
-      setFormError("Certificate no and env var reference are required.");
+    if (!state.certificateNo.trim() || !state.certificate.trim()) {
+      setFormError("Certificate no and PEM content are required.");
       return;
     }
-    const pemTrimmed = state.pemContent.trim();
     const draft: PaymentCertificateDraft = {
       certificateNo: state.certificateNo.trim(),
       certificateType: state.certificateType,
-      certificateRef: state.certificateRef.trim(),
+      certificate: state.certificate.trim(),
       ...(state.providerCode ? { providerCode: state.providerCode as PaymentProviderCode } : {}),
-      ...(pemTrimmed ? { pemContent: pemTrimmed } : {}),
     };
     try {
       await props.onSubmit(draft);
@@ -358,23 +354,16 @@ function CertificateForm(props: CertificateFormProps) {
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Env var reference" htmlFor="cert-certificate-ref" required>
-          <Input
-            id="cert-certificate-ref"
-            value={state.certificateRef}
-            onChange={(event) => update("certificateRef", event.target.value)}
-            placeholder="e.g., ALIPAY_PUBLIC_KEY"
-            required
-          />
-        </AdminFieldLabel>
       </div>
-      <AdminFieldLabel label="PEM content (optional, for auto-parsing)" htmlFor="cert-pem-content">
+      <AdminFieldLabel label="PEM Content" htmlFor="cert-pem-content" required>
         <textarea
           id="cert-pem-content"
           className="min-h-[8rem] w-full rounded-md border border-[var(--sdk-color-border-default)] bg-[var(--sdk-color-surface-panel)] px-3 py-2 font-mono text-sm shadow-[var(--sdk-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--sdk-color-border-focus)]"
-          value={state.pemContent}
-          onChange={(event) => update("pemContent", event.target.value)}
-          placeholder={"Paste PEM content (base64) — the backend will parse\nsubject, issuer, fingerprint, and expiry server-side."}
+          value={state.certificate}
+          onChange={(event) => update("certificate", event.target.value)}
+          placeholder="Paste PEM content"
+          required
+          autoComplete="new-password"
         />
       </AdminFieldLabel>
       {formError ? (
@@ -389,7 +378,7 @@ function CertificateForm(props: CertificateFormProps) {
         <Button type="button" variant="ghost" onClick={props.onCancel} disabled={props.submitting} title="Cancel certificate registration">
           Cancel
         </Button>
-        <Button type="submit" disabled={props.submitting} title="Register this certificate reference">
+        <Button type="submit" disabled={props.submitting} title="Register this certificate">
           {props.submitting ? "Registering..." : "Register certificate"}
         </Button>
       </div>

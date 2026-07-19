@@ -156,9 +156,9 @@ export function EnvironmentSwitcher(props: EnvironmentSwitcherProps) {
                 <div className="mt-2">
                   <SecretRefField
                     label="Secret ref"
-                    value={account.secretRef}
+                    value={account.hasPrimarySecret ? "Configured" : "Missing"}
                     masked
-                    helperText="Env var name holding the PSP credential (safe to reveal — this is the variable name, not the secret value)"
+                    helperText="Credential values are write-only and are not returned by the backend."
                   />
                 </div>
               </div>

@@ -32,6 +32,7 @@ pub struct PayOwnerOrderCommand {
     pub payment_method: String,
     pub payment_scene: Option<String>,
     pub payment_attempt_callback_payload: Option<String>,
+    pub payment_metadata: serde_json::Value,
     pub tenant_id: String,
     pub idempotency_key: String,
     pub request_no: String,
@@ -46,6 +47,7 @@ pub struct PayOwnerOrderCommandInput {
     pub payment_method: String,
     pub payment_scene: Option<String>,
     pub payment_attempt_callback_payload: Option<String>,
+    pub payment_metadata: serde_json::Value,
     pub request_no: String,
     pub idempotency_key: String,
 }
@@ -97,6 +99,11 @@ impl PayOwnerOrderCommand {
         crate::validation::require_non_empty("payment_method", &input.payment_method)?;
         crate::validation::require_non_empty("request_no", &input.request_no)?;
         crate::validation::require_non_empty("idempotency_key", &input.idempotency_key)?;
+        if !input.payment_metadata.is_object() {
+            return Err(CommerceServiceError::validation(
+                "payment_metadata must be a JSON object",
+            ));
+        }
 
         Ok(Self {
             order_id: input.order_id.trim().to_string(),
@@ -108,6 +115,7 @@ impl PayOwnerOrderCommand {
                 .map(|value| value.trim().to_ascii_lowercase())
                 .filter(|value| !value.is_empty()),
             payment_attempt_callback_payload: input.payment_attempt_callback_payload,
+            payment_metadata: input.payment_metadata,
             tenant_id: input.tenant_id.trim().to_string(),
             idempotency_key: input.idempotency_key.trim().to_string(),
             request_no: input.request_no.trim().to_string(),
@@ -156,6 +164,7 @@ mod tests {
             payment_method: " WeChat_Pay ".to_owned(),
             payment_scene: Some(" Mini_Program ".to_owned()),
             payment_attempt_callback_payload: Some("{\"source\":\"test\"}".to_owned()),
+            payment_metadata: serde_json::json!({"openid":"openid-1"}),
             request_no: " request-1 ".to_owned(),
             idempotency_key: " idempotency-1 ".to_owned(),
         })
@@ -171,6 +180,7 @@ mod tests {
             command.payment_attempt_callback_payload.as_deref(),
             Some("{\"source\":\"test\"}")
         );
+        assert_eq!(command.payment_metadata["openid"], "openid-1");
         assert_eq!(command.request_no, "request-1");
         assert_eq!(command.idempotency_key, "idempotency-1");
 
@@ -182,6 +192,7 @@ mod tests {
             payment_method: "wechat_pay".to_owned(),
             payment_scene: None,
             payment_attempt_callback_payload: None,
+            payment_metadata: serde_json::json!({}),
             request_no: "request-1".to_owned(),
             idempotency_key: "idempotency-1".to_owned(),
         })

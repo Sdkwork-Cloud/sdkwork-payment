@@ -340,7 +340,7 @@
       "post": {
         "tags": ["payments"],
         "summary": "Provider account credential rotation.",
-        "description": "Dev config: rotates the secret_ref/webhook_secret_ref/certificate_ref pointers for a provider account. Does not revoke the underlying env secret; only updates the pointer used at runtime resolution.",
+        "description": "Rotates encrypted database credential versions for a provider account and supersedes the previous active versions.",
         "operationId": "providerAccounts.credentials.rotate",
         "parameters": [
           { "name": "providerAccountId", "in": "path", "required": true, "schema": { "type": "string" } },
@@ -771,7 +771,7 @@
       "post": {
         "tags": ["payments"],
         "summary": "Certificate create (upload/register PEM).",
-        "description": "Dev config: registers a PEM certificate by storing its env var name reference (certificate_ref) and parsed expiry. The PEM content itself is stored in env/secrets manager, never in the database.",
+        "description": "Registers PEM certificate material as a write-only input encrypted before database persistence.",
         "operationId": "certificates.create",
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateCertificateCommand" } } } },
@@ -1072,7 +1072,7 @@
       "post": {
         "tags": ["payments"],
         "summary": "Webhook signature verification test (dev config).",
-        "description": "Dev config: verifies a webhook signature against the configured webhook_secret_ref for a provider account. Accepts the raw payload, signature header, and timestamp; returns whether verification succeeded and diagnostic info. Aligned with Stripe CLI `listen` verify semantics.",
+        "description": "Verifies a webhook signature against the database-backed credential for a provider account. Accepts the raw payload, signature header, and timestamp; returns whether verification succeeded and safe diagnostic info.",
         "operationId": "dev.webhookSignatureTest",
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookSignatureTestCommand" } } } },
@@ -1340,7 +1340,8 @@
         ]
       },
       "ProviderAccount": {
-        "type": "object", "additionalProperties": true,
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "accountNo", "providerCode", "accountMode", "environment", "settlementCurrency", "hasPrimarySecret", "hasWebhookSecret", "hasCertificate", "credentialStorage", "capabilities", "status", "metadata", "createdAt", "updatedAt"],
         "properties": {
           "id": { "type": "string" },
           "accountNo": { "type": "string" },
@@ -1351,12 +1352,13 @@
           "environment": { "type": "string", "enum": ["development", "sandbox", "production"] },
           "countryCode": { "type": "string" },
           "settlementCurrency": { "type": "string" },
-          "secretRef": { "type": "string", "description": "Env var name for primary secret (Stripe secret key, Alipay/WeChat private key PEM). Never stores plaintext." },
-          "webhookSecretRef": { "type": "string", "description": "Env var name for webhook secret (Stripe) or WeChat API v3 key" },
-          "certificateRef": { "type": "string", "description": "Env var name for Alipay public key or WeChat platform cert PEM" },
+          "hasPrimarySecret": { "type": "boolean", "description": "Whether a primary provider credential is configured. Secret values are never returned." },
+          "hasWebhookSecret": { "type": "boolean", "description": "Whether a webhook signing secret or WeChat API v3 key is configured." },
+          "hasCertificate": { "type": "boolean", "description": "Whether a provider public key or platform certificate is configured." },
+          "credentialStorage": { "type": "string", "enum": ["database_encrypted", "legacy_reference", "none"] },
           "capabilities": { "type": "object", "additionalProperties": true, "description": "Supported payment capabilities: { pay: true, refund: true, close: true, query: true }" },
           "status": { "type": "string", "enum": ["active", "inactive", "suspended", "deprecated"] },
-          "metadata": { "type": "object", "additionalProperties": true, "description": "Provider-specific extras: appId, merchantSerialNo, returnUrl, sub_appid mappings" },
+          "metadata": { "type": "object", "additionalProperties": true, "description": "Provider-specific extras: appId, merchantSerialNo, notifyUrl, returnUrl, sub_appid mappings" },
           "certificateExpiresAt": { "type": "string", "format": "date-time", "description": "Parsed PEM expiry for certificate_ref" },
           "lastTestedAt": { "type": "string", "format": "date-time" },
           "lastTestStatus": { "type": "string", "enum": ["success", "failure", "unknown"] },
@@ -1366,7 +1368,7 @@
       },
       "CreateProviderAccountCommand": {
         "type": "object", "additionalProperties": false,
-        "required": ["accountNo", "providerCode", "merchantId", "environment", "countryCode", "settlementCurrency", "secretRef"],
+        "required": ["accountNo", "providerCode", "merchantId", "environment", "countryCode", "settlementCurrency", "primarySecret"],
         "properties": {
           "accountNo": { "type": "string", "minLength": 1, "maxLength": 64 },
           "providerCode": { "type": "string", "enum": ["stripe", "alipay", "wechat_pay", "sandbox"] },
@@ -1376,11 +1378,11 @@
           "environment": { "type": "string", "enum": ["development", "sandbox", "production"] },
           "countryCode": { "type": "string", "minLength": 2, "maxLength": 2 },
           "settlementCurrency": { "type": "string", "minLength": 3, "maxLength": 3 },
-          "secretRef": { "type": "string", "minLength": 1, "maxLength": 128 },
-          "webhookSecretRef": { "type": "string" },
-          "certificateRef": { "type": "string" },
+          "primarySecret": { "type": "string", "minLength": 1, "maxLength": 32768, "writeOnly": true, "description": "Primary PSP secret material. Encrypted before database persistence and never returned." },
+          "webhookSecret": { "type": "string", "minLength": 1, "maxLength": 32768, "writeOnly": true, "description": "Stripe webhook secret or WeChat API v3 key." },
+          "certificate": { "type": "string", "minLength": 1, "maxLength": 65536, "writeOnly": true, "description": "Alipay public key or WeChat platform certificate PEM." },
           "capabilities": { "type": "object", "additionalProperties": true },
-          "status": { "type": "string", "enum": ["active", "inactive", "suspended", "deprecated"], "default": "active" },
+          "status": { "type": "string", "enum": ["active", "inactive", "suspended", "deprecated"], "default": "inactive" },
           "metadata": { "type": "object", "additionalProperties": true }
         }
       },
@@ -1393,9 +1395,9 @@
           "environment": { "type": "string", "enum": ["development", "sandbox", "production"] },
           "countryCode": { "type": "string" },
           "settlementCurrency": { "type": "string" },
-          "secretRef": { "type": "string" },
-          "webhookSecretRef": { "type": "string" },
-          "certificateRef": { "type": "string" },
+          "primarySecret": { "type": "string", "minLength": 1, "maxLength": 32768, "writeOnly": true, "description": "Replacement primary secret. Omit to preserve the current value." },
+          "webhookSecret": { "type": "string", "minLength": 1, "maxLength": 32768, "writeOnly": true, "description": "Replacement webhook/API v3 secret. Omit to preserve the current value." },
+          "certificate": { "type": "string", "minLength": 1, "maxLength": 65536, "writeOnly": true, "description": "Replacement certificate/public key. Omit to preserve the current value." },
           "capabilities": { "type": "object", "additionalProperties": true },
           "status": { "type": "string", "enum": ["active", "inactive", "suspended", "deprecated"] },
           "metadata": { "type": "object", "additionalProperties": true }
@@ -1417,7 +1419,7 @@
         "type": "object", "additionalProperties": false,
         "properties": {
           "environment": { "type": "string", "enum": ["development", "sandbox", "production"], "description": "Override target environment for this test (defaults to account.environment)" },
-          "dryRun": { "type": "boolean", "default": false, "description": "Validate env var resolution without invoking PSP API" }
+          "dryRun": { "type": "boolean", "default": false, "description": "Decrypt database credentials and initialize the provider adapter without creating a payment" }
         }
       },
       "ProviderAccountTestResult": {
@@ -1439,12 +1441,12 @@
         ]
       },
       "CredentialRotateCommand": {
-        "type": "object", "additionalProperties": false, "required": ["secretRef"],
+        "type": "object", "additionalProperties": false, "required": ["primarySecret"],
         "properties": {
-          "secretRef": { "type": "string", "description": "New env var name for primary secret" },
-          "webhookSecretRef": { "type": "string", "description": "New env var name for webhook secret" },
-          "certificateRef": { "type": "string", "description": "New env var name for certificate PEM" },
-          "invalidatePrevious": { "type": "boolean", "default": false, "description": "Mark previous refs as deprecated (metadata flag)" }
+          "primarySecret": { "type": "string", "minLength": 1, "maxLength": 32768, "writeOnly": true },
+          "webhookSecret": { "type": "string", "minLength": 1, "maxLength": 32768, "writeOnly": true },
+          "certificate": { "type": "string", "minLength": 1, "maxLength": 65536, "writeOnly": true },
+          "invalidatePrevious": { "type": "boolean", "default": true, "description": "Supersede previous active credential versions" }
         }
       },
       "PaymentChannel": {
@@ -1625,14 +1627,15 @@
         ]
       },
       "Certificate": {
-        "type": "object", "additionalProperties": true,
-        "description": "PEM certificate reference for provider credential management.",
+        "type": "object", "additionalProperties": false,
+        "description": "Encrypted PEM certificate inventory metadata.",
         "properties": {
           "id": { "type": "string" },
           "certificateNo": { "type": "string" },
           "providerCode": { "type": "string", "enum": ["stripe", "alipay", "wechat_pay"] },
           "certificateType": { "type": "string", "enum": ["merchant_private_key", "provider_public_key", "platform_certificate", "webhook_secret"] },
-          "certificateRef": { "type": "string", "description": "Env var name where the PEM/secret is stored" },
+          "hasContent": { "type": "boolean", "description": "Whether encrypted certificate content is present" },
+          "credentialStorage": { "type": "string", "enum": ["database_encrypted", "legacy_reference"] },
           "fingerprint": { "type": "string", "description": "SHA-256 fingerprint of the PEM for dedup/rotation tracking" },
           "expiresAt": { "type": "string", "format": "date-time" },
           "issuer": { "type": "string" },
@@ -1645,13 +1648,12 @@
       },
       "CreateCertificateCommand": {
         "type": "object", "additionalProperties": false,
-        "required": ["certificateNo", "providerCode", "certificateType", "certificateRef"],
+        "required": ["certificateNo", "providerCode", "certificateType", "certificate"],
         "properties": {
           "certificateNo": { "type": "string", "minLength": 1, "maxLength": 64 },
           "providerCode": { "type": "string", "enum": ["stripe", "alipay", "wechat_pay"] },
           "certificateType": { "type": "string", "enum": ["merchant_private_key", "provider_public_key", "platform_certificate", "webhook_secret"] },
-          "certificateRef": { "type": "string", "description": "Env var name; the PEM content is read from env at runtime, never stored in DB" },
-          "pemContent": { "type": "string", "format": "byte", "description": "Optional base64 PEM for parsing expiry/fingerprint server-side; not persisted" },
+          "certificate": { "type": "string", "minLength": 1, "maxLength": 65536, "writeOnly": true, "description": "PEM content encrypted before database persistence" },
           "metadata": { "type": "object", "additionalProperties": true }
         }
       },

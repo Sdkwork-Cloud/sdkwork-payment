@@ -219,6 +219,7 @@ impl CommercePaymentIntentStore for ProviderEnrichedSqlitePaymentIntents {
                     order_id: &order_id,
                     idempotency_key: &idempotency_key,
                     payment_scene: None,
+                    payment_metadata: None,
                 },
                 outcome,
             )
@@ -276,6 +277,7 @@ impl CommercePaymentIntentStore for ProviderEnrichedPostgresPaymentIntents {
                     order_id: &order_id,
                     idempotency_key: &idempotency_key,
                     payment_scene: None,
+                    payment_metadata: None,
                 },
                 outcome,
             )
@@ -352,7 +354,7 @@ async fn create_payment_intent(
     let payment_method = body
         .payment_method
         .clone()
-        .unwrap_or_else(|| "wechat_pay".to_owned());
+        .unwrap_or_else(|| "wechat_native".to_owned());
     let command = match CreateOwnerPaymentIntentCommand::new(
         &subject.tenant_id,
         subject.organization_id.as_deref(),

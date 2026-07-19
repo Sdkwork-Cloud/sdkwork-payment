@@ -11,14 +11,15 @@ import { Label } from "@sdkwork/ui-pc-react";
 
 export interface AdminFieldLabelProps {
   children: React.ReactNode;
+  className?: string;
   htmlFor: string;
   label: string;
   required?: boolean;
 }
 
-export function AdminFieldLabel({ children, htmlFor, label, required }: AdminFieldLabelProps) {
+export function AdminFieldLabel({ children, className, htmlFor, label, required }: AdminFieldLabelProps) {
   return (
-    <div className="space-y-1.5">
+    <div className={["space-y-1.5", className].filter(Boolean).join(" ")}>
       <Label htmlFor={htmlFor}>
         {label}
         {required ? <span className="text-[var(--sdk-color-text-error)]">*</span> : null}

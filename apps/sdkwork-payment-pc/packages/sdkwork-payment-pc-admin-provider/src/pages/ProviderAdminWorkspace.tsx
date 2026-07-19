@@ -49,9 +49,12 @@ import type {
 export interface PaymentProviderAdminWorkspaceProps {
   controller: PaymentProviderAdminController;
   capabilities: PaymentProviderAdminCapabilities;
+  section?: PaymentProviderAdminSection;
   title?: string;
   description?: string;
 }
+
+export type PaymentProviderAdminSection = "accounts" | "submerchants";
 
 export interface PaymentProviderAdminCapabilities {
   canCreateProviderAccount: boolean;
@@ -75,7 +78,8 @@ export function PaymentProviderAdminWorkspace(
 ) {
   const { controller } = props;
   const [state, setState] = React.useState<PaymentProviderAdminState>(() => controller.getState());
-  const [tab, setTab] = React.useState<"accounts" | "submerchants">("accounts");
+  const [tab, setTab] = React.useState<PaymentProviderAdminSection>("accounts");
+  const activeSection = props.section ?? tab;
   const [dialog, setDialog] = React.useState<DialogState>({ kind: "closed" });
 
   React.useEffect(() => {
@@ -117,7 +121,22 @@ export function PaymentProviderAdminWorkspace(
     if (dialog.kind !== "edit") {
       return;
     }
-    await controller.updateProviderAccount(dialog.account.id, draft);
+    if (draft.status === "active") {
+      await controller.updateProviderAccount(dialog.account.id, {
+        ...draft,
+        status: "inactive",
+      });
+      const result = await controller.testProviderAccount(dialog.account.id, {
+        environment: draft.environment ?? dialog.account.environment,
+        dryRun: true,
+      });
+      if (!result.ok) {
+        throw new Error(result.diagnostic ?? "Provider account readiness validation failed.");
+      }
+      await controller.updateProviderAccount(dialog.account.id, { status: "active" });
+    } else {
+      await controller.updateProviderAccount(dialog.account.id, draft);
+    }
     setDialog({ kind: "closed" });
   }
 
@@ -127,7 +146,7 @@ export function PaymentProviderAdminWorkspace(
     }
     const options: PaymentProviderAccountTestOptions = {
       environment: dialog.account.environment,
-      dryRun: false,
+      dryRun: true,
     };
     await controller.testProviderAccount(dialog.account.id, options);
   }
@@ -144,7 +163,9 @@ export function PaymentProviderAdminWorkspace(
     controller.selectProviderAccount(account.id);
     if (account.accountMode === "partner") {
       void controller.loadMoreSubMerchants(account.id);
-      setTab("submerchants");
+      if (!props.section) {
+        setTab("submerchants");
+      }
     }
   }
 
@@ -181,13 +202,19 @@ export function PaymentProviderAdminWorkspace(
         ) : null}
 
         <Tabs
-          value={tab}
-          onValueChange={(value) => setTab(value as "accounts" | "submerchants")}
+          value={activeSection}
+          onValueChange={(value) => {
+            if (!props.section) {
+              setTab(value as PaymentProviderAdminSection);
+            }
+          }}
         >
-          <PaymentAdminTabsList aria-label="Payment provider sections">
-            <PaymentAdminTabsTrigger value="accounts">Provider accounts</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="submerchants">Sub-merchants</PaymentAdminTabsTrigger>
-          </PaymentAdminTabsList>
+          {!props.section ? (
+            <PaymentAdminTabsList aria-label="Payment provider sections">
+              <PaymentAdminTabsTrigger value="accounts">Provider accounts</PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger value="submerchants">Sub-merchants</PaymentAdminTabsTrigger>
+            </PaymentAdminTabsList>
+          ) : null}
           <PaymentAdminTabsContent value="accounts">
             <ProviderAccountList
               accounts={state.providerAccounts}
@@ -305,7 +332,7 @@ export function PaymentProviderAdminWorkspace(
           {dialog.kind === "test" ? (
             <div className="space-y-3">
               <p className="text-sm text-[var(--sdk-color-text-secondary)]">
-                This will invoke the lowest-cost PSP API to verify connectivity for{" "}
+                Validate the saved credential references and provider adapter for{" "}
                 <strong>{dialog.account.accountNo}</strong> ({dialog.account.providerCode} /{" "}
                 {dialog.account.environment}). The result updates the provider account's
                 <code className="mx-1 rounded bg-[var(--sdk-color-bg-subtle)] px-1 text-xs">
@@ -366,8 +393,7 @@ export function PaymentProviderAdminWorkspace(
 }
 
 // Credential rotation form: replaces the legacy window.prompt anti-pattern with a structured
-// Dialog + Input/Switch form, supporting simultaneous rotation of secretRef / webhookSecretRef /
-// certificateRef with control over whether to invalidate previous credentials.
+// Dialog + write-only credential fields. Existing values are never loaded into browser state.
 interface RotateCredentialsDialogProps {
   account: PaymentProviderAccountView;
   busy: boolean;
@@ -376,18 +402,17 @@ interface RotateCredentialsDialogProps {
 }
 
 interface RotateFormState {
-  secretRef: string;
-  webhookSecretRef: string;
-  certificateRef: string;
+  primarySecret: string;
+  webhookSecret: string;
+  certificate: string;
   invalidatePrevious: boolean;
 }
 
 function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
-  // Pre-fill with the current account's credential references on open, so they can be edited in place
   const [state, setState] = React.useState<RotateFormState>(() => ({
-    secretRef: props.account.secretRef,
-    webhookSecretRef: props.account.webhookSecretRef ?? "",
-    certificateRef: props.account.certificateRef ?? "",
+    primarySecret: "",
+    webhookSecret: "",
+    certificate: "",
     invalidatePrevious: true,
   }));
   const [submitting, setSubmitting] = React.useState(false);
@@ -399,12 +424,12 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
     setSubmitting(true);
     try {
       const draft: PaymentCredentialRotateDraft = {
-        secretRef: state.secretRef.trim(),
-        ...(state.webhookSecretRef.trim()
-          ? { webhookSecretRef: state.webhookSecretRef.trim() }
+        primarySecret: state.primarySecret.trim(),
+        ...(state.webhookSecret.trim()
+          ? { webhookSecret: state.webhookSecret.trim() }
           : {}),
-        ...(state.certificateRef.trim()
-          ? { certificateRef: state.certificateRef.trim() }
+        ...(state.certificate.trim()
+          ? { certificate: state.certificate.trim() }
           : {}),
         invalidatePrevious: state.invalidatePrevious,
       };
@@ -423,45 +448,53 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
       aria-label="Rotate credentials form"
     >
       <p className="text-sm text-[var(--sdk-color-text-secondary)]">
-        Provide new secret env var names below. The previous env var will be marked
-        as deprecated in account metadata; the underlying secret is not revoked
-        automatically — rotate it in your secret store separately.
+        New credential versions are encrypted in the database. Previous active versions
+        are superseded after this operation succeeds.
       </p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <AdminFieldLabel label="Secret Env Var" htmlFor="rotate-secret-ref">
-          <Input
-            id="rotate-secret-ref"
-            value={state.secretRef}
+        <AdminFieldLabel label="Primary Credential" htmlFor="rotate-primary-secret" required>
+          <textarea
+            id="rotate-primary-secret"
+            value={state.primarySecret}
             onChange={(event) =>
-              setState((prev) => ({ ...prev, secretRef: event.target.value }))
+              setState((prev) => ({ ...prev, primarySecret: event.target.value }))
             }
-            placeholder="New secret env var name"
+            placeholder="Enter new credential value"
+            required
+            rows={5}
+            autoComplete="new-password"
+            className="w-full resize-y rounded-md border border-[var(--sdk-color-border)] bg-[var(--sdk-color-bg-surface)] px-3 py-2 font-mono text-sm text-[var(--sdk-color-text-primary)]"
           />
         </AdminFieldLabel>
         <AdminFieldLabel
-          label="Webhook Secret Env Var"
-          htmlFor="rotate-webhook-secret-ref"
+          label="Webhook / API v3 Secret"
+          htmlFor="rotate-webhook-secret"
         >
           <Input
-            id="rotate-webhook-secret-ref"
-            value={state.webhookSecretRef}
+            id="rotate-webhook-secret"
+            type="password"
+            value={state.webhookSecret}
             onChange={(event) =>
-              setState((prev) => ({ ...prev, webhookSecretRef: event.target.value }))
+              setState((prev) => ({ ...prev, webhookSecret: event.target.value }))
             }
-            placeholder="New webhook secret env var name"
+            placeholder="Enter new secret value"
+            autoComplete="new-password"
           />
         </AdminFieldLabel>
         <AdminFieldLabel
-          label="Certificate Env Var"
-          htmlFor="rotate-certificate-ref"
+          label="Certificate / Provider Public Key"
+          htmlFor="rotate-certificate"
         >
-          <Input
-            id="rotate-certificate-ref"
-            value={state.certificateRef}
+          <textarea
+            id="rotate-certificate"
+            value={state.certificate}
             onChange={(event) =>
-              setState((prev) => ({ ...prev, certificateRef: event.target.value }))
+              setState((prev) => ({ ...prev, certificate: event.target.value }))
             }
-            placeholder="New certificate env var name"
+            placeholder="Enter new PEM value"
+            rows={5}
+            autoComplete="new-password"
+            className="w-full resize-y rounded-md border border-[var(--sdk-color-border)] bg-[var(--sdk-color-bg-surface)] px-3 py-2 font-mono text-sm text-[var(--sdk-color-text-primary)]"
           />
         </AdminFieldLabel>
         <AdminFieldLabel

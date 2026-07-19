@@ -99,7 +99,7 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Post,
-        "/app/v3/api/payments:reconcile",
+        "/app/v3/api/payments/reconcile",
         "commerce",
         "payments.reconcile",
     )

@@ -36,7 +36,7 @@ explicitly opts in.
 | --- | --- | --- |
 | Development | `development` | Complete catalog and an active local sandbox method/channel; external PSP templates remain inactive. |
 | Test/CI | `test` | Complete catalog and an active isolated test sandbox method/channel; external PSP templates remain inactive. |
-| Production | `production` or `standard` | Complete catalog, provider-account templates, and channels are present but inactive. |
+| Production | `production` or `standard` | Complete catalog and channels are pre-wired; provider accounts are inactive and act as the routing gate. |
 
 For example, a development service can use:
 
@@ -47,10 +47,24 @@ SDKWORK_PAYMENT_DATABASE_SEED_LOCALE=zh-CN
 ```
 
 Production deployment should run the `production` seed explicitly during its
-controlled database bootstrap, then configure secret references and activate
+controlled database bootstrap, then configure database-backed credentials and activate
 only the reviewed provider accounts, methods, and channels in the payment admin
-workspace. Seed SQL contains references to environment variable names only; it
-never persists credential values.
+workspace. Seed SQL contains mock identifiers only and never persists real
+credential values. Backend-admin encrypts credential replacements before persistence.
+
+The seeded WeChat Pay account is a complete, inactive mock template. To promote
+it to a live direct-merchant account, replace `merchantId`, `metadata.appId`,
+and `metadata.merchantSerialNo`; enter the merchant private-key PEM, 32-byte API
+v3 key, and WeChat platform public certificate PEM in the write-only credential fields;
+replace `metadata.notifyUrl`; run the provider-account dry-run test; then
+activate the account. The pre-wired methods and channels become routable only
+after that account activation. The same database record is consumed by pay,
+close, refund, and webhook verification paths.
+
+Existing databases created from the legacy templates are upgraded by
+`006_upgrade_bootstrap_templates.sql` on the next `pnpm db:seed` (or lifecycle
+bootstrap) run. The upgrade is limited to inactive rows that still carry the
+bootstrap/mock marker and does not replace already configured merchant data.
 
 ## Federated host integration
 

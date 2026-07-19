@@ -1,9 +1,4 @@
-export type PaymentAdminMessages = {
-  legacy: {
-    phrases: Record<string, string>;
-    tokens: Record<string, string>;
-  };
-};
+import type { PaymentAdminMessages } from "../../../types";
 
 export const paymentAdminChineseMessages: PaymentAdminMessages = {
   legacy: {
@@ -116,16 +111,5 @@ export const paymentAdminChineseMessages: PaymentAdminMessages = {
       "signature": "签名", "Signature": "签名", "valid": "有效", "invalid": "无效", "unknown": "未知", "unverified": "未验证",
       "loading": "加载中", "Loading": "加载中", "Failed": "失败", "Create": "创建", "Update": "更新", "Delete": "删除", "Edit": "编辑", "Save": "保存", "Cancel": "取消", "Test": "测试", "Replay": "重放", "View": "查看", "Details": "详情", "Logs": "日志", "Integration": "集成", "Configuration": "配置", "configuration": "配置", "enabled": "已启用", "disabled": "已禁用", "Enabled": "已启用", "Disabled": "已禁用", "from": "从", "to": "至", "From": "从", "To": "至", "all": "全部", "All": "全部",
     },
-  },
-};
-
-export const paymentAdminEnglishMessages: PaymentAdminMessages = {
-  legacy: {
-    phrases: Object.fromEntries(
-      Object.keys(paymentAdminChineseMessages.legacy.phrases).map((key) => [key, key]),
-    ),
-    tokens: Object.fromEntries(
-      Object.keys(paymentAdminChineseMessages.legacy.tokens).map((key) => [key, key]),
-    ),
   },
 };

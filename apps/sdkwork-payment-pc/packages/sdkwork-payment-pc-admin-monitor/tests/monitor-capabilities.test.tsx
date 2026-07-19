@@ -17,7 +17,6 @@ describe("payment monitor capabilities", () => {
           status: "failed",
           retries: 0,
           receivedAt: "2026-07-17T00:00:00.000Z",
-          createdAt: "2026-07-17T00:00:00.000Z",
         }]}
         onApplyFilter={vi.fn()}
         onLoadMore={vi.fn()}

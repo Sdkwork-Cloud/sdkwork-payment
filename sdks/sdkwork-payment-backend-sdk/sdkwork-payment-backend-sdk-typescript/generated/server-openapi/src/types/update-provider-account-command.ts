@@ -5,9 +5,12 @@ export interface UpdateProviderAccountCommand {
   environment?: 'development' | 'sandbox' | 'production';
   countryCode?: string;
   settlementCurrency?: string;
-  secretRef?: string;
-  webhookSecretRef?: string;
-  certificateRef?: string;
+  /** Replacement primary secret. Omit to preserve the current value. */
+  primarySecret?: string;
+  /** Replacement webhook/API v3 secret. Omit to preserve the current value. */
+  webhookSecret?: string;
+  /** Replacement certificate/public key. Omit to preserve the current value. */
+  certificate?: string;
   capabilities?: Record<string, unknown>;
   status?: 'active' | 'inactive' | 'suspended' | 'deprecated';
   metadata?: Record<string, unknown>;

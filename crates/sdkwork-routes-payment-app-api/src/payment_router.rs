@@ -18,10 +18,12 @@ use sdkwork_payment_repository_sqlx::{
     enrich_payment_record_checkout_postgres, enrich_payment_record_checkout_sqlite,
     load_active_provider_account_postgres, load_active_provider_account_sqlite,
     load_payment_attempt_provider_context_postgres, load_payment_attempt_provider_context_sqlite,
-    provider_account_binding, OwnerOrderPaymentEnrichmentContext,
-    PostgresCommerceOwnerOrderPaymentStore, PostgresCommercePaymentMethodStore,
-    PostgresCommercePaymentRecordStore, SqliteCommerceOwnerOrderPaymentStore,
-    SqliteCommercePaymentMethodStore, SqliteCommercePaymentRecordStore,
+    load_provider_account_for_existing_payment_postgres,
+    load_provider_account_for_existing_payment_sqlite, provider_account_binding,
+    OwnerOrderPaymentEnrichmentContext, PostgresCommerceOwnerOrderPaymentStore,
+    PostgresCommercePaymentMethodStore, PostgresCommercePaymentRecordStore,
+    SqliteCommerceOwnerOrderPaymentStore, SqliteCommercePaymentMethodStore,
+    SqliteCommercePaymentRecordStore,
 };
 use sdkwork_payment_service::{
     scene_code_filter_from_client_type, ClosePaymentRecordCommand, PayOwnerOrderCommand,
@@ -200,6 +202,8 @@ struct CreatePaymentRequest {
     business_type: Option<String>,
     #[serde(rename = "clientIp", alias = "client_ip")]
     client_ip: Option<String>,
+    #[serde(rename = "payerOpenId", alias = "payer_open_id", alias = "openid")]
+    payer_open_id: Option<String>,
     #[serde(rename = "paymentProvider", alias = "payment_provider")]
     payment_provider: Option<String>,
     #[serde(rename = "paymentScene", alias = "payment_scene")]
@@ -399,7 +403,7 @@ pub(crate) fn build_app_payment_router_with_options(
             get(retrieve_payment_status_by_out_trade_no),
         )
         .route("/app/v3/api/payments", post(create_payment))
-        .route("/app/v3/api/payments:reconcile", post(reconcile_payment))
+        .route("/app/v3/api/payments/reconcile", post(reconcile_payment))
         .route(
             "/app/v3/api/payments/{paymentId}/close",
             post(close_payment_record),
@@ -453,6 +457,7 @@ impl OwnerOrderPaymentSource for ProviderEnrichedSqlitePayments {
             let order_id = command.order_id.clone();
             let idempotency_key = command.idempotency_key.clone();
             let payment_scene = command.payment_scene.clone();
+            let payment_metadata = command.payment_metadata.clone();
             let outcome = self.inner.pay_owner_order(command).await?;
             enrich_owner_order_payment_sqlite(
                 &pool,
@@ -464,6 +469,7 @@ impl OwnerOrderPaymentSource for ProviderEnrichedSqlitePayments {
                     order_id: &order_id,
                     idempotency_key: &idempotency_key,
                     payment_scene: payment_scene.as_deref(),
+                    payment_metadata: Some(&payment_metadata),
                 },
                 outcome,
             )
@@ -486,6 +492,7 @@ impl OwnerOrderPaymentSource for ProviderEnrichedPostgresPayments {
             let order_id = command.order_id.clone();
             let idempotency_key = command.idempotency_key.clone();
             let payment_scene = command.payment_scene.clone();
+            let payment_metadata = command.payment_metadata.clone();
             let outcome = self.inner.pay_owner_order(command).await?;
             enrich_owner_order_payment_postgres(
                 &pool,
@@ -497,6 +504,7 @@ impl OwnerOrderPaymentSource for ProviderEnrichedPostgresPayments {
                     order_id: &order_id,
                     idempotency_key: &idempotency_key,
                     payment_scene: payment_scene.as_deref(),
+                    payment_metadata: Some(&payment_metadata),
                 },
                 outcome,
             )
@@ -733,27 +741,46 @@ impl PaymentRecordSource for ProviderEnrichedSqlitePaymentRecords {
                 &command.payment_id,
             )
             .await?;
-            inner.close_payment_record(command).await?;
             if let Some(ctx) = provider_ctx {
-                let account = load_active_provider_account_sqlite(
-                    &pool,
-                    &tenant_id,
-                    organization_id.as_deref(),
-                    &ctx.provider_code,
-                )
-                .await?;
+                let account = match ctx.provider_account_id.as_deref() {
+                    Some(provider_account_id) => Some(
+                        load_provider_account_for_existing_payment_sqlite(
+                            &pool,
+                            &tenant_id,
+                            organization_id.as_deref(),
+                            provider_account_id,
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            CommerceServiceError::conflict(
+                                "original payment provider account is unavailable for close",
+                            )
+                        })?,
+                    ),
+                    None if ctx.channel_id.is_some() => None,
+                    None => {
+                        load_active_provider_account_sqlite(
+                            &pool,
+                            &tenant_id,
+                            organization_id.as_deref(),
+                            &ctx.provider_code,
+                        )
+                        .await?
+                    }
+                };
                 let registry = provider_registry_for_account(
                     &credentials,
                     account.map(|record| provider_account_binding(&record)),
                 );
-                let _ = cancel_provider_payment(
+                cancel_provider_payment(
                     &registry,
                     &ctx.provider_code,
                     &ctx.out_trade_no,
                     ctx.provider_transaction_id.as_deref(),
                 )
-                .await;
+                .await?;
             }
+            inner.close_payment_record(command).await?;
             Ok(())
         })
     }
@@ -817,27 +844,46 @@ impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
                 &command.payment_id,
             )
             .await?;
-            inner.close_payment_record(command).await?;
             if let Some(ctx) = provider_ctx {
-                let account = load_active_provider_account_postgres(
-                    &pool,
-                    &tenant_id,
-                    organization_id.as_deref(),
-                    &ctx.provider_code,
-                )
-                .await?;
+                let account = match ctx.provider_account_id.as_deref() {
+                    Some(provider_account_id) => Some(
+                        load_provider_account_for_existing_payment_postgres(
+                            &pool,
+                            &tenant_id,
+                            organization_id.as_deref(),
+                            provider_account_id,
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            CommerceServiceError::conflict(
+                                "original payment provider account is unavailable for close",
+                            )
+                        })?,
+                    ),
+                    None if ctx.channel_id.is_some() => None,
+                    None => {
+                        load_active_provider_account_postgres(
+                            &pool,
+                            &tenant_id,
+                            organization_id.as_deref(),
+                            &ctx.provider_code,
+                        )
+                        .await?
+                    }
+                };
                 let registry = provider_registry_for_account(
                     &credentials,
                     account.map(|record| provider_account_binding(&record)),
                 );
-                let _ = cancel_provider_payment(
+                cancel_provider_payment(
                     &registry,
                     &ctx.provider_code,
                     &ctx.out_trade_no,
                     ctx.provider_transaction_id.as_deref(),
                 )
-                .await;
+                .await?;
             }
+            inner.close_payment_record(command).await?;
             Ok(())
         })
     }
@@ -1328,13 +1374,29 @@ async fn create_payment(
     let payment_method = body
         .payment_method
         .clone()
-        .unwrap_or_else(|| "wechat_pay".to_owned());
+        .unwrap_or_else(|| "wechat_native".to_owned());
     let payment_scene = body.payment_scene.clone().or(body.product_type.clone());
+    let mut payment_metadata = serde_json::json!({});
+    if let Some(client_ip) = body
+        .client_ip
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        payment_metadata["client_ip"] = serde_json::json!(client_ip);
+    }
+    if let Some(openid) = body
+        .payer_open_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        payment_metadata["openid"] = serde_json::json!(openid);
+    }
     let _ = (
         body.amount.as_deref(),
         body.business_order_id.as_deref(),
         body.business_type.as_deref(),
-        body.client_ip.as_deref(),
         body.payment_provider.as_deref(),
     );
     let command = match PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
@@ -1344,7 +1406,10 @@ async fn create_payment(
         order_id: body.order_id.clone(),
         payment_method,
         payment_scene,
-        payment_attempt_callback_payload: None,
+        payment_attempt_callback_payload: Some(
+            serde_json::json!({ "paymentMetadata": payment_metadata.clone() }).to_string(),
+        ),
+        payment_metadata,
         request_no: write_headers.request_no.clone(),
         idempotency_key: write_headers.idempotency_key.clone(),
     }) {

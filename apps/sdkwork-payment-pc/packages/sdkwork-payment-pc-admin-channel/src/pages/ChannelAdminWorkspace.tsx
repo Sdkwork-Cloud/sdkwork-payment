@@ -43,6 +43,7 @@ import type {
 export interface PaymentChannelAdminWorkspaceProps {
   controller: PaymentChannelAdminController;
   capabilities: PaymentChannelAdminCapabilities;
+  section?: PaymentChannelAdminSection;
   title?: string;
   description?: string;
 }
@@ -56,7 +57,7 @@ export interface PaymentChannelAdminCapabilities {
   canDeleteRouteRule: boolean;
 }
 
-type TabKind = "methods" | "channels" | "rules";
+export type PaymentChannelAdminSection = "methods" | "channels" | "rules";
 
 export function PaymentChannelAdminWorkspace(
   props: PaymentChannelAdminWorkspaceProps,
@@ -65,7 +66,8 @@ export function PaymentChannelAdminWorkspace(
   const [state, setState] = React.useState<PaymentChannelAdminState>(() =>
     controller.getState(),
   );
-  const [tab, setTab] = React.useState<TabKind>("methods");
+  const [tab, setTab] = React.useState<PaymentChannelAdminSection>("methods");
+  const activeSection = props.section ?? tab;
 
   React.useEffect(() => {
     return controller.subscribe(() => {
@@ -107,7 +109,9 @@ export function PaymentChannelAdminWorkspace(
 
   function handleSelectMethod(methodId: string) {
     controller.selectMethod(methodId);
-    setTab("channels");
+    if (!props.section) {
+      setTab("channels");
+    }
   }
 
   return (
@@ -118,12 +122,21 @@ export function PaymentChannelAdminWorkspace(
         error={state.lastError}
         title={props.title ?? "Payment methods, channels & routing"}
       >
-        <Tabs value={tab} onValueChange={(value) => setTab(value as TabKind)}>
-          <PaymentAdminTabsList aria-label="Payment channel sections">
-            <PaymentAdminTabsTrigger value="methods">Payment methods</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="channels">Channels</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="rules">Route rules</PaymentAdminTabsTrigger>
-          </PaymentAdminTabsList>
+        <Tabs
+          value={activeSection}
+          onValueChange={(value) => {
+            if (!props.section) {
+              setTab(value as PaymentChannelAdminSection);
+            }
+          }}
+        >
+          {!props.section ? (
+            <PaymentAdminTabsList aria-label="Payment channel sections">
+              <PaymentAdminTabsTrigger value="methods">Payment methods</PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger value="channels">Channels</PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger value="rules">Route rules</PaymentAdminTabsTrigger>
+            </PaymentAdminTabsList>
+          ) : null}
 
           <PaymentAdminTabsContent value="methods">
             <PaymentMethodManager

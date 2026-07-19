@@ -13,15 +13,18 @@ pub fn build_order_payment_webhook_url(base: &str, provider_code: &str) -> Strin
     )
 }
 
-/// Resolves a `secret_ref` pointer to a runtime secret.
+/// Resolves a legacy `secret_ref` pointer to a runtime secret.
 ///
-/// `secret_ref` stores the **name** of an environment variable (never the plaintext secret).
+/// New provider credentials are database-backed and bypass this compatibility path.
 pub fn resolve_secret_ref(secret_ref: &str) -> Option<String> {
+    if secret_ref.starts_with("database:") {
+        return None;
+    }
     env_required(secret_ref)
 }
 
 /// Tenant-scoped provider account binding (from `commerce_payment_provider_account`).
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ProviderAccountBinding {
     pub provider_code: String,
     pub merchant_id: Option<String>,
@@ -29,6 +32,9 @@ pub struct ProviderAccountBinding {
     pub secret_ref: String,
     pub webhook_secret_ref: Option<String>,
     pub certificate_ref: Option<String>,
+    pub primary_secret: Option<String>,
+    pub webhook_secret: Option<String>,
+    pub certificate: Option<String>,
     pub metadata: serde_json::Value,
 }
 
@@ -127,15 +133,21 @@ impl EnvPaymentCredentialResolver {
 }
 
 fn merge_stripe_account(bundle: &mut ProviderCredentialBundle, account: &ProviderAccountBinding) {
-    let Some(secret_key) = resolve_secret_ref(&account.secret_ref) else {
+    let Some(secret_key) = account
+        .primary_secret
+        .clone()
+        .or_else(|| resolve_secret_ref(&account.secret_ref))
+    else {
         return;
     };
     bundle.stripe = Some(StripePaymentProviderConfig {
         secret_key,
-        webhook_secret: account
-            .webhook_secret_ref
-            .as_ref()
-            .and_then(|value| resolve_secret_ref(value)),
+        webhook_secret: account.webhook_secret.clone().or_else(|| {
+            account
+                .webhook_secret_ref
+                .as_ref()
+                .and_then(|value| resolve_secret_ref(value))
+        }),
     });
 }
 
@@ -147,28 +159,35 @@ fn merge_alipay_account(bundle: &mut ProviderCredentialBundle, account: &Provide
     let Some(app_id) = app_id.filter(|value| !value.trim().is_empty()) else {
         return;
     };
-    let Some(private_key_pem) = resolve_secret_ref(&account.secret_ref) else {
+    let Some(private_key_pem) = account
+        .primary_secret
+        .clone()
+        .or_else(|| resolve_secret_ref(&account.secret_ref))
+    else {
         return;
     };
-    let Some(alipay_public_key_pem) = account
-        .certificate_ref
-        .as_ref()
-        .and_then(|value| resolve_secret_ref(value))
-    else {
+    let Some(alipay_public_key_pem) = account.certificate.clone().or_else(|| {
+        account
+            .certificate_ref
+            .as_ref()
+            .and_then(|value| resolve_secret_ref(value))
+    }) else {
         return;
     };
     bundle.alipay = Some(AlipayRegistryConfig {
         app_id,
         private_key_pem,
         alipay_public_key_pem,
-        notify_url: None,
+        notify_url: metadata_string(&account.metadata, "notifyUrl"),
         return_url: metadata_string(&account.metadata, "returnUrl"),
         sandbox: account.environment.eq_ignore_ascii_case("sandbox"),
     });
 }
 
 fn merge_wechat_account(bundle: &mut ProviderCredentialBundle, account: &ProviderAccountBinding) {
-    let app_id = metadata_string(&account.metadata, "appId");
+    let Some(app_id) = metadata_string(&account.metadata, "appId") else {
+        return;
+    };
     let Some(mch_id) = account
         .merchant_id
         .clone()
@@ -179,27 +198,37 @@ fn merge_wechat_account(bundle: &mut ProviderCredentialBundle, account: &Provide
     let Some(merchant_serial_no) = metadata_string(&account.metadata, "merchantSerialNo") else {
         return;
     };
-    let Some(merchant_private_key_pem) = resolve_secret_ref(&account.secret_ref) else {
-        return;
-    };
-    let Some(api_v3_key) = account
-        .webhook_secret_ref
-        .as_ref()
-        .and_then(|value| resolve_secret_ref(value))
+    let Some(merchant_private_key_pem) = account
+        .primary_secret
+        .clone()
+        .or_else(|| resolve_secret_ref(&account.secret_ref))
     else {
         return;
     };
+    let Some(api_v3_key) = account.webhook_secret.clone().or_else(|| {
+        account
+            .webhook_secret_ref
+            .as_ref()
+            .and_then(|value| resolve_secret_ref(value))
+    }) else {
+        return;
+    };
+    let Some(platform_public_key_pem) = account.certificate.clone().or_else(|| {
+        account
+            .certificate_ref
+            .as_ref()
+            .and_then(|value| resolve_secret_ref(value))
+    }) else {
+        return;
+    };
     bundle.wechat_pay = Some(WeChatPayRegistryConfig {
-        app_id: app_id.unwrap_or_default(),
+        app_id,
         mch_id,
         merchant_serial_no,
         merchant_private_key_pem,
         api_v3_key,
-        notify_url: None,
-        platform_public_key_pem: account
-            .certificate_ref
-            .as_ref()
-            .and_then(|value| resolve_secret_ref(value)),
+        notify_url: metadata_string(&account.metadata, "notifyUrl"),
+        platform_public_key_pem: Some(platform_public_key_pem),
     });
 }
 
@@ -210,4 +239,43 @@ fn metadata_string(metadata: &serde_json::Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wechat_account_uses_database_values_including_notify_url() {
+        let bundle = ProviderCredentialBundle {
+            stripe: None,
+            alipay: None,
+            wechat_pay: None,
+            webhook_base_url: None,
+        };
+        let account = ProviderAccountBinding {
+            provider_code: "wechat_pay".to_owned(),
+            merchant_id: Some("1900000109".to_owned()),
+            environment: "production".to_owned(),
+            secret_ref: "database:primary_secret".to_owned(),
+            webhook_secret_ref: Some("database:webhook_secret".to_owned()),
+            certificate_ref: Some("database:certificate".to_owned()),
+            primary_secret: Some("merchant-private-key".to_owned()),
+            webhook_secret: Some("12345678901234567890123456789012".to_owned()),
+            certificate: Some("platform-certificate".to_owned()),
+            metadata: serde_json::json!({
+                "appId": "wx-app-id",
+                "merchantSerialNo": "merchant-serial",
+                "notifyUrl": "https://pay.example.com/app/v3/api/orders/payments/webhooks/wechat_pay"
+            }),
+        };
+
+        let resolved = bundle.with_provider_account(&account);
+        let wechat = resolved.wechat_pay.expect("WeChat database credentials");
+        assert_eq!(wechat.mch_id, "1900000109");
+        assert_eq!(
+            wechat.notify_url.as_deref(),
+            Some("https://pay.example.com/app/v3/api/orders/payments/webhooks/wechat_pay")
+        );
+    }
 }

@@ -138,7 +138,7 @@ mod tests {
                 .await
                 .expect("bootstrap payment module through registry");
 
-            assert_eq!(results, vec![("payment".to_owned(), 0, 3)]);
+            assert_eq!(results, vec![("payment".to_owned(), 2, 4)]);
             let DatabasePool::Sqlite(sqlite_pool, _) = &pool else {
                 panic!("expected sqlite pool");
             };
@@ -148,7 +148,7 @@ mod tests {
             .fetch_one(sqlite_pool)
             .await
             .expect("active payment method count");
-            assert_eq!(method_count, 1);
+            assert_eq!(method_count, 15);
             sqlite_pool.close().await;
         }
         .await;

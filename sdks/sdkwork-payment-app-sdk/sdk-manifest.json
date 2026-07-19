@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "sdkFamily": "sdkwork-payment-app-sdk",
+  "sdkName": "sdkwork-payment-app-sdk",
+  "packageName": "@sdkwork/payment-app-sdk",
+  "transportPackageName": "sdkwork-payment-app-sdk-generated-typescript",
+  "typescript": {
+    "composedRoot": "sdkwork-payment-app-sdk-typescript",
+    "composedEntry": "sdkwork-payment-app-sdk-typescript/src/index.ts",
+    "transportRoot": "sdkwork-payment-app-sdk-typescript/generated/server-openapi",
+    "transportEntry": "sdkwork-payment-app-sdk-typescript/generated/server-openapi/src/index.ts"
+  },
+  "workspace": "sdkwork-payment-app-sdk",
+  "title": "SDKWork Payment App API SDK",
+  "apiVersion": "1.0.0",
+  "openapiVersion": "3.1.2",
+  "authoritySpec": "openapi/sdkwork-payment-app-api.openapi.json",
+  "generationInputSpec": "openapi/sdkwork-payment-app-api.sdkgen.json",
+  "derivedSpecs": {
+    "sdk-generator": "openapi/sdkwork-payment-app-api.sdkgen.json"
+  },
+  "sdkOwner": "sdkwork-payment",
+  "apiAuthority": "sdkwork-payment-app-api",
+  "discoverySurface": {
+    "sdkTarget": "app",
+    "apiPrefix": "/app/v3/api",
+    "generatedProtocols": [
+      "http-openapi"
+    ],
+    "manualTransports": []
+  },
+  "sdkDependencies": [],
+  "ownerOnlyOperationCount": 18,
+  "languages": [
+    {
+      "language": "typescript",
+      "workspace": "sdkwork-payment-app-sdk-typescript",
+      "generationState": "generated",
+      "releaseState": "not_published",
+      "packagePath": "sdkwork-payment-app-sdk-typescript",
+      "generatedPath": "sdkwork-payment-app-sdk-typescript/generated/server-openapi",
+      "manifestPath": "sdkwork-payment-app-sdk-typescript/package.json",
+      "name": "@sdkwork/payment-app-sdk",
+      "version": "0.1.0"
+    }
+  ]
+}

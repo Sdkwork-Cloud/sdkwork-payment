@@ -3,6 +3,7 @@ export { createPaymentProviderAdminController } from "./services/provider-admin-
 export {
   PaymentProviderAdminWorkspace,
   type PaymentProviderAdminCapabilities,
+  type PaymentProviderAdminSection,
   type PaymentProviderAdminWorkspaceProps,
 } from "./pages/ProviderAdminWorkspace";
 export { ProviderAccountForm } from "./components/ProviderAccountForm";

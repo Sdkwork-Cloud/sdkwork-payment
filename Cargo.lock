@@ -1690,6 +1690,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -1811,11 +1812,13 @@ dependencies = [
  "rsa",
  "sdkwork-contract-service",
  "sdkwork-payment-service",
+ "sdkwork-utils-rust",
  "serde",
  "serde_json",
  "sha2",
  "tokio",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]
@@ -1839,6 +1842,7 @@ name = "sdkwork-payment-service"
 version = "0.1.0"
 dependencies = [
  "sdkwork-contract-service",
+ "serde_json",
 ]
 
 [[package]]

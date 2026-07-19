@@ -7,6 +7,7 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use crate::order_reference::order_status_is_payable;
 use crate::owner_payment_params::owner_order_payment_params;
+use crate::payment_channel::select_payment_channel_postgres;
 use crate::shared::{
     current_timestamp_string, ensure_confirmation_intent_update,
     payment_attempt_is_terminal_success, required_persisted_paid_at,
@@ -337,7 +338,16 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             return Ok(existing);
         }
 
-        let method = load_owner_payment_method(&mut tx, &command).await?;
+        let channel = select_payment_channel_postgres(
+            &mut tx,
+            &command.tenant_id,
+            command.organization_id.as_deref(),
+            &command.payment_method,
+            "CNY",
+            total_amount.as_str(),
+            command.payment_scene.as_deref(),
+        )
+        .await?;
         let now = current_timestamp_string();
         let payment_intent_id = stable_storage_id(&[
             "pi",
@@ -374,8 +384,8 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .bind(&command.owner_user_id)
         .bind(&command.order_id)
         .bind(format!("PAY-{}", order_sn))
-        .bind(&method.method_key)
-        .bind(&method.provider_code)
+        .bind(&command.payment_method)
+        .bind(&channel.provider_code)
         .bind(total_amount.as_str())
         .bind(CommercePaymentStatus::Pending.as_str())
         .bind(&command.request_no)
@@ -409,10 +419,10 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             r#"
             INSERT INTO commerce_payment_attempt
                 (id, tenant_id, organization_id, owner_user_id, payment_intent_id, order_id,
-                 payment_method, provider_code, out_trade_no, amount, currency_code, status,
+                 payment_method, provider_code, channel_id, out_trade_no, amount, currency_code, status,
                  callback_payload, request_no, idempotency_key, created_at, paid_at, updated_at)
             VALUES
-                ($1, CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10::numeric, 'CNY', $11, $12::jsonb, $13, $14, $15::timestamptz, NULL, $16::timestamptz)
+                ($1, CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10, $11::numeric, 'CNY', $12, $13::jsonb, $14, $15, $16::timestamptz, NULL, $17::timestamptz)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -422,8 +432,9 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .bind(&command.owner_user_id)
         .bind(&payment_intent_id)
         .bind(&command.order_id)
-        .bind(&method.method_key)
-        .bind(&method.provider_code)
+        .bind(&command.payment_method)
+        .bind(&channel.provider_code)
+        .bind(channel.channel_id.as_deref())
         .bind(&out_trade_no)
         .bind(total_amount.as_str())
         .bind(CommercePaymentStatus::Pending.as_str())
@@ -713,49 +724,6 @@ impl PostgresCommerceOwnerOrderPaymentStore {
     }
 }
 
-struct OwnerPaymentMethod {
-    method_key: String,
-    provider_code: String,
-}
-
-async fn load_owner_payment_method(
-    tx: &mut Transaction<'_, Postgres>,
-    command: &PayOwnerOrderCommand,
-) -> Result<OwnerPaymentMethod, CommerceServiceError> {
-    let row = sqlx::query(
-        r#"
-        SELECT method_key, provider_code
-        FROM commerce_payment_method
-        WHERE method_key = $1
-          AND status = 'active'
-          AND (
-                (tenant_id = CAST($2 AS TEXT) AND organization_id = CAST($3 AS TEXT))
-             OR (tenant_id = CAST($4 AS TEXT) AND organization_id IS NULL)
-          )
-        ORDER BY CASE WHEN tenant_id = CAST($5 AS TEXT) THEN 0 ELSE 1 END, sort_order ASC
-        LIMIT 1
-        "#,
-    )
-    .bind(&command.payment_method)
-    .bind(&command.tenant_id)
-    .bind(command.organization_id.as_deref())
-    .bind(&command.tenant_id)
-    .bind(&command.tenant_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(|error| store_error("failed to load owner payment method", error))?;
-
-    Ok(row
-        .map(|row| OwnerPaymentMethod {
-            method_key: string_cell(&row, "method_key"),
-            provider_code: string_cell(&row, "provider_code"),
-        })
-        .unwrap_or_else(|| OwnerPaymentMethod {
-            method_key: command.payment_method.clone(),
-            provider_code: command.payment_method.clone(),
-        }))
-}
-
 async fn load_owner_payment_outcome_by_idempotency_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     command: &PayOwnerOrderCommand,
@@ -769,6 +737,7 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
                CAST(pa.amount AS BIGINT)::TEXT AS amount,
                pa.payment_method,
                pa.provider_code,
+               pa.channel_id,
                pa.status
         FROM commerce_payment_intent pi
         INNER JOIN commerce_payment_attempt pa
@@ -800,12 +769,15 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
     let amount =
         CommerceMoney::new(&string_cell(&row, "amount")).map_err(CommerceServiceError::storage)?;
     let out_trade_no = string_cell(&row, "out_trade_no");
-    let payment_params = owner_order_payment_params(
+    let mut payment_params = owner_order_payment_params(
         &string_cell(&row, "provider_code"),
         order_sn,
         order_subject,
         &out_trade_no,
     );
+    if let Some(channel_id) = optional_string_cell(&row, "channel_id") {
+        payment_params.insert("channelId".to_owned(), channel_id);
+    }
 
     Ok(Some(PayOwnerOrderOutcome {
         amount,
@@ -828,7 +800,7 @@ async fn load_reusable_owner_payment_in_tx(
         r#"
         SELECT pa.id, pa.out_trade_no,
                CAST(pa.amount AS BIGINT)::TEXT AS amount,
-               pa.payment_method, pa.provider_code, pa.status
+               pa.payment_method, pa.provider_code, pa.channel_id, pa.status
         FROM commerce_payment_attempt pa
         INNER JOIN commerce_order o
             ON o.id = pa.order_id
@@ -858,12 +830,15 @@ async fn load_reusable_owner_payment_in_tx(
     let amount =
         CommerceMoney::new(&string_cell(&row, "amount")).map_err(CommerceServiceError::storage)?;
     let out_trade_no = string_cell(&row, "out_trade_no");
-    let payment_params = owner_order_payment_params(
+    let mut payment_params = owner_order_payment_params(
         &string_cell(&row, "provider_code"),
         order_sn,
         order_subject,
         &out_trade_no,
     );
+    if let Some(channel_id) = optional_string_cell(&row, "channel_id") {
+        payment_params.insert("channelId".to_owned(), channel_id);
+    }
 
     Ok(Some(PayOwnerOrderOutcome {
         amount,

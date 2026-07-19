@@ -59,11 +59,18 @@ Forbidden: payment routes calling order HTTP, `settle_owner_order_after_payment_
 
 ## 5. Provider Credentials
 
-- Deployment defaults: env vars such as `STRIPE_*`, `ALIPAY_*`, `WECHAT_PAY_*`, and `ORDER_PAYMENT_WEBHOOK_BASE_URL`.
+- Deployment compatibility defaults may still read legacy `STRIPE_*`, `ALIPAY_*`, and `WECHAT_PAY_*` variables; new provider-account configuration never requires them. `ORDER_PAYMENT_WEBHOOK_BASE_URL` remains non-secret deployment routing configuration.
 - Notify URL pattern: `{base}/app/v3/api/orders/payments/webhooks/{providerCode}`; order gateway owns HTTP.
-- Tenant overrides: `commerce_payment_provider_account.secret_ref` stores env var names resolved at runtime for pay, close, refund, and webhook verify.
+- Tenant provider credentials are write-only backend inputs encrypted into `commerce_payment_provider_credential`. Runtime resolution is database-first for pay, close, refund, and webhook verification; existing `*_ref` account columns are compatibility-only fallbacks and are never returned by APIs.
 - Stripe and Alipay route through `out_trade_no` or Alipay `app_id`.
 - WeChat Pay uses deployment env until `out_trade_no` routing is available before decrypt.
+- Bootstrap profiles pre-wire the provider methods/channels but keep provider accounts inactive. Runtime method eligibility requires an active account (or an explicitly unbound channel using deployment-level credentials); duplicate active accounts for one tenant/organization/provider fail closed.
+- The production bootstrap includes a mock WeChat account and `006_upgrade_bootstrap_templates.sql` repairs only untouched legacy mock rows. Replace identifiers and secret references, pass the provider-account dry-run, and activate the account to expose the pre-wired methods.
+- Provider-account activation is a status-only operation after configuration is saved. The latest dry-run must be successful and at least as recent as the saved configuration, and bootstrap mock markers must be removed. New accounts default to `inactive`.
+- Runtime routing selects an eligible active channel for the requested method and currency. Matching active route rules win by rule priority, followed by scene match, channel priority, sort order, and stable channel id. A configured but unavailable channel set fails closed; deployment credentials are only a compatibility fallback when the method has never had a channel.
+- The selected `commerce_payment_channel.id` is persisted on `commerce_payment_attempt.channel_id`. Checkout, close, and refund resolve the bound provider account from that historical channel rather than looking up an arbitrary active account by provider code.
+- An inactive or deprecated account may service close/refund for its historical attempts; a suspended, deleted, missing, or cross-tenant account fails closed. New payments always require an active bound account.
+- The current order-owned webhook URL is provider-scoped, so one tenant/organization may have only one active account per provider at a time. Activation rejects a second active account. Merchant rotation is sequential: deactivate the old account, validate and activate the new account; historical attempts remain bound to the old account for close/refund.
 
 ## 6. API Prefixes
 
@@ -115,13 +122,17 @@ HTTP `200` `SdkWorkApiResponse` command payload:
 
 Read routes return `data.item` or `data.items` plus `data.pageInfo`.
 
-App reconcile (`POST /payments:reconcile`) is a lookup command that returns the latest payment record as `data.item`. It performs no inline PSP status repair.
+App reconcile (`POST /payments/reconcile`) is a lookup command that returns the latest payment record as `data.item`. It performs no inline PSP status repair.
 
 ## 10. PSP Enrichment And Persistence
 
 After the repository persists intent/attempt, `enrich_owner_order_payment_*` calls the configured PSP and merges `providerTransactionId` / `providerStatus` into attempt `callback_payload` for later close/cancel.
 
 `GET /payments/checkout/{paymentId}` re-enriches pending attempts for cashier and QR parameters.
+
+Payer inputs needed for pending checkout recreation (`openid`, `client_ip`) are stored under the `paymentMetadata` namespace in `callback_payload`; legacy flat callback payloads remain readable. PSP enrichment fields stay outside that namespace.
+
+Close invokes the PSP with the attempt's historical channel/account before committing the local closed state. PSP failure leaves the local payment retryable. Refund submission uses the same historical account so activating another merchant cannot redirect funds.
 
 ## 11. Verification
 

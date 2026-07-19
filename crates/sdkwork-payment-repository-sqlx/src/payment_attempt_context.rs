@@ -9,12 +9,15 @@ use crate::shared::{current_timestamp_string, store_error, string_cell};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaymentAttemptProviderContext {
     pub attempt_id: String,
+    pub channel_id: Option<String>,
+    pub provider_account_id: Option<String>,
     pub provider_code: String,
     pub out_trade_no: String,
     pub amount: String,
     pub tenant_id: String,
     pub idempotency_key: String,
     pub provider_transaction_id: Option<String>,
+    pub payment_metadata: serde_json::Value,
 }
 
 fn provider_transaction_id_from_callback_payload(payload: &str) -> Option<String> {
@@ -28,6 +31,18 @@ fn provider_transaction_id_from_callback_payload(payload: &str) -> Option<String
     } else {
         Some(text.to_owned())
     }
+}
+
+fn payment_metadata_from_callback_payload(payload: &str) -> serde_json::Value {
+    let value = serde_json::from_str(payload)
+        .ok()
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    value
+        .get("paymentMetadata")
+        .filter(|metadata| metadata.is_object())
+        .cloned()
+        .unwrap_or(value)
 }
 
 fn merge_callback_payload_patch(
@@ -153,11 +168,13 @@ pub async fn load_payment_attempt_provider_context_sqlite(
 ) -> Result<Option<PaymentAttemptProviderContext>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT id, provider_code, out_trade_no, amount, tenant_id, callback_payload, idempotency_key
-        FROM commerce_payment_attempt
-        WHERE tenant_id = CAST(? AS TEXT)
-          AND owner_user_id = CAST(? AS TEXT)
-          AND id = CAST(? AS TEXT)
+        SELECT pa.id, pa.channel_id, c.provider_account_id, pa.provider_code, pa.out_trade_no,
+               pa.amount, pa.tenant_id, pa.callback_payload, pa.idempotency_key
+        FROM commerce_payment_attempt pa
+        LEFT JOIN commerce_payment_channel c ON c.id = pa.channel_id
+        WHERE pa.tenant_id = CAST(? AS TEXT)
+          AND pa.owner_user_id = CAST(? AS TEXT)
+          AND pa.id = CAST(? AS TEXT)
         "#,
     )
     .bind(tenant_id)
@@ -171,6 +188,8 @@ pub async fn load_payment_attempt_provider_context_sqlite(
         let callback_payload = string_cell(&row, "callback_payload");
         PaymentAttemptProviderContext {
             attempt_id: string_cell(&row, "id"),
+            channel_id: row.try_get("channel_id").ok().flatten(),
+            provider_account_id: row.try_get("provider_account_id").ok().flatten(),
             provider_code: string_cell(&row, "provider_code"),
             out_trade_no: string_cell(&row, "out_trade_no"),
             amount: string_cell(&row, "amount"),
@@ -179,6 +198,7 @@ pub async fn load_payment_attempt_provider_context_sqlite(
             provider_transaction_id: provider_transaction_id_from_callback_payload(
                 &callback_payload,
             ),
+            payment_metadata: payment_metadata_from_callback_payload(&callback_payload),
         }
     }))
 }
@@ -189,9 +209,11 @@ pub async fn load_payment_attempt_provider_context_by_id_sqlite(
 ) -> Result<Option<PaymentAttemptProviderContext>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT id, provider_code, out_trade_no, amount, tenant_id, callback_payload, idempotency_key
-        FROM commerce_payment_attempt
-        WHERE id = CAST(? AS TEXT)
+        SELECT pa.id, pa.channel_id, c.provider_account_id, pa.provider_code, pa.out_trade_no,
+               pa.amount, pa.tenant_id, pa.callback_payload, pa.idempotency_key
+        FROM commerce_payment_attempt pa
+        LEFT JOIN commerce_payment_channel c ON c.id = pa.channel_id
+        WHERE pa.id = CAST(? AS TEXT)
         "#,
     )
     .bind(payment_attempt_id)
@@ -208,6 +230,8 @@ pub async fn load_payment_attempt_provider_context_by_id_sqlite(
         let callback_payload = string_cell(&row, "callback_payload");
         PaymentAttemptProviderContext {
             attempt_id: string_cell(&row, "id"),
+            channel_id: row.try_get("channel_id").ok().flatten(),
+            provider_account_id: row.try_get("provider_account_id").ok().flatten(),
             provider_code: string_cell(&row, "provider_code"),
             out_trade_no: string_cell(&row, "out_trade_no"),
             amount: string_cell(&row, "amount"),
@@ -216,6 +240,7 @@ pub async fn load_payment_attempt_provider_context_by_id_sqlite(
             provider_transaction_id: provider_transaction_id_from_callback_payload(
                 &callback_payload,
             ),
+            payment_metadata: payment_metadata_from_callback_payload(&callback_payload),
         }
     }))
 }
@@ -228,11 +253,13 @@ pub async fn load_payment_attempt_provider_context_postgres(
 ) -> Result<Option<PaymentAttemptProviderContext>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT id, provider_code, out_trade_no, amount, tenant_id, callback_payload, idempotency_key
-        FROM commerce_payment_attempt
-        WHERE tenant_id = CAST($1 AS TEXT)
-          AND owner_user_id = CAST($2 AS TEXT)
-          AND id = CAST($3 AS TEXT)
+        SELECT pa.id, pa.channel_id, c.provider_account_id, pa.provider_code, pa.out_trade_no,
+               pa.amount, pa.tenant_id, pa.callback_payload, pa.idempotency_key
+        FROM commerce_payment_attempt pa
+        LEFT JOIN commerce_payment_channel c ON c.id = pa.channel_id
+        WHERE pa.tenant_id = CAST($1 AS TEXT)
+          AND pa.owner_user_id = CAST($2 AS TEXT)
+          AND pa.id = CAST($3 AS TEXT)
         "#,
     )
     .bind(tenant_id)
@@ -246,6 +273,8 @@ pub async fn load_payment_attempt_provider_context_postgres(
         let callback_payload = string_cell(&row, "callback_payload");
         PaymentAttemptProviderContext {
             attempt_id: string_cell(&row, "id"),
+            channel_id: row.try_get("channel_id").ok().flatten(),
+            provider_account_id: row.try_get("provider_account_id").ok().flatten(),
             provider_code: string_cell(&row, "provider_code"),
             out_trade_no: string_cell(&row, "out_trade_no"),
             amount: string_cell(&row, "amount"),
@@ -254,6 +283,7 @@ pub async fn load_payment_attempt_provider_context_postgres(
             provider_transaction_id: provider_transaction_id_from_callback_payload(
                 &callback_payload,
             ),
+            payment_metadata: payment_metadata_from_callback_payload(&callback_payload),
         }
     }))
 }
@@ -264,9 +294,11 @@ pub async fn load_payment_attempt_provider_context_by_id_postgres(
 ) -> Result<Option<PaymentAttemptProviderContext>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT id, provider_code, out_trade_no, amount, tenant_id, callback_payload, idempotency_key
-        FROM commerce_payment_attempt
-        WHERE id = CAST($1 AS TEXT)
+        SELECT pa.id, pa.channel_id, c.provider_account_id, pa.provider_code, pa.out_trade_no,
+               pa.amount, pa.tenant_id, pa.callback_payload, pa.idempotency_key
+        FROM commerce_payment_attempt pa
+        LEFT JOIN commerce_payment_channel c ON c.id = pa.channel_id
+        WHERE pa.id = CAST($1 AS TEXT)
         "#,
     )
     .bind(payment_attempt_id)
@@ -283,6 +315,8 @@ pub async fn load_payment_attempt_provider_context_by_id_postgres(
         let callback_payload = string_cell(&row, "callback_payload");
         PaymentAttemptProviderContext {
             attempt_id: string_cell(&row, "id"),
+            channel_id: row.try_get("channel_id").ok().flatten(),
+            provider_account_id: row.try_get("provider_account_id").ok().flatten(),
             provider_code: string_cell(&row, "provider_code"),
             out_trade_no: string_cell(&row, "out_trade_no"),
             amount: string_cell(&row, "amount"),
@@ -291,6 +325,7 @@ pub async fn load_payment_attempt_provider_context_by_id_postgres(
             provider_transaction_id: provider_transaction_id_from_callback_payload(
                 &callback_payload,
             ),
+            payment_metadata: payment_metadata_from_callback_payload(&callback_payload),
         }
     }))
 }

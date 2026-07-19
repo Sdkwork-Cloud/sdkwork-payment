@@ -11,6 +11,7 @@
     "commerce_payment_method",
     "commerce_refund",
     "commerce_payment_provider_account",
+    "commerce_payment_provider_credential",
     "commerce_payment_channel",
     "commerce_payment_webhook_event"
   ],

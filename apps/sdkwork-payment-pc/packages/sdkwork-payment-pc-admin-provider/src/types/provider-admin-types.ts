@@ -69,9 +69,10 @@ export interface PaymentProviderAccountView {
   readonly environment: PaymentProviderEnvironment;
   readonly countryCode?: string;
   readonly settlementCurrency: string;
-  readonly secretRef: string;
-  readonly webhookSecretRef?: string;
-  readonly certificateRef?: string;
+  readonly hasPrimarySecret: boolean;
+  readonly hasWebhookSecret: boolean;
+  readonly hasCertificate: boolean;
+  readonly credentialStorage: "database_encrypted" | "legacy_reference" | "none";
   readonly capabilities: PaymentProviderCapabilities;
   readonly status: PaymentProviderAccountStatus;
   readonly metadata: Record<string, unknown>;
@@ -116,9 +117,9 @@ export interface PaymentProviderAccountDraft {
   readonly environment: PaymentProviderEnvironment;
   readonly countryCode: string;
   readonly settlementCurrency: string;
-  readonly secretRef: string;
-  readonly webhookSecretRef?: string;
-  readonly certificateRef?: string;
+  readonly primarySecret: string;
+  readonly webhookSecret?: string;
+  readonly certificate?: string;
   readonly capabilities?: PaymentProviderCapabilities;
   readonly status?: PaymentProviderAccountStatus;
   readonly metadata?: Record<string, unknown>;
@@ -131,9 +132,9 @@ export interface PaymentProviderAccountUpdateDraft {
   readonly environment?: PaymentProviderEnvironment;
   readonly countryCode?: string;
   readonly settlementCurrency?: string;
-  readonly secretRef?: string;
-  readonly webhookSecretRef?: string;
-  readonly certificateRef?: string;
+  readonly primarySecret?: string;
+  readonly webhookSecret?: string;
+  readonly certificate?: string;
   readonly capabilities?: PaymentProviderCapabilities;
   readonly status?: PaymentProviderAccountStatus;
   readonly metadata?: Record<string, unknown>;
@@ -161,9 +162,9 @@ export interface PaymentSubMerchantUpdateDraft {
 }
 
 export interface PaymentCredentialRotateDraft {
-  readonly secretRef: string;
-  readonly webhookSecretRef?: string;
-  readonly certificateRef?: string;
+  readonly primarySecret: string;
+  readonly webhookSecret?: string;
+  readonly certificate?: string;
   readonly invalidatePrevious?: boolean;
 }
 

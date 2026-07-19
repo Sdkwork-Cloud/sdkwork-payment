@@ -20,18 +20,9 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let host = Arc::new(PaymentServiceHost::new().await);
-    let cors_layer = sdkwork_web_bootstrap::application_cors_layer_from_env(
-        &["SDKWORK_PAYMENT_ENVIRONMENT", "PAYMENT_ENVIRONMENT"],
-        &[
-            "PAYMENT_API_CORS_ORIGINS",
-            "SDKWORK_PAYMENT_CORS_ALLOWED_ORIGINS",
-            "SDKWORK_CORS_ALLOWED_ORIGINS",
-        ],
-    );
     let business = assemble_application_router(host)
         .await
         .router
-        .layer(cors_layer)
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MiB，支付请求体不会超过
         .layer(TimeoutLayer::new(Duration::from_secs(30))) // 30s 超时，防止慢 SQL 拖垮线程池
         .layer(TraceLayer::new_for_http());

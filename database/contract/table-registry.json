@@ -3,94 +3,88 @@
   "kind": "sdkwork.database.table-registry",
   "tables": [
     {
-      "name": "commerce_payment_intent",
+      "table_name": "commerce_payment_method",
       "owner": "sdkwork-payment",
-      "profile": "user_entity",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_attempt",
+      "table_name": "is",
       "owner": "sdkwork-payment",
-      "profile": "event_log",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_method",
+      "table_name": "commerce_payment_intent",
       "owner": "sdkwork-payment",
-      "profile": "tenant_entity",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_channel",
+      "table_name": "commerce_payment_attempt",
       "owner": "sdkwork-payment",
-      "profile": "tenant_entity",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_provider_account",
+      "table_name": "commerce_refund",
       "owner": "sdkwork-payment",
-      "profile": "tenant_entity",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_sub_merchant",
+      "table_name": "commerce_refund_event",
       "owner": "sdkwork-payment",
-      "profile": "tenant_entity",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_certificate",
+      "table_name": "commerce_payment_channel",
       "owner": "sdkwork-payment",
-      "profile": "tenant_entity",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_route_rule",
+      "table_name": "commerce_payment_provider_account",
       "owner": "sdkwork-payment",
-      "profile": "tenant_entity",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_webhook_event",
+      "table_name": "commerce_payment_provider_credential",
       "owner": "sdkwork-payment",
-      "profile": "event_log",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     },
     {
-      "name": "commerce_payment_reconciliation_run",
+      "table_name": "commerce_payment_sub_merchant",
       "owner": "sdkwork-payment",
-      "profile": "event_log",
-      "complianceLevel": "L2",
-      "engine": ["postgres", "sqlite"],
-      "migration": "commerce-initial",
-      "referenceOnly": true
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
+    },
+    {
+      "table_name": "commerce_payment_certificate",
+      "owner": "sdkwork-payment",
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
+    },
+    {
+      "table_name": "commerce_payment_route_rule",
+      "owner": "sdkwork-payment",
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
+    },
+    {
+      "table_name": "commerce_payment_webhook_event",
+      "owner": "sdkwork-payment",
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
+    },
+    {
+      "table_name": "commerce_payment_reconciliation_run",
+      "owner": "sdkwork-payment",
+      "compliance_level": "L2",
+      "lifecycle_status": "active"
     }
   ]
 }

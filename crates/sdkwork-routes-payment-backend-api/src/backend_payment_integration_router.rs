@@ -9,15 +9,15 @@ use axum::{Json, Router};
 use sdkwork_database_sqlx::DatabasePool;
 use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{
-    provider_registry_for_account, resolve_secret_ref, EnvPaymentCredentialResolver,
-    PaymentVerifyWebhookRequest, ProviderAccountBinding,
+    payment_credential_cipher, provider_registry_for_account, resolve_secret_ref,
+    CredentialCipherScope, EncryptedPaymentCredential, EnvPaymentCredentialResolver,
+    PaymentVerifyWebhookRequest, ProviderAccountBinding, ProviderCredentialBundle,
 };
 use sdkwork_payment_service_host::PaymentServiceHost;
 use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
 
 use crate::api_response::{
@@ -38,7 +38,7 @@ struct IntegrationState {
     pool: IntegrationPool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct ProviderAccountRecord {
     id: String,
     provider_code: String,
@@ -47,6 +47,9 @@ struct ProviderAccountRecord {
     secret_ref: String,
     webhook_secret_ref: Option<String>,
     certificate_ref: Option<String>,
+    primary_secret: Option<String>,
+    webhook_secret: Option<String>,
+    certificate: Option<String>,
     metadata: Value,
 }
 
@@ -59,6 +62,9 @@ impl ProviderAccountRecord {
             secret_ref: self.secret_ref.clone(),
             webhook_secret_ref: self.webhook_secret_ref.clone(),
             certificate_ref: self.certificate_ref.clone(),
+            primary_secret: self.primary_secret.clone(),
+            webhook_secret: self.webhook_secret.clone(),
+            certificate: self.certificate.clone(),
             metadata: self.metadata.clone(),
         }
     }
@@ -72,12 +78,12 @@ struct ProviderAccountTestBody {
     dry_run: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CredentialRotateBody {
-    secret_ref: String,
-    webhook_secret_ref: Option<String>,
-    certificate_ref: Option<String>,
+    primary_secret: String,
+    webhook_secret: Option<String>,
+    certificate: Option<String>,
     #[serde(default)]
     invalidate_previous: bool,
 }
@@ -119,14 +125,13 @@ struct SubMerchantListQuery {
     q: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateCertificateBody {
     certificate_no: String,
     provider_code: String,
     certificate_type: String,
-    certificate_ref: String,
-    pem_content: Option<String>,
+    certificate: String,
     metadata: Option<Value>,
 }
 
@@ -268,30 +273,27 @@ async fn test_provider_account(
 
     let started = Instant::now();
     let binding = account.binding(environment.clone());
-    let registry =
-        provider_registry_for_account(&EnvPaymentCredentialResolver::load(), Some(binding));
+    let credentials = EnvPaymentCredentialResolver::load();
+    let registry = provider_registry_for_account(&credentials, Some(binding));
     let adapter = registry.resolve(&account.provider_code);
-    let credentials_resolved =
-        resolve_secret_ref(&account.secret_ref).is_some() && adapter.is_some();
+    let readiness_issues =
+        provider_account_readiness_issues(&account, &credentials, adapter.is_some());
+    let credentials_resolved = readiness_issues.is_empty();
     let (ok, diagnostic) = if body.dry_run {
         (
             credentials_resolved,
             if credentials_resolved {
                 "Credential references resolved and the provider adapter initialized.".to_owned()
             } else {
-                "Credential references could not be resolved or the provider adapter could not initialize.".to_owned()
+                readiness_issues.join(" ")
             },
         )
-    } else if adapter.is_some() {
-        (
-            false,
-            "Credential references resolved, but this provider adapter does not expose a non-mutating remote connectivity probe; use dryRun for credential validation.".to_owned(),
-        )
+    } else if !readiness_issues.is_empty() {
+        (false, readiness_issues.join(" "))
     } else {
         (
             false,
-            "Provider adapter could not initialize from the configured credential references."
-                .to_owned(),
+            "Credential references resolved, but this provider adapter does not expose a non-mutating remote connectivity probe; use dryRun for credential validation.".to_owned(),
         )
     };
     let tested_at = now_string();
@@ -319,6 +321,123 @@ async fn test_provider_account(
     )
 }
 
+fn provider_account_readiness_issues(
+    account: &ProviderAccountRecord,
+    credentials: &ProviderCredentialBundle,
+    adapter_initialized: bool,
+) -> Vec<String> {
+    let mut issues = Vec::new();
+    let mock = |value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some_and(|value| value.starts_with("mock-") || value.starts_with("MOCK_"))
+    };
+    if account
+        .metadata
+        .get("configurationState")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.eq_ignore_ascii_case("mock"))
+        || mock(account.merchant_id.as_deref())
+        || mock(account.metadata.get("appId").and_then(Value::as_str))
+        || mock(
+            account
+                .metadata
+                .get("merchantSerialNo")
+                .and_then(Value::as_str),
+        )
+    {
+        issues.push("replace bootstrap mock identifiers".to_owned());
+    }
+    if account.primary_secret.is_none() && resolve_secret_ref(&account.secret_ref).is_none() {
+        issues.push("primary provider credential is not configured".to_owned());
+    }
+    match account.provider_code.to_ascii_lowercase().as_str() {
+        "wechat_pay" => {
+            if account
+                .metadata
+                .get("appId")
+                .and_then(Value::as_str)
+                .is_none_or(|value| value.trim().is_empty())
+            {
+                issues.push("metadata.appId is required for WeChat Pay".to_owned());
+            }
+            if account
+                .metadata
+                .get("merchantSerialNo")
+                .and_then(Value::as_str)
+                .is_none_or(|value| value.trim().is_empty())
+            {
+                issues.push("metadata.merchantSerialNo is required for WeChat Pay".to_owned());
+            }
+            if account.merchant_id.as_deref().is_none_or(str::is_empty) {
+                issues.push("merchantId is required for WeChat Pay".to_owned());
+            }
+            if account.webhook_secret.is_none()
+                && account
+                    .webhook_secret_ref
+                    .as_deref()
+                    .and_then(resolve_secret_ref)
+                    .is_none()
+            {
+                issues.push("WeChat API v3 key is not configured".to_owned());
+            }
+            if account.certificate.is_none()
+                && account
+                    .certificate_ref
+                    .as_deref()
+                    .and_then(resolve_secret_ref)
+                    .is_none()
+            {
+                issues.push("WeChat platform certificate is not configured".to_owned());
+            }
+            if account
+                .metadata
+                .get("notifyUrl")
+                .and_then(Value::as_str)
+                .is_none_or(|value| value.trim().is_empty())
+                && credentials.provider_notify_url("wechat_pay").is_none()
+            {
+                issues.push("metadata.notifyUrl is required for WeChat Pay".to_owned());
+            }
+        }
+        "alipay" => {
+            if account.merchant_id.as_deref().is_none_or(str::is_empty) {
+                issues.push("merchantId (Alipay appId) is required".to_owned());
+            }
+            if account.certificate.is_none()
+                && account
+                    .certificate_ref
+                    .as_deref()
+                    .and_then(resolve_secret_ref)
+                    .is_none()
+            {
+                issues.push("Alipay public key is not configured".to_owned());
+            }
+        }
+        "stripe" => {
+            if account.webhook_secret.is_none()
+                && account
+                    .webhook_secret_ref
+                    .as_deref()
+                    .and_then(resolve_secret_ref)
+                    .is_none()
+            {
+                issues.push("Stripe webhook signing secret is not configured".to_owned());
+            }
+        }
+        "sandbox" => return issues,
+        _ => issues.push(format!(
+            "unsupported provider code {}",
+            account.provider_code
+        )),
+    }
+    if !adapter_initialized && account.provider_code != "sandbox" {
+        issues.push("provider adapter could not initialize".to_owned());
+    }
+    issues
+}
+
 async fn rotate_provider_credentials(
     State(state): State<IntegrationState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -335,7 +454,7 @@ async fn rotate_provider_credentials(
     if let Err(response) = validate_command(ctx, &headers, "provider-credential-rotate", &body) {
         return response;
     }
-    let secret_ref = match required_text(&body.secret_ref, "secretRef", ctx) {
+    let primary_secret = match required_text(&body.primary_secret, "primarySecret", ctx) {
         Ok(value) => value,
         Err(response) => return response,
     };
@@ -343,9 +462,9 @@ async fn rotate_provider_credentials(
         &state.pool,
         &subject,
         &provider_account_id,
-        &secret_ref,
-        normalized(body.webhook_secret_ref),
-        normalized(body.certificate_ref),
+        primary_secret,
+        normalized(body.webhook_secret),
+        normalized(body.certificate),
         body.invalidate_previous,
     )
     .await
@@ -515,23 +634,30 @@ async fn create_certificate(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let certificate_ref = match required_text(&body.certificate_ref, "certificateRef", ctx) {
+    let certificate = match required_text(&body.certificate, "certificate", ctx) {
         Ok(value) => value,
         Err(response) => return response,
     };
-    let pem = body
-        .pem_content
-        .clone()
-        .or_else(|| resolve_secret_ref(&certificate_ref));
-    let fingerprint = pem.as_deref().map(sha256_hex);
     let id = stable_id("certificate", &write.idempotency_key);
+    let encrypted = match payment_credential_cipher().and_then(|cipher| {
+        cipher.encrypt(
+            CredentialCipherScope {
+                tenant_id: &subject.tenant_id,
+                provider_account_id: &id,
+                credential_kind: "certificate_inventory",
+            },
+            &certificate,
+        )
+    }) {
+        Ok(value) => value,
+        Err(_) => return map_service_error(ctx, storage("certificate encryption failed")),
+    };
     match insert_certificate(
         &state.pool,
         &subject,
         &id,
         &certificate_no,
-        &certificate_ref,
-        fingerprint.as_deref(),
+        &encrypted,
         &body,
     )
     .await
@@ -857,10 +983,6 @@ fn now_string() -> String {
     sqlx::types::chrono::Utc::now().to_rfc3339()
 }
 
-fn sha256_hex(value: &str) -> String {
-    format!("{:x}", Sha256::digest(value.as_bytes()))
-}
-
 fn provider_algorithm(provider_code: &str) -> &'static str {
     match provider_code {
         "stripe" => "HMAC-SHA256",
@@ -905,19 +1027,39 @@ async fn load_provider_account(
     match pool {
         IntegrationPool::Sqlite(pool) => {
             let row = sqlx::query(
-                "SELECT id, provider_code, merchant_id, environment, secret_ref, webhook_secret_ref, certificate_ref, metadata FROM commerce_payment_provider_account WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL LIMIT 1",
+                "SELECT id, provider_code, merchant_id, environment, secret_ref, webhook_secret_ref, certificate_ref, metadata FROM commerce_payment_provider_account WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL)) AND deleted_at IS NULL LIMIT 1",
             )
             .bind(id)
             .bind(&subject.tenant_id)
             .bind(&subject.organization_id)
+            .bind(&subject.organization_id)
             .fetch_optional(pool)
             .await
             .map_err(storage)?;
-            Ok(row.map(map_provider_account_sqlite))
+            match row {
+                Some(row) => {
+                    let mut account = map_provider_account_sqlite(row);
+                    if uses_database_credentials(&account) {
+                        let credentials =
+                            sdkwork_payment_repository_sqlx::load_provider_credentials_sqlite(
+                                pool,
+                                &subject.tenant_id,
+                                subject.organization_id.as_deref(),
+                                id,
+                            )
+                            .await?;
+                        account.primary_secret = credentials.primary_secret;
+                        account.webhook_secret = credentials.webhook_secret;
+                        account.certificate = credentials.certificate;
+                    }
+                    Ok(Some(account))
+                }
+                None => Ok(None),
+            }
         }
         IntegrationPool::Postgres(pool) => {
             let row = sqlx::query(
-                "SELECT id, provider_code, merchant_id, environment, secret_ref, webhook_secret_ref, certificate_ref, CAST(metadata AS TEXT) AS metadata FROM commerce_payment_provider_account WHERE id = CAST($1 AS TEXT) AND tenant_id = CAST($2 AS TEXT) AND organization_id = CAST($3 AS TEXT) AND deleted_at IS NULL LIMIT 1",
+                "SELECT id, provider_code, merchant_id, environment, secret_ref, webhook_secret_ref, certificate_ref, CAST(metadata AS TEXT) AS metadata FROM commerce_payment_provider_account WHERE id = CAST($1 AS TEXT) AND tenant_id = CAST($2 AS TEXT) AND ((organization_id = CAST($3 AS TEXT)) OR (organization_id IS NULL AND $3::text IS NULL)) AND deleted_at IS NULL LIMIT 1",
             )
             .bind(id)
             .bind(&subject.tenant_id)
@@ -925,7 +1067,26 @@ async fn load_provider_account(
             .fetch_optional(pool)
             .await
             .map_err(storage)?;
-            Ok(row.map(map_provider_account_pg))
+            match row {
+                Some(row) => {
+                    let mut account = map_provider_account_pg(row);
+                    if uses_database_credentials(&account) {
+                        let credentials =
+                            sdkwork_payment_repository_sqlx::load_provider_credentials_postgres(
+                                pool,
+                                &subject.tenant_id,
+                                subject.organization_id.as_deref(),
+                                id,
+                            )
+                            .await?;
+                        account.primary_secret = credentials.primary_secret;
+                        account.webhook_secret = credentials.webhook_secret;
+                        account.certificate = credentials.certificate;
+                    }
+                    Ok(Some(account))
+                }
+                None => Ok(None),
+            }
         }
     }
 }
@@ -939,6 +1100,9 @@ fn map_provider_account_sqlite(row: SqliteRow) -> ProviderAccountRecord {
         secret_ref: row.try_get("secret_ref").unwrap_or_default(),
         webhook_secret_ref: row.try_get("webhook_secret_ref").ok().flatten(),
         certificate_ref: row.try_get("certificate_ref").ok().flatten(),
+        primary_secret: None,
+        webhook_secret: None,
+        certificate: None,
         metadata: parse_json(row.try_get("metadata").ok()),
     }
 }
@@ -952,8 +1116,23 @@ fn map_provider_account_pg(row: PgRow) -> ProviderAccountRecord {
         secret_ref: row.try_get("secret_ref").unwrap_or_default(),
         webhook_secret_ref: row.try_get("webhook_secret_ref").ok().flatten(),
         certificate_ref: row.try_get("certificate_ref").ok().flatten(),
+        primary_secret: None,
+        webhook_secret: None,
+        certificate: None,
         metadata: parse_json(row.try_get("metadata").ok()),
     }
+}
+
+fn uses_database_credentials(account: &ProviderAccountRecord) -> bool {
+    account.secret_ref.starts_with("database:")
+        || account
+            .webhook_secret_ref
+            .as_deref()
+            .is_some_and(|value| value.starts_with("database:"))
+        || account
+            .certificate_ref
+            .as_deref()
+            .is_some_and(|value| value.starts_with("database:"))
 }
 
 async fn update_provider_test_status(
@@ -965,12 +1144,12 @@ async fn update_provider_test_status(
 ) -> Result<(), sdkwork_contract_service::CommerceServiceError> {
     match pool {
         IntegrationPool::Sqlite(pool) => {
-            sqlx::query("UPDATE commerce_payment_provider_account SET last_tested_at = ?, last_test_status = ?, updated_at = ? WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL")
-                .bind(tested_at).bind(status).bind(tested_at).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id)
+            sqlx::query("UPDATE commerce_payment_provider_account SET last_tested_at = ?, last_test_status = ?, updated_at = ? WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL)) AND deleted_at IS NULL")
+                .bind(tested_at).bind(status).bind(tested_at).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(&subject.organization_id)
                 .execute(pool).await.map_err(storage)?;
         }
         IntegrationPool::Postgres(pool) => {
-            sqlx::query("UPDATE commerce_payment_provider_account SET last_tested_at = CAST($1 AS TIMESTAMPTZ), last_test_status = $2, updated_at = CAST($1 AS TIMESTAMPTZ) WHERE id = CAST($3 AS TEXT) AND tenant_id = CAST($4 AS TEXT) AND organization_id = CAST($5 AS TEXT) AND deleted_at IS NULL")
+            sqlx::query("UPDATE commerce_payment_provider_account SET last_tested_at = CAST($1 AS TIMESTAMPTZ), last_test_status = $2, updated_at = CAST($1 AS TIMESTAMPTZ) WHERE id = CAST($3 AS TEXT) AND tenant_id = CAST($4 AS TEXT) AND ((organization_id = CAST($5 AS TEXT)) OR (organization_id IS NULL AND $5::text IS NULL)) AND deleted_at IS NULL")
                 .bind(tested_at).bind(status).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id)
                 .execute(pool).await.map_err(storage)?;
         }
@@ -982,29 +1161,47 @@ async fn rotate_credentials(
     pool: &IntegrationPool,
     subject: &AppRuntimeSubject,
     id: &str,
-    secret_ref: &str,
-    webhook_secret_ref: Option<String>,
-    certificate_ref: Option<String>,
+    primary_secret: String,
+    webhook_secret: Option<String>,
+    certificate: Option<String>,
     invalidate_previous: bool,
 ) -> Result<Option<Value>, sdkwork_contract_service::CommerceServiceError> {
     let rotated_at = now_string();
     let metadata_patch = json!({"previousCredentialsInvalidated": invalidate_previous, "credentialsRotatedAt": rotated_at});
     match pool {
         IntegrationPool::Sqlite(pool) => {
-            let result = sqlx::query("UPDATE commerce_payment_provider_account SET secret_ref = ?, webhook_secret_ref = COALESCE(?, webhook_secret_ref), certificate_ref = COALESCE(?, certificate_ref), metadata = json_patch(COALESCE(metadata, '{}'), ?), version = version + 1, updated_at = ? WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL")
-                .bind(secret_ref).bind(&webhook_secret_ref).bind(&certificate_ref).bind(metadata_patch.to_string()).bind(&rotated_at).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id)
+            sdkwork_payment_repository_sqlx::rotate_provider_credentials_sqlite(
+                pool,
+                &subject.tenant_id,
+                subject.organization_id.as_deref(),
+                id,
+                sdkwork_payment_repository_sqlx::ProviderCredentialWrite {
+                    primary_secret: Some(primary_secret),
+                    webhook_secret,
+                    certificate,
+                },
+            )
+            .await?;
+            sqlx::query("UPDATE commerce_payment_provider_account SET metadata = json_patch(COALESCE(metadata, '{}'), ?), last_tested_at = NULL, last_test_status = NULL, updated_at = ? WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL)) AND deleted_at IS NULL")
+                .bind(metadata_patch.to_string()).bind(&rotated_at).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(&subject.organization_id)
                 .execute(pool).await.map_err(storage)?;
-            if result.rows_affected() == 0 {
-                return Ok(None);
-            }
         }
         IntegrationPool::Postgres(pool) => {
-            let result = sqlx::query("UPDATE commerce_payment_provider_account SET secret_ref = $1, webhook_secret_ref = COALESCE($2, webhook_secret_ref), certificate_ref = COALESCE($3, certificate_ref), metadata = COALESCE(metadata, '{}'::jsonb) || CAST($4 AS JSONB), version = version + 1, updated_at = CAST($5 AS TIMESTAMPTZ) WHERE id = CAST($6 AS TEXT) AND tenant_id = CAST($7 AS TEXT) AND organization_id = CAST($8 AS TEXT) AND deleted_at IS NULL")
-                .bind(secret_ref).bind(&webhook_secret_ref).bind(&certificate_ref).bind(metadata_patch.to_string()).bind(&rotated_at).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id)
+            sdkwork_payment_repository_sqlx::rotate_provider_credentials_postgres(
+                pool,
+                &subject.tenant_id,
+                subject.organization_id.as_deref(),
+                id,
+                sdkwork_payment_repository_sqlx::ProviderCredentialWrite {
+                    primary_secret: Some(primary_secret),
+                    webhook_secret,
+                    certificate,
+                },
+            )
+            .await?;
+            sqlx::query("UPDATE commerce_payment_provider_account SET metadata = COALESCE(metadata, '{}'::jsonb) || CAST($1 AS JSONB), last_tested_at = NULL, last_test_status = NULL, updated_at = CAST($2 AS TIMESTAMPTZ) WHERE id = CAST($3 AS TEXT) AND tenant_id = CAST($4 AS TEXT) AND ((organization_id = CAST($5 AS TEXT)) OR (organization_id IS NULL AND $5::text IS NULL)) AND deleted_at IS NULL")
+                .bind(metadata_patch.to_string()).bind(&rotated_at).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id)
                 .execute(pool).await.map_err(storage)?;
-            if result.rows_affected() == 0 {
-                return Ok(None);
-            }
         }
     }
     load_provider_account(pool, subject, id)
@@ -1018,9 +1215,10 @@ fn provider_account_json(account: ProviderAccountRecord) -> Value {
         "providerCode": account.provider_code,
         "merchantId": account.merchant_id,
         "environment": account.environment,
-        "secretRef": account.secret_ref,
-        "webhookSecretRef": account.webhook_secret_ref,
-        "certificateRef": account.certificate_ref,
+        "hasPrimarySecret": account.primary_secret.is_some() || !account.secret_ref.trim().is_empty(),
+        "hasWebhookSecret": account.webhook_secret.is_some() || account.webhook_secret_ref.as_deref().is_some_and(|value| !value.trim().is_empty()),
+        "hasCertificate": account.certificate.is_some() || account.certificate_ref.as_deref().is_some_and(|value| !value.trim().is_empty()),
+        "credentialStorage": if account.secret_ref.starts_with("database:") { "database_encrypted" } else { "legacy_reference" },
         "metadata": account.metadata,
     })
 }
@@ -1211,7 +1409,9 @@ where
     let status = text("status");
     json!({
         "id": text("id"), "certificateNo": text("certificate_no"), "providerCode": text("provider_code"),
-        "certificateType": certificate_type(&kind), "certificateRef": text("content_ref"),
+        "certificateType": certificate_type(&kind),
+        "hasContent": text("content_ref").starts_with("database:"),
+        "credentialStorage": if text("content_ref").starts_with("database:") { "database_encrypted" } else { "legacy_reference" },
         "fingerprint": optional("fingerprint_sha256"), "expiresAt": optional("valid_until"),
         "issuer": optional("issuer_cn"), "subject": optional("subject_cn"),
         "status": if status == "pending" { "pending_rotation" } else { status.as_str() },
@@ -1224,8 +1424,7 @@ async fn insert_certificate(
     subject: &AppRuntimeSubject,
     id: &str,
     certificate_no: &str,
-    certificate_ref: &str,
-    fingerprint: Option<&str>,
+    encrypted: &EncryptedPaymentCredential,
     body: &CreateCertificateBody,
 ) -> Result<Value, sdkwork_contract_service::CommerceServiceError> {
     let now = now_string();
@@ -1237,13 +1436,13 @@ async fn insert_certificate(
     let kind = certificate_kind(&body.certificate_type);
     match pool {
         IntegrationPool::Sqlite(pool) => {
-            sqlx::query("INSERT INTO commerce_payment_certificate (id, tenant_id, organization_id, certificate_no, provider_code, kind, fingerprint_sha256, content_ref, status, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?) ON CONFLICT(id) DO NOTHING")
-                .bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(certificate_no).bind(&body.provider_code).bind(kind).bind(fingerprint).bind(certificate_ref).bind(&metadata).bind(&now).bind(&now)
+            sqlx::query("INSERT INTO commerce_payment_certificate (id, tenant_id, organization_id, certificate_no, provider_code, kind, fingerprint_sha256, content_ref, ciphertext, encryption_key_id, encryption_algorithm, status, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'database:certificate_inventory', ?, ?, ?, 'active', ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+                .bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(certificate_no).bind(&body.provider_code).bind(kind).bind(&encrypted.fingerprint_sha256).bind(&encrypted.ciphertext).bind(&encrypted.encryption_key_id).bind(&encrypted.encryption_algorithm).bind(&metadata).bind(&now).bind(&now)
                 .execute(pool).await.map_err(storage)?;
         }
         IntegrationPool::Postgres(pool) => {
-            sqlx::query("INSERT INTO commerce_payment_certificate (id, tenant_id, organization_id, certificate_no, provider_code, kind, fingerprint_sha256, content_ref, status, metadata, created_at, updated_at) VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), $4, $5, $6, $7, $8, 'active', CAST($9 AS JSONB), CAST($10 AS TIMESTAMPTZ), CAST($10 AS TIMESTAMPTZ)) ON CONFLICT(id) DO NOTHING")
-                .bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(certificate_no).bind(&body.provider_code).bind(kind).bind(fingerprint).bind(certificate_ref).bind(&metadata).bind(&now)
+            sqlx::query("INSERT INTO commerce_payment_certificate (id, tenant_id, organization_id, certificate_no, provider_code, kind, fingerprint_sha256, content_ref, ciphertext, encryption_key_id, encryption_algorithm, status, metadata, created_at, updated_at) VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), $4, $5, $6, $7, 'database:certificate_inventory', $8, $9, $10, 'active', CAST($11 AS JSONB), CAST($12 AS TIMESTAMPTZ), CAST($12 AS TIMESTAMPTZ)) ON CONFLICT(id) DO NOTHING")
+                .bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(certificate_no).bind(&body.provider_code).bind(kind).bind(&encrypted.fingerprint_sha256).bind(&encrypted.ciphertext).bind(&encrypted.encryption_key_id).bind(&encrypted.encryption_algorithm).bind(&metadata).bind(&now)
                 .execute(pool).await.map_err(storage)?;
         }
     }
@@ -1257,7 +1456,7 @@ async fn insert_certificate(
     let replay_matches = item["certificateNo"] == certificate_no
         && item["providerCode"] == body.provider_code
         && item["certificateType"] == body.certificate_type
-        && item["certificateRef"] == certificate_ref;
+        && item["fingerprint"] == encrypted.fingerprint_sha256;
     if !replay_matches {
         return Err(sdkwork_contract_service::CommerceServiceError::conflict(
             "Idempotency-Key was already used with a different certificate payload",
@@ -1528,7 +1727,7 @@ mod tests {
         for statement in [
             "CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_code TEXT NOT NULL, merchant_id TEXT, environment TEXT NOT NULL, secret_ref TEXT NOT NULL, webhook_secret_ref TEXT, certificate_ref TEXT, metadata TEXT NOT NULL DEFAULT '{}', last_tested_at TEXT, last_test_status TEXT, version INTEGER NOT NULL DEFAULT 0, updated_at TEXT, deleted_at TEXT)",
             "CREATE TABLE commerce_payment_sub_merchant (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, external_sub_merchant_id TEXT NOT NULL, sub_appid TEXT, sub_mch_id TEXT, display_name TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
-            "CREATE TABLE commerce_payment_certificate (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, certificate_no TEXT NOT NULL, provider_code TEXT NOT NULL, kind TEXT NOT NULL, content_ref TEXT NOT NULL, fingerprint_sha256 TEXT, valid_until TEXT, issuer_cn TEXT, subject_cn TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
+            "CREATE TABLE commerce_payment_certificate (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, certificate_no TEXT NOT NULL, provider_code TEXT NOT NULL, kind TEXT NOT NULL, content_ref TEXT NOT NULL, ciphertext TEXT, encryption_key_id TEXT, encryption_algorithm TEXT, fingerprint_sha256 TEXT, valid_until TEXT, issuer_cn TEXT, subject_cn TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
             "CREATE TABLE commerce_payment_webhook_event (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, event_id TEXT NOT NULL, event_type TEXT NOT NULL, provider_code TEXT, payload TEXT NOT NULL, status TEXT NOT NULL, received_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
         ] {
             sqlx::query(statement)
@@ -1588,22 +1787,50 @@ mod tests {
             certificate_no: "cert-no-1".to_owned(),
             provider_code: "stripe".to_owned(),
             certificate_type: "provider_public_key".to_owned(),
-            certificate_ref: "STRIPE_CERTIFICATE_PEM".to_owned(),
-            pem_content: Some("test-pem".to_owned()),
+            certificate: "test-pem".to_owned(),
             metadata: None,
         };
+        let encrypted = payment_credential_cipher()
+            .expect("cipher")
+            .encrypt(
+                CredentialCipherScope {
+                    tenant_id: &subject.tenant_id,
+                    provider_account_id: "cert-1",
+                    credential_kind: "certificate_inventory",
+                },
+                "test-pem",
+            )
+            .expect("encrypt certificate");
         let certificate = insert_certificate(
             &integration_pool,
             &subject,
             "cert-1",
             "cert-no-1",
-            "STRIPE_CERTIFICATE_PEM",
-            Some(&sha256_hex("test-pem")),
+            &encrypted,
             &certificate_body,
         )
         .await
         .expect("create certificate");
         assert_eq!(certificate["certificateType"], "provider_public_key");
+        assert_eq!(certificate["hasContent"], true);
+        assert!(certificate.get("certificateRef").is_none());
+        assert!(certificate.get("ciphertext").is_none());
+        let stored_certificate = sqlx::query(
+            "SELECT content_ref, ciphertext FROM commerce_payment_certificate WHERE id = 'cert-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("stored certificate");
+        assert_eq!(
+            stored_certificate
+                .try_get::<String, _>("content_ref")
+                .expect("content marker"),
+            "database:certificate_inventory"
+        );
+        assert!(!stored_certificate
+            .try_get::<String, _>("ciphertext")
+            .expect("ciphertext")
+            .contains("test-pem"));
         assert!(soft_delete_resource(
             &integration_pool,
             &subject,

@@ -8,6 +8,7 @@
                                       "common":  [
                                                      "001_payment_method_catalog.sql",
                                                      "002_production_templates.sql",
+                                                     "006_upgrade_bootstrap_templates.sql",
                                                      "005_production_sandbox_template.sql"
                                                  ]
                                   },
@@ -16,6 +17,7 @@
                                         "common":  [
                                                        "001_payment_method_catalog.sql",
                                                        "002_production_templates.sql",
+                                                       "006_upgrade_bootstrap_templates.sql",
                                                        "005_production_sandbox_template.sql"
                                                    ]
                                     },
@@ -24,6 +26,7 @@
                                          "common":  [
                                                         "001_payment_method_catalog.sql",
                                                         "002_production_templates.sql",
+                                                        "006_upgrade_bootstrap_templates.sql",
                                                         "003_development_templates.sql"
                                                     ]
                                      },
@@ -32,6 +35,7 @@
                                   "common":  [
                                                  "001_payment_method_catalog.sql",
                                                  "002_production_templates.sql",
+                                                 "006_upgrade_bootstrap_templates.sql",
                                                  "004_test_templates.sql"
                                              ]
                               }

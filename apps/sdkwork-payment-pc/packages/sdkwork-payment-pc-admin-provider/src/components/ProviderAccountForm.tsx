@@ -6,21 +6,20 @@
  *   2. accountMode (direct / partner)
  *
  * Direct mode fields per provider:
- *   - stripe: secretRef (env var holding sk_live_... / sk_test_...), webhookSecretRef
- *   - alipay: secretRef (merchantPrivateKey PEM), certificateRef (alipayPublicKey PEM),
+ *   - stripe: primarySecret (sk_live_... / sk_test_...), webhookSecret
+ *   - alipay: primarySecret (merchantPrivateKey PEM), certificate (alipayPublicKey PEM),
  *             metadata.appId, metadata.signType (RSA2/RSA)
- *   - wechat_pay: secretRef (API v3 key), webhookSecretRef (API v3 key),
- *                 certificateRef (platform cert PEM), metadata.merchantSerialNo
- *   - sandbox: secretRef only
+ *   - wechat_pay: primarySecret (merchant private key PEM), webhookSecret (API v3 key),
+ *                 certificate (platform cert PEM), metadata.merchantSerialNo
+ *   - sandbox: primarySecret only
  *
  * Partner (ISV) mode fields:
  *   - All direct fields PLUS:
  *   - partnerProviderAccountId (select from existing partner accounts)
  *   - Sub-merchant management is delegated to <SubMerchantManager/>
  *
- * Env var indirection: secrets are NEVER stored as plaintext. The form collects
- * env var NAMES (e.g., STRIPE_SECRET_KEY, ALIPAY_MERCHANT_PRIVATE_KEY) which the
- * backend resolves at runtime via sdkwork-payment-providers::credentials.
+ * Credential fields are write-only. Existing values are never loaded into the
+ * browser; the backend encrypts replacements before database persistence.
  */
 
 import * as React from "react";
@@ -87,13 +86,14 @@ interface FormState {
   environment: PaymentProviderEnvironment;
   countryCode: string;
   settlementCurrency: string;
-  secretRef: string;
-  webhookSecretRef: string;
-  certificateRef: string;
+  primarySecret: string;
+  webhookSecret: string;
+  certificate: string;
   status: PaymentProviderAccountStatus;
   metadataAppId: string;
   metadataMerchantSerialNo: string;
   metadataSignType: string;
+  metadataNotifyUrl: string;
   metadataReturnUrl: string;
   capabilities: Record<string, boolean>;
 }
@@ -111,13 +111,14 @@ function deriveInitialState(
     environment: initial?.environment ?? "sandbox",
     countryCode: initial?.countryCode ?? "CN",
     settlementCurrency: initial?.settlementCurrency ?? "CNY",
-    secretRef: initial?.secretRef ?? "",
-    webhookSecretRef: initial?.webhookSecretRef ?? "",
-    certificateRef: initial?.certificateRef ?? "",
-    status: initial?.status ?? "active",
+    primarySecret: "",
+    webhookSecret: "",
+    certificate: "",
+    status: initial?.status ?? "inactive",
     metadataAppId: typeof metadata.appId === "string" ? metadata.appId : "",
     metadataMerchantSerialNo: typeof metadata.merchantSerialNo === "string" ? metadata.merchantSerialNo : "",
     metadataSignType: typeof metadata.signType === "string" ? metadata.signType : "RSA2",
+    metadataNotifyUrl: typeof metadata.notifyUrl === "string" ? metadata.notifyUrl : "",
     metadataReturnUrl: typeof metadata.returnUrl === "string" ? metadata.returnUrl : "",
     capabilities: {
       pay: initial?.capabilities?.pay ?? true,
@@ -144,7 +145,14 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
   }
 
   function buildMetadata(): Record<string, unknown> {
-    const metadata: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = { ...(props.initial?.metadata ?? {}) };
+    delete metadata.configurationState;
+    delete metadata.configureBeforeActivation;
+    delete metadata.appId;
+    delete metadata.merchantSerialNo;
+    delete metadata.signType;
+    delete metadata.notifyUrl;
+    delete metadata.returnUrl;
     if (state.metadataAppId) {
       metadata.appId = state.metadataAppId;
     }
@@ -153,6 +161,9 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
     }
     if (state.metadataSignType) {
       metadata.signType = state.metadataSignType;
+    }
+    if (state.metadataNotifyUrl) {
+      metadata.notifyUrl = state.metadataNotifyUrl;
     }
     if (state.metadataReturnUrl) {
       metadata.returnUrl = state.metadataReturnUrl;
@@ -171,12 +182,16 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
-    if (!state.accountNo.trim() || !state.merchantId.trim() || !state.secretRef.trim()) {
-      setError("Account no, merchant id, and secret reference are required.");
+    if (!state.accountNo.trim() || !state.merchantId.trim() || (isCreate && !state.primarySecret.trim())) {
+      setError("Account no, merchant id, and primary credential are required.");
       return;
     }
     if (state.accountMode === "partner" && !state.partnerProviderAccountId.trim() && isCreate) {
       setError("Partner provider account is required when account mode is partner.");
+      return;
+    }
+    if (isCreate && state.status === "active") {
+      setError("Create the account as inactive, validate it, then activate it.");
       return;
     }
     setSubmitting(true);
@@ -195,9 +210,9 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
           environment: state.environment,
           countryCode: state.countryCode.trim().toUpperCase() || "CN",
           settlementCurrency: state.settlementCurrency.trim().toUpperCase() || "CNY",
-          secretRef: state.secretRef.trim(),
-          ...(state.webhookSecretRef.trim() ? { webhookSecretRef: state.webhookSecretRef.trim() } : {}),
-          ...(state.certificateRef.trim() ? { certificateRef: state.certificateRef.trim() } : {}),
+          primarySecret: state.primarySecret.trim(),
+          ...(state.webhookSecret.trim() ? { webhookSecret: state.webhookSecret.trim() } : {}),
+          ...(state.certificate.trim() ? { certificate: state.certificate.trim() } : {}),
           capabilities,
           status: state.status,
           metadata,
@@ -213,9 +228,9 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
           environment: state.environment,
           countryCode: state.countryCode.trim().toUpperCase() || "CN",
           settlementCurrency: state.settlementCurrency.trim().toUpperCase() || "CNY",
-          ...(state.secretRef.trim() ? { secretRef: state.secretRef.trim() } : {}),
-          ...(state.webhookSecretRef.trim() ? { webhookSecretRef: state.webhookSecretRef.trim() } : {}),
-          ...(state.certificateRef.trim() ? { certificateRef: state.certificateRef.trim() } : {}),
+          ...(state.primarySecret.trim() ? { primarySecret: state.primarySecret.trim() } : {}),
+          ...(state.webhookSecret.trim() ? { webhookSecret: state.webhookSecret.trim() } : {}),
+          ...(state.certificate.trim() ? { certificate: state.certificate.trim() } : {}),
           capabilities,
           status: state.status,
           metadata,
@@ -392,53 +407,73 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
 
       <div className="rounded-md border border-[var(--sdk-color-border-subtle)] p-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--sdk-color-text-muted)]">
-          Credential References (env var names, never plaintext)
+          Database Credentials
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <AdminFieldLabel
-            label={secretRefLabel(state.providerCode)}
-            htmlFor="provider-secret-ref"
-            required
+            label={primarySecretLabel(state.providerCode)}
+            htmlFor="provider-primary-secret"
+            required={isCreate}
           >
-            <Input
-              id="provider-secret-ref"
-              value={state.secretRef}
-              onChange={(event) => update("secretRef", event.target.value)}
-              placeholder={secretRefPlaceholder(state.providerCode)}
-              required
-            />
+            {showAlipayFields || showWeChatFields ? (
+              <textarea
+                id="provider-primary-secret"
+                value={state.primarySecret}
+                onChange={(event) => update("primarySecret", event.target.value)}
+                placeholder={credentialPlaceholder(isCreate, props.initial?.hasPrimarySecret)}
+                required={isCreate}
+                rows={5}
+                className="w-full resize-y rounded-md border border-[var(--sdk-color-border)] bg-[var(--sdk-color-bg-surface)] px-3 py-2 font-mono text-sm text-[var(--sdk-color-text-primary)]"
+                autoComplete="new-password"
+              />
+            ) : (
+              <Input
+                id="provider-primary-secret"
+                type="password"
+                value={state.primarySecret}
+                onChange={(event) => update("primarySecret", event.target.value)}
+                placeholder={credentialPlaceholder(isCreate, props.initial?.hasPrimarySecret)}
+                required={isCreate}
+                autoComplete="new-password"
+              />
+            )}
           </AdminFieldLabel>
           {showStripeFields || showWeChatFields ? (
             <AdminFieldLabel
-              label={webhookSecretRefLabel(state.providerCode)}
-              htmlFor="provider-webhook-secret-ref"
+              label={webhookSecretLabel(state.providerCode)}
+              htmlFor="provider-webhook-secret"
             >
               <Input
-                id="provider-webhook-secret-ref"
-                value={state.webhookSecretRef}
-                onChange={(event) => update("webhookSecretRef", event.target.value)}
-                placeholder={webhookSecretRefPlaceholder(state.providerCode)}
+                id="provider-webhook-secret"
+                type="password"
+                value={state.webhookSecret}
+                onChange={(event) => update("webhookSecret", event.target.value)}
+                placeholder={credentialPlaceholder(isCreate, props.initial?.hasWebhookSecret)}
+                autoComplete="new-password"
               />
             </AdminFieldLabel>
           ) : null}
           {showAlipayFields || showWeChatFields ? (
             <AdminFieldLabel
-              label={certificateRefLabel(state.providerCode)}
-              htmlFor="provider-certificate-ref"
+              label={certificateLabel(state.providerCode)}
+              htmlFor="provider-certificate"
             >
-              <Input
-                id="provider-certificate-ref"
-                value={state.certificateRef}
-                onChange={(event) => update("certificateRef", event.target.value)}
-                placeholder={certificateRefPlaceholder(state.providerCode)}
+              <textarea
+                id="provider-certificate"
+                value={state.certificate}
+                onChange={(event) => update("certificate", event.target.value)}
+                placeholder={credentialPlaceholder(isCreate, props.initial?.hasCertificate)}
+                rows={5}
+                className="w-full resize-y rounded-md border border-[var(--sdk-color-border)] bg-[var(--sdk-color-bg-surface)] px-3 py-2 font-mono text-sm text-[var(--sdk-color-text-primary)]"
+                autoComplete="new-password"
               />
             </AdminFieldLabel>
           ) : null}
         </div>
         <p className="mt-3 text-xs text-[var(--sdk-color-text-secondary)]">
-          These fields store environment variable names (e.g., STRIPE_SECRET_KEY,
-          ALIPAY_MERCHANT_PRIVATE_KEY). The runtime resolves them via the secret store;
-          plaintext secrets are never persisted in the database.
+          {props.initial?.credentialStorage === "legacy_reference"
+            ? "Legacy credential reference detected. Saving a replacement migrates it to encrypted database storage."
+            : "Credential values are write-only and encrypted before database persistence."}
         </p>
       </div>
 
@@ -493,14 +528,21 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
                 placeholder="Optional override return URL"
               />
             </AdminFieldLabel>
+            <AdminFieldLabel label="Notify URL" htmlFor="provider-metadata-notify-url">
+              <Input
+                id="provider-metadata-notify-url"
+                value={state.metadataNotifyUrl}
+                onChange={(event) => update("metadataNotifyUrl", event.target.value)}
+                placeholder={`https://pay.example.com/app/v3/api/orders/payments/webhooks/${state.providerCode}`}
+              />
+            </AdminFieldLabel>
           </div>
         </div>
       ) : null}
 
       {showSandboxFields ? (
         <p className="text-xs text-[var(--sdk-color-text-secondary)]">
-          Sandbox provider only requires the secret reference. Use it for local
-          development and integration tests; no metadata is required.
+          Sandbox provider requires only the primary credential.
         </p>
       ) : null}
 
@@ -552,40 +594,26 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
   );
 }
 
-function secretRefLabel(providerCode: PaymentProviderCode): string {
-  if (providerCode === "stripe") return "Stripe Secret Key Env Var";
-  if (providerCode === "alipay") return "Alipay Merchant Private Key Env Var";
-  if (providerCode === "wechat_pay") return "WeChat API v3 Key Env Var";
-  return "Secret Env Var";
+function primarySecretLabel(providerCode: PaymentProviderCode): string {
+  if (providerCode === "stripe") return "Stripe Secret Key";
+  if (providerCode === "alipay") return "Alipay Merchant Private Key";
+  if (providerCode === "wechat_pay") return "WeChat Merchant Private Key";
+  return "Primary Credential";
 }
 
-function secretRefPlaceholder(providerCode: PaymentProviderCode): string {
-  if (providerCode === "stripe") return "STRIPE_SECRET_KEY";
-  if (providerCode === "alipay") return "ALIPAY_MERCHANT_PRIVATE_KEY";
-  if (providerCode === "wechat_pay") return "WECHAT_PAY_API_V3_KEY";
-  return "SANDBOX_SECRET";
+function credentialPlaceholder(isCreate: boolean, configured?: boolean): string {
+  if (!isCreate && configured) return "Configured";
+  return "Enter credential value";
 }
 
-function webhookSecretRefLabel(providerCode: PaymentProviderCode): string {
-  if (providerCode === "stripe") return "Stripe Webhook Signing Secret Env Var";
-  if (providerCode === "wechat_pay") return "WeChat API v3 Key (Webhook) Env Var";
-  return "Webhook Secret Env Var";
+function webhookSecretLabel(providerCode: PaymentProviderCode): string {
+  if (providerCode === "stripe") return "Stripe Webhook Signing Secret";
+  if (providerCode === "wechat_pay") return "WeChat API v3 Key";
+  return "Webhook Secret";
 }
 
-function webhookSecretRefPlaceholder(providerCode: PaymentProviderCode): string {
-  if (providerCode === "stripe") return "STRIPE_WEBHOOK_SECRET";
-  if (providerCode === "wechat_pay") return "WECHAT_PAY_API_V3_KEY";
-  return "WEBHOOK_SECRET";
-}
-
-function certificateRefLabel(providerCode: PaymentProviderCode): string {
-  if (providerCode === "alipay") return "Alipay Public Key Env Var";
-  if (providerCode === "wechat_pay") return "WeChat Platform Certificate Env Var";
-  return "Certificate Env Var";
-}
-
-function certificateRefPlaceholder(providerCode: PaymentProviderCode): string {
-  if (providerCode === "alipay") return "ALIPAY_PUBLIC_KEY";
-  if (providerCode === "wechat_pay") return "WECHAT_PAY_PLATFORM_CERT";
-  return "CERTIFICATE_PEM";
+function certificateLabel(providerCode: PaymentProviderCode): string {
+  if (providerCode === "alipay") return "Alipay Public Key";
+  if (providerCode === "wechat_pay") return "WeChat Platform Certificate";
+  return "Certificate";
 }

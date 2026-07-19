@@ -12,6 +12,7 @@ use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
 
 use crate::api_response::{
@@ -56,6 +57,12 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
         &'a self,
         payload: BackendProviderAccountPayload,
     ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value>;
+
+    fn provider_account_ready_for_activation<'a>(
+        &'a self,
+        scope: BackendTenantScope,
+        provider_account_id: String,
+    ) -> CommerceBackendPaymentAdminFuture<'a, bool>;
 
     fn list_channels<'a>(
         &'a self,
@@ -204,7 +211,7 @@ struct UpsertPaymentMethodBody {
     sort_order: Option<i64>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpsertProviderAccountBody {
     account_no: Option<String>,
@@ -216,24 +223,36 @@ struct UpsertProviderAccountBody {
     secret_ref: Option<String>,
     webhook_secret_ref: Option<String>,
     certificate_ref: Option<String>,
+    primary_secret: Option<String>,
+    webhook_secret: Option<String>,
+    certificate: Option<String>,
+    account_mode: Option<String>,
+    partner_provider_account_id: Option<String>,
+    capabilities: Option<Value>,
+    metadata: Option<Value>,
     status: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BackendProviderAccountPayload {
     pub id: Option<String>,
     pub tenant_id: String,
     pub organization_id: Option<String>,
     pub account_no: String,
-    pub provider_code: String,
-    pub merchant_id: String,
-    pub environment: String,
-    pub country_code: String,
-    pub settlement_currency: String,
-    pub secret_ref: String,
+    pub provider_code: Option<String>,
+    pub merchant_id: Option<String>,
+    pub environment: Option<String>,
+    pub country_code: Option<String>,
+    pub settlement_currency: Option<String>,
+    pub secret_ref: Option<String>,
     pub webhook_secret_ref: Option<String>,
     pub certificate_ref: Option<String>,
-    pub status: String,
+    pub credential_write: sdkwork_payment_repository_sqlx::ProviderCredentialWrite,
+    pub account_mode: Option<String>,
+    pub partner_provider_account_id: Option<String>,
+    pub capabilities: Option<Value>,
+    pub metadata: Option<Value>,
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -461,11 +480,19 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
             let scope = query.scope;
             let rows = sqlx::query(
                 r#"
-                SELECT id, account_no, provider_code, merchant_id, environment, country_code,
-                       settlement_currency, status, COUNT(*) OVER() AS total_count
+                SELECT id, account_no, provider_code, merchant_id, account_mode,
+                       partner_provider_account_id, environment, country_code,
+                       settlement_currency, secret_ref, webhook_secret_ref, certificate_ref,
+                       capabilities, metadata, status, last_tested_at, last_test_status,
+                       certificate_expires_at, created_at, updated_at,
+                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'primary_secret' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_primary_secret,
+                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'webhook_secret' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_webhook_secret,
+                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'certificate' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_certificate,
+                       COUNT(*) OVER() AS total_count
                 FROM commerce_payment_provider_account
                 WHERE tenant_id = CAST(? AS TEXT)
                   AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                  AND deleted_at IS NULL
                 ORDER BY created_at DESC, id DESC
                 LIMIT ? OFFSET ?
                 "#,
@@ -489,10 +516,23 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                         "accountNo": sqlite_string(row, "account_no"),
                         "providerCode": sqlite_string(row, "provider_code"),
                         "merchantId": sqlite_string(row, "merchant_id"),
+                        "accountMode": sqlite_string(row, "account_mode"),
+                        "partnerProviderAccountId": sqlite_string(row, "partner_provider_account_id"),
                         "environment": sqlite_string(row, "environment"),
                         "countryCode": sqlite_string(row, "country_code"),
                         "settlementCurrency": sqlite_string(row, "settlement_currency"),
+                        "hasPrimarySecret": sqlite_bool(row, "has_primary_secret"),
+                        "hasWebhookSecret": sqlite_bool(row, "has_webhook_secret"),
+                        "hasCertificate": sqlite_bool(row, "has_certificate"),
+                        "credentialStorage": credential_storage(&sqlite_string(row, "secret_ref")),
+                        "capabilities": sqlite_json(row, "capabilities"),
+                        "metadata": sqlite_json(row, "metadata"),
                         "status": sqlite_string(row, "status"),
+                        "lastTestedAt": sqlite_optional_string(row, "last_tested_at"),
+                        "lastTestStatus": sqlite_optional_string(row, "last_test_status"),
+                        "certificateExpiresAt": sqlite_optional_string(row, "certificate_expires_at"),
+                        "createdAt": sqlite_string(row, "created_at"),
+                        "updatedAt": sqlite_string(row, "updated_at"),
                     })
                 })
                 .collect();
@@ -509,54 +549,170 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                 stable_storage_id(&["provider-account", &payload.tenant_id, &payload.account_no])
             });
             let now = current_timestamp_string();
-            let row = sqlx::query(
+            let capabilities = payload.capabilities.as_ref().map(Value::to_string);
+            let metadata = payload.metadata.as_ref().map(Value::to_string);
+            let credential_write = payload.credential_write.clone();
+            let row = if payload.id.is_some() {
+                sqlx::query(
+                    r#"
+                    UPDATE commerce_payment_provider_account SET
+                        provider_code = COALESCE(?, provider_code),
+                        merchant_id = COALESCE(?, merchant_id),
+                        account_mode = COALESCE(?, account_mode),
+                        partner_provider_account_id = COALESCE(?, partner_provider_account_id),
+                        environment = COALESCE(?, environment),
+                        country_code = COALESCE(?, country_code),
+                        settlement_currency = COALESCE(?, settlement_currency),
+                        secret_ref = COALESCE(?, secret_ref),
+                        webhook_secret_ref = COALESCE(?, webhook_secret_ref),
+                        certificate_ref = COALESCE(?, certificate_ref),
+                        capabilities = COALESCE(?, capabilities),
+                        metadata = COALESCE(?, metadata),
+                        status = COALESCE(?, status),
+                        version = version + 1,
+                        updated_at = ?
+                    WHERE id = CAST(? AS TEXT)
+                      AND tenant_id = CAST(? AS TEXT)
+                      AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+                      AND deleted_at IS NULL
+                    RETURNING id, account_no, provider_code, merchant_id, account_mode,
+                              partner_provider_account_id, environment, country_code, settlement_currency,
+                              secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
+                              status, created_at, updated_at
+                    "#,
+                )
+                .bind(payload.provider_code.as_deref())
+                .bind(payload.merchant_id.as_deref())
+                .bind(payload.account_mode.as_deref())
+                .bind(payload.partner_provider_account_id.as_deref())
+                .bind(payload.environment.as_deref())
+                .bind(payload.country_code.as_deref())
+                .bind(payload.settlement_currency.as_deref())
+                .bind(payload.secret_ref.as_deref())
+                .bind(payload.webhook_secret_ref.as_deref())
+                .bind(payload.certificate_ref.as_deref())
+                .bind(capabilities.as_deref())
+                .bind(metadata.as_deref())
+                .bind(payload.status.as_deref())
+                .bind(&now)
+                .bind(&id)
+                .bind(&payload.tenant_id)
+                .bind(payload.organization_id.as_deref())
+                .bind(payload.organization_id.as_deref())
+                .fetch_one(&self.pool)
+                .await
+            } else {
+                sqlx::query(
+                    r#"
+                    INSERT INTO commerce_payment_provider_account
+                        (id, tenant_id, organization_id, account_no, provider_code, merchant_id, account_mode,
+                         partner_provider_account_id, environment, country_code, settlement_currency, secret_ref,
+                         webhook_secret_ref, certificate_ref, capabilities, metadata, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (tenant_id, COALESCE(organization_id, ''), account_no)
+                    WHERE deleted_at IS NULL DO UPDATE SET
+                        provider_code = EXCLUDED.provider_code,
+                        merchant_id = EXCLUDED.merchant_id,
+                        account_mode = EXCLUDED.account_mode,
+                        partner_provider_account_id = EXCLUDED.partner_provider_account_id,
+                        environment = EXCLUDED.environment,
+                        country_code = EXCLUDED.country_code,
+                        settlement_currency = EXCLUDED.settlement_currency,
+                        secret_ref = EXCLUDED.secret_ref,
+                        webhook_secret_ref = EXCLUDED.webhook_secret_ref,
+                        certificate_ref = EXCLUDED.certificate_ref,
+                        capabilities = EXCLUDED.capabilities,
+                        metadata = EXCLUDED.metadata,
+                        status = EXCLUDED.status,
+                        version = commerce_payment_provider_account.version + 1,
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING id, account_no, provider_code, merchant_id, account_mode,
+                              partner_provider_account_id, environment, country_code, settlement_currency,
+                              secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
+                              status, created_at, updated_at
+                    "#,
+                )
+                .bind(&id)
+                .bind(&payload.tenant_id)
+                .bind(payload.organization_id.as_deref())
+                .bind(&payload.account_no)
+                .bind(payload.provider_code.as_deref())
+                .bind(payload.merchant_id.as_deref())
+                .bind(payload.account_mode.as_deref())
+                .bind(payload.partner_provider_account_id.as_deref())
+                .bind(payload.environment.as_deref())
+                .bind(payload.country_code.as_deref())
+                .bind(payload.settlement_currency.as_deref())
+                .bind(payload.secret_ref.as_deref())
+                .bind(payload.webhook_secret_ref.as_deref())
+                .bind(payload.certificate_ref.as_deref())
+                .bind(capabilities.as_deref())
+                .bind(metadata.as_deref())
+                .bind(payload.status.as_deref())
+                .bind(&now)
+                .bind(&now)
+                .fetch_one(&self.pool)
+                .await
+            }
+            .map_err(|error| CommerceServiceError::storage(format!("failed to upsert provider account: {error}")))?;
+            sdkwork_payment_repository_sqlx::rotate_provider_credentials_sqlite(
+                &self.pool,
+                &payload.tenant_id,
+                payload.organization_id.as_deref(),
+                &id,
+                credential_write,
+            )
+            .await?;
+            Ok(sqlite_provider_account_value(&row))
+        })
+    }
+
+    fn provider_account_ready_for_activation<'a>(
+        &'a self,
+        scope: BackendTenantScope,
+        provider_account_id: String,
+    ) -> CommerceBackendPaymentAdminFuture<'a, bool> {
+        Box::pin(async move {
+            let ready = sqlx::query(
                 r#"
-                INSERT INTO commerce_payment_provider_account
-                    (id, tenant_id, organization_id, account_no, provider_code, merchant_id, environment, country_code,
-                     settlement_currency, secret_ref, webhook_secret_ref, certificate_ref, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (tenant_id, account_no) DO UPDATE SET
-                    provider_code = EXCLUDED.provider_code,
-                    merchant_id = EXCLUDED.merchant_id,
-                    environment = EXCLUDED.environment,
-                    country_code = EXCLUDED.country_code,
-                    settlement_currency = EXCLUDED.settlement_currency,
-                    secret_ref = EXCLUDED.secret_ref,
-                    webhook_secret_ref = EXCLUDED.webhook_secret_ref,
-                    certificate_ref = EXCLUDED.certificate_ref,
-                    status = EXCLUDED.status,
-                    updated_at = EXCLUDED.updated_at
-                RETURNING id, account_no, provider_code, merchant_id, environment, country_code, settlement_currency, status
+                SELECT 1
+                FROM commerce_payment_provider_account
+                WHERE id = CAST(? AS TEXT)
+                  AND tenant_id = CAST(? AS TEXT)
+                  AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+                  AND last_test_status = 'success'
+                  AND last_tested_at IS NOT NULL
+                  AND updated_at IS NOT NULL
+                  AND datetime(last_tested_at) >= datetime(updated_at)
+                  AND CAST(metadata AS TEXT) NOT LIKE '%"configurationState":"mock"%'
+                  AND CAST(metadata AS TEXT) NOT LIKE '%"configureBeforeActivation":true%'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM commerce_payment_provider_account active_account
+                      WHERE active_account.tenant_id = commerce_payment_provider_account.tenant_id
+                        AND ((active_account.organization_id = commerce_payment_provider_account.organization_id)
+                             OR (active_account.organization_id IS NULL AND commerce_payment_provider_account.organization_id IS NULL))
+                        AND LOWER(active_account.provider_code) = LOWER(commerce_payment_provider_account.provider_code)
+                        AND active_account.id <> commerce_payment_provider_account.id
+                        AND active_account.status = 'active'
+                        AND active_account.deleted_at IS NULL
+                  )
+                  AND deleted_at IS NULL
+                LIMIT 1
                 "#,
             )
-            .bind(&id)
-            .bind(&payload.tenant_id)
-            .bind(payload.organization_id.as_deref())
-            .bind(&payload.account_no)
-            .bind(&payload.provider_code)
-            .bind(&payload.merchant_id)
-            .bind(&payload.environment)
-            .bind(&payload.country_code)
-            .bind(&payload.settlement_currency)
-            .bind(&payload.secret_ref)
-            .bind(payload.webhook_secret_ref.as_deref())
-            .bind(payload.certificate_ref.as_deref())
-            .bind(&payload.status)
-            .bind(&now)
-            .bind(&now)
-            .fetch_one(&self.pool)
+            .bind(&provider_account_id)
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .bind(scope.organization_id.as_deref())
+            .fetch_optional(&self.pool)
             .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to upsert provider account: {error}")))?;
-            Ok(serde_json::json!({
-                "id": sqlite_string(&row, "id"),
-                "accountNo": sqlite_string(&row, "account_no"),
-                "providerCode": sqlite_string(&row, "provider_code"),
-                "merchantId": sqlite_string(&row, "merchant_id"),
-                "environment": sqlite_string(&row, "environment"),
-                "countryCode": sqlite_string(&row, "country_code"),
-                "settlementCurrency": sqlite_string(&row, "settlement_currency"),
-                "status": sqlite_string(&row, "status"),
-            }))
+            .map_err(|error| {
+                CommerceServiceError::storage(format!(
+                    "failed to validate provider account activation readiness: {error}"
+                ))
+            })?;
+            Ok(ready.is_some())
         })
     }
 
@@ -1028,11 +1184,21 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             let scope = query.scope;
             let rows = sqlx::query(
                 r#"
-                SELECT id, account_no, provider_code, merchant_id, environment, country_code,
-                       settlement_currency, status, COUNT(*) OVER() AS total_count
+                SELECT id, account_no, provider_code, merchant_id, account_mode,
+                       partner_provider_account_id, environment, country_code,
+                       settlement_currency, secret_ref, webhook_secret_ref, certificate_ref,
+                       capabilities, metadata, status,
+                       CAST(last_tested_at AS TEXT) AS last_tested_at, last_test_status,
+                       CAST(certificate_expires_at AS TEXT) AS certificate_expires_at,
+                       CAST(created_at AS TEXT) AS created_at, CAST(updated_at AS TEXT) AS updated_at,
+                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'primary_secret' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_primary_secret,
+                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'webhook_secret' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_webhook_secret,
+                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'certificate' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_certificate,
+                       COUNT(*) OVER() AS total_count
                 FROM commerce_payment_provider_account
                 WHERE tenant_id = CAST($1 AS TEXT)
                   AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
+                  AND deleted_at IS NULL
                 ORDER BY created_at DESC, id DESC
                 LIMIT $3 OFFSET $4
                 "#,
@@ -1053,10 +1219,23 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                         "accountNo": pg_string(row, "account_no"),
                         "providerCode": pg_string(row, "provider_code"),
                         "merchantId": pg_string(row, "merchant_id"),
+                        "accountMode": pg_string(row, "account_mode"),
+                        "partnerProviderAccountId": pg_optional_string(row, "partner_provider_account_id"),
                         "environment": pg_string(row, "environment"),
                         "countryCode": pg_string(row, "country_code"),
                         "settlementCurrency": pg_string(row, "settlement_currency"),
+                        "hasPrimarySecret": pg_bool(row, "has_primary_secret"),
+                        "hasWebhookSecret": pg_bool(row, "has_webhook_secret"),
+                        "hasCertificate": pg_bool(row, "has_certificate"),
+                        "credentialStorage": credential_storage(&pg_string(row, "secret_ref")),
+                        "capabilities": pg_json(row, "capabilities"),
+                        "metadata": pg_json(row, "metadata"),
                         "status": pg_string(row, "status"),
+                        "lastTestedAt": pg_optional_string(row, "last_tested_at"),
+                        "lastTestStatus": pg_optional_string(row, "last_test_status"),
+                        "certificateExpiresAt": pg_optional_string(row, "certificate_expires_at"),
+                        "createdAt": pg_string(row, "created_at"),
+                        "updatedAt": pg_string(row, "updated_at"),
                     })
                 })
                 .collect();
@@ -1073,53 +1252,166 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                 stable_storage_id(&["provider-account", &payload.tenant_id, &payload.account_no])
             });
             let now = current_timestamp_string();
-            let row = sqlx::query(
+            let capabilities = payload.capabilities.as_ref().map(Value::to_string);
+            let metadata = payload.metadata.as_ref().map(Value::to_string);
+            let credential_write = payload.credential_write.clone();
+            let row = if payload.id.is_some() {
+                sqlx::query(
+                    r#"
+                    UPDATE commerce_payment_provider_account SET
+                        provider_code = COALESCE($1, provider_code),
+                        merchant_id = COALESCE($2, merchant_id),
+                        account_mode = COALESCE($3, account_mode),
+                        partner_provider_account_id = COALESCE($4, partner_provider_account_id),
+                        environment = COALESCE($5, environment),
+                        country_code = COALESCE($6, country_code),
+                        settlement_currency = COALESCE($7, settlement_currency),
+                        secret_ref = COALESCE($8, secret_ref),
+                        webhook_secret_ref = COALESCE($9, webhook_secret_ref),
+                        certificate_ref = COALESCE($10, certificate_ref),
+                        capabilities = COALESCE(CAST($11 AS JSONB), capabilities),
+                        metadata = COALESCE(CAST($12 AS JSONB), metadata),
+                        status = COALESCE($13, status),
+                        version = version + 1,
+                        updated_at = CAST($14 AS TIMESTAMPTZ)
+                    WHERE id = CAST($15 AS TEXT)
+                      AND tenant_id = CAST($16 AS TEXT)
+                      AND ((organization_id = CAST($17 AS TEXT)) OR (organization_id IS NULL AND $17::text IS NULL))
+                      AND deleted_at IS NULL
+                    RETURNING id, account_no, provider_code, merchant_id, account_mode,
+                              partner_provider_account_id, environment, country_code, settlement_currency,
+                              secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
+                              status, created_at, updated_at
+                    "#,
+                )
+                .bind(payload.provider_code.as_deref())
+                .bind(payload.merchant_id.as_deref())
+                .bind(payload.account_mode.as_deref())
+                .bind(payload.partner_provider_account_id.as_deref())
+                .bind(payload.environment.as_deref())
+                .bind(payload.country_code.as_deref())
+                .bind(payload.settlement_currency.as_deref())
+                .bind(payload.secret_ref.as_deref())
+                .bind(payload.webhook_secret_ref.as_deref())
+                .bind(payload.certificate_ref.as_deref())
+                .bind(capabilities.as_deref())
+                .bind(metadata.as_deref())
+                .bind(payload.status.as_deref())
+                .bind(&now)
+                .bind(&id)
+                .bind(&payload.tenant_id)
+                .bind(payload.organization_id.as_deref())
+                .fetch_one(&self.pool)
+                .await
+            } else {
+                sqlx::query(
+                    r#"
+                    INSERT INTO commerce_payment_provider_account
+                        (id, tenant_id, organization_id, account_no, provider_code, merchant_id, account_mode,
+                         partner_provider_account_id, environment, country_code, settlement_currency, secret_ref,
+                         webhook_secret_ref, certificate_ref, capabilities, metadata, status, created_at, updated_at)
+                    VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CAST($15 AS JSONB), CAST($16 AS JSONB), $17, CAST($18 AS TIMESTAMPTZ), CAST($18 AS TIMESTAMPTZ))
+                    ON CONFLICT (tenant_id, (COALESCE(organization_id, '')), account_no)
+                    WHERE deleted_at IS NULL DO UPDATE SET
+                        provider_code = EXCLUDED.provider_code,
+                        merchant_id = EXCLUDED.merchant_id,
+                        account_mode = EXCLUDED.account_mode,
+                        partner_provider_account_id = EXCLUDED.partner_provider_account_id,
+                        environment = EXCLUDED.environment,
+                        country_code = EXCLUDED.country_code,
+                        settlement_currency = EXCLUDED.settlement_currency,
+                        secret_ref = EXCLUDED.secret_ref,
+                        webhook_secret_ref = EXCLUDED.webhook_secret_ref,
+                        certificate_ref = EXCLUDED.certificate_ref,
+                        capabilities = EXCLUDED.capabilities,
+                        metadata = EXCLUDED.metadata,
+                        status = EXCLUDED.status,
+                        version = commerce_payment_provider_account.version + 1,
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING id, account_no, provider_code, merchant_id, account_mode,
+                              partner_provider_account_id, environment, country_code, settlement_currency,
+                              secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
+                              status, created_at, updated_at
+                    "#,
+                )
+                .bind(&id)
+                .bind(&payload.tenant_id)
+                .bind(payload.organization_id.as_deref())
+                .bind(&payload.account_no)
+                .bind(payload.provider_code.as_deref())
+                .bind(payload.merchant_id.as_deref())
+                .bind(payload.account_mode.as_deref())
+                .bind(payload.partner_provider_account_id.as_deref())
+                .bind(payload.environment.as_deref())
+                .bind(payload.country_code.as_deref())
+                .bind(payload.settlement_currency.as_deref())
+                .bind(payload.secret_ref.as_deref())
+                .bind(payload.webhook_secret_ref.as_deref())
+                .bind(payload.certificate_ref.as_deref())
+                .bind(capabilities.as_deref())
+                .bind(metadata.as_deref())
+                .bind(payload.status.as_deref())
+                .bind(&now)
+                .fetch_one(&self.pool)
+                .await
+            }
+            .map_err(|error| CommerceServiceError::storage(format!("failed to upsert provider account: {error}")))?;
+            sdkwork_payment_repository_sqlx::rotate_provider_credentials_postgres(
+                &self.pool,
+                &payload.tenant_id,
+                payload.organization_id.as_deref(),
+                &id,
+                credential_write,
+            )
+            .await?;
+            Ok(pg_provider_account_value(&row))
+        })
+    }
+
+    fn provider_account_ready_for_activation<'a>(
+        &'a self,
+        scope: BackendTenantScope,
+        provider_account_id: String,
+    ) -> CommerceBackendPaymentAdminFuture<'a, bool> {
+        Box::pin(async move {
+            let ready = sqlx::query(
                 r#"
-                INSERT INTO commerce_payment_provider_account
-                    (id, tenant_id, organization_id, account_no, provider_code, merchant_id, environment, country_code,
-                     settlement_currency, secret_ref, webhook_secret_ref, certificate_ref, status, created_at, updated_at)
-                VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
-                ON CONFLICT (tenant_id, account_no) DO UPDATE SET
-                    provider_code = EXCLUDED.provider_code,
-                    merchant_id = EXCLUDED.merchant_id,
-                    environment = EXCLUDED.environment,
-                    country_code = EXCLUDED.country_code,
-                    settlement_currency = EXCLUDED.settlement_currency,
-                    secret_ref = EXCLUDED.secret_ref,
-                    webhook_secret_ref = EXCLUDED.webhook_secret_ref,
-                    certificate_ref = EXCLUDED.certificate_ref,
-                    status = EXCLUDED.status,
-                    updated_at = EXCLUDED.updated_at
-                RETURNING id, account_no, provider_code, merchant_id, environment, country_code, settlement_currency, status
+                SELECT 1
+                FROM commerce_payment_provider_account
+                WHERE id = CAST($1 AS TEXT)
+                  AND tenant_id = CAST($2 AS TEXT)
+                  AND ((organization_id = CAST($3 AS TEXT)) OR (organization_id IS NULL AND $3::text IS NULL))
+                  AND last_test_status = 'success'
+                  AND last_tested_at IS NOT NULL
+                  AND updated_at IS NOT NULL
+                  AND last_tested_at >= updated_at
+                  AND metadata->>'configurationState' IS DISTINCT FROM 'mock'
+                  AND COALESCE((metadata->>'configureBeforeActivation')::boolean, false) = false
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM commerce_payment_provider_account active_account
+                      WHERE active_account.tenant_id = commerce_payment_provider_account.tenant_id
+                        AND active_account.organization_id IS NOT DISTINCT FROM commerce_payment_provider_account.organization_id
+                        AND LOWER(active_account.provider_code) = LOWER(commerce_payment_provider_account.provider_code)
+                        AND active_account.id <> commerce_payment_provider_account.id
+                        AND active_account.status = 'active'
+                        AND active_account.deleted_at IS NULL
+                  )
+                  AND deleted_at IS NULL
+                LIMIT 1
                 "#,
             )
-            .bind(&id)
-            .bind(&payload.tenant_id)
-            .bind(payload.organization_id.as_deref())
-            .bind(&payload.account_no)
-            .bind(&payload.provider_code)
-            .bind(&payload.merchant_id)
-            .bind(&payload.environment)
-            .bind(&payload.country_code)
-            .bind(&payload.settlement_currency)
-            .bind(&payload.secret_ref)
-            .bind(payload.webhook_secret_ref.as_deref())
-            .bind(payload.certificate_ref.as_deref())
-            .bind(&payload.status)
-            .bind(&now)
-            .fetch_one(&self.pool)
+            .bind(&provider_account_id)
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .fetch_optional(&self.pool)
             .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to upsert provider account: {error}")))?;
-            Ok(serde_json::json!({
-                "id": pg_string(&row, "id"),
-                "accountNo": pg_string(&row, "account_no"),
-                "providerCode": pg_string(&row, "provider_code"),
-                "merchantId": pg_string(&row, "merchant_id"),
-                "environment": pg_string(&row, "environment"),
-                "countryCode": pg_string(&row, "country_code"),
-                "settlementCurrency": pg_string(&row, "settlement_currency"),
-                "status": pg_string(&row, "status"),
-            }))
+            .map_err(|error| {
+                CommerceServiceError::storage(format!(
+                    "failed to validate provider account activation readiness: {error}"
+                ))
+            })?;
+            Ok(ready.is_some())
         })
     }
 
@@ -1753,6 +2045,68 @@ async fn upsert_provider_account_inner(
         Ok(headers) => headers,
         Err(response) => return response,
     };
+    let requests_activation = body
+        .status
+        .as_deref()
+        .is_some_and(|status| status.trim().eq_ignore_ascii_case("active"));
+    if requests_activation && is_create {
+        return conflict(
+            ctx,
+            "create the provider account as inactive, save its configuration, pass dry-run validation, then activate it",
+        );
+    }
+    if requests_activation {
+        let is_status_only_patch = body.account_no.is_none()
+            && body.provider_code.is_none()
+            && body.merchant_id.is_none()
+            && body.environment.is_none()
+            && body.country_code.is_none()
+            && body.settlement_currency.is_none()
+            && body.secret_ref.is_none()
+            && body.webhook_secret_ref.is_none()
+            && body.certificate_ref.is_none()
+            && body.primary_secret.is_none()
+            && body.webhook_secret.is_none()
+            && body.certificate.is_none()
+            && body.account_mode.is_none()
+            && body.partner_provider_account_id.is_none()
+            && body.capabilities.is_none()
+            && body.metadata.is_none();
+        if !is_status_only_patch {
+            return conflict(
+                ctx,
+                "provider account activation must be a status-only patch after configuration is saved and tested",
+            );
+        }
+        let provider_account_id = provider_account_id
+            .as_ref()
+            .expect("create activation is rejected above")
+            .clone();
+        let scope = BackendTenantScope {
+            tenant_id: subject.tenant_id.clone(),
+            organization_id: subject.organization_id.clone(),
+        };
+        match state
+            .store
+            .provider_account_ready_for_activation(scope, provider_account_id)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                return conflict(
+                    ctx,
+                    "provider account configuration is untested, stale, or still contains mock values; run a successful dry-run before activation",
+                )
+            }
+            Err(error) => {
+                return backend_payment_error_response(
+                    ctx,
+                    "payment provider account readiness validation failed",
+                    error,
+                )
+            }
+        }
+    }
     let account_no = match body.account_no {
         Some(value) => match require_trimmed_string(ctx, Some(value), "accountNo") {
             Ok(value) => value,
@@ -1763,31 +2117,114 @@ async fn upsert_provider_account_inner(
             None => return validation(ctx, "accountNo is required"),
         },
     };
-    let provider_code = match require_trimmed_string(ctx, body.provider_code, "providerCode") {
+    let required_for_create = |value: Option<String>, field: &str| {
+        let value = value
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        if is_create && value.is_none() {
+            Err(validation(ctx, format!("{field} is required")))
+        } else {
+            Ok(value)
+        }
+    };
+    let provider_code = match required_for_create(body.provider_code, "providerCode") {
         Ok(value) => value,
         Err(response) => return response,
     };
-    let merchant_id = match require_trimmed_string(ctx, body.merchant_id, "merchantId") {
+    let merchant_id = match required_for_create(body.merchant_id, "merchantId") {
         Ok(value) => value,
         Err(response) => return response,
     };
-    let environment = match require_trimmed_string(ctx, body.environment, "environment") {
+    let environment = match required_for_create(body.environment, "environment") {
         Ok(value) => value,
         Err(response) => return response,
     };
-    let country_code = match require_trimmed_string(ctx, body.country_code, "countryCode") {
+    let country_code = match required_for_create(body.country_code, "countryCode") {
         Ok(value) => value,
         Err(response) => return response,
     };
     let settlement_currency =
-        match require_trimmed_string(ctx, body.settlement_currency, "settlementCurrency") {
+        match required_for_create(body.settlement_currency, "settlementCurrency") {
             Ok(value) => value,
             Err(response) => return response,
         };
-    let secret_ref = match require_trimmed_string(ctx, body.secret_ref, "secretRef") {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
+    let primary_secret = body
+        .primary_secret
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let webhook_secret = body
+        .webhook_secret
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let certificate = body
+        .certificate
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let legacy_secret_ref = body
+        .secret_ref
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    if is_create && primary_secret.is_none() && legacy_secret_ref.is_none() {
+        return validation(ctx, "primarySecret is required");
+    }
+    let secret_ref = legacy_secret_ref.or_else(|| {
+        primary_secret
+            .as_ref()
+            .map(|_| "database:primary_secret".to_owned())
+    });
+    let webhook_secret_ref = body
+        .webhook_secret_ref
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            webhook_secret
+                .as_ref()
+                .map(|_| "database:webhook_secret".to_owned())
+        });
+    let certificate_ref = body
+        .certificate_ref
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            certificate
+                .as_ref()
+                .map(|_| "database:certificate".to_owned())
+        });
+    let account_mode = body
+        .account_mode
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .or_else(|| is_create.then(|| "direct".to_owned()));
+    if account_mode
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "direct" | "partner"))
+    {
+        return validation(ctx, "accountMode must be direct or partner");
+    }
+    let partner_provider_account_id = body
+        .partner_provider_account_id
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    if account_mode.as_deref() == Some("partner") && partner_provider_account_id.is_none() {
+        return validation(
+            ctx,
+            "partnerProviderAccountId is required for partner accounts",
+        );
+    }
+    if body
+        .capabilities
+        .as_ref()
+        .is_some_and(|value| !value.is_object())
+    {
+        return validation(ctx, "capabilities must be a JSON object");
+    }
+    if body
+        .metadata
+        .as_ref()
+        .is_some_and(|value| !value.is_object())
+    {
+        return validation(ctx, "metadata must be a JSON object");
+    }
     let payload = BackendProviderAccountPayload {
         id: provider_account_id,
         tenant_id: subject.tenant_id,
@@ -1799,9 +2236,28 @@ async fn upsert_provider_account_inner(
         country_code,
         settlement_currency,
         secret_ref,
-        webhook_secret_ref: body.webhook_secret_ref,
-        certificate_ref: body.certificate_ref,
-        status: body.status.unwrap_or_else(|| "active".to_owned()),
+        webhook_secret_ref,
+        certificate_ref,
+        credential_write: sdkwork_payment_repository_sqlx::ProviderCredentialWrite {
+            primary_secret,
+            webhook_secret,
+            certificate,
+        },
+        account_mode,
+        partner_provider_account_id,
+        capabilities: body.capabilities.or_else(|| {
+            is_create.then(
+                || serde_json::json!({"pay": true, "refund": true, "close": true, "query": true}),
+            )
+        }),
+        metadata: body
+            .metadata
+            .or_else(|| is_create.then(|| serde_json::json!({}))),
+        status: body
+            .status
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .or_else(|| is_create.then(|| "inactive".to_owned())),
     };
     match state.store.upsert_provider_account(payload).await {
         Ok(item) if is_create => success_created_item(ctx, item),
@@ -2483,12 +2939,99 @@ fn sqlite_string(row: &SqliteRow, column: &str) -> String {
     sqlite_optional_string(row, column).unwrap_or_default()
 }
 
+fn sqlite_json(row: &SqliteRow, column: &str) -> Value {
+    sqlite_optional_string(row, column)
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn sqlite_bool(row: &SqliteRow, column: &str) -> bool {
+    row.try_get::<bool, _>(column)
+        .or_else(|_| row.try_get::<i64, _>(column).map(|value| value != 0))
+        .unwrap_or(false)
+}
+
+fn credential_storage(secret_ref: &str) -> &'static str {
+    if secret_ref.starts_with("database:") {
+        "database_encrypted"
+    } else if secret_ref.trim().is_empty() {
+        "none"
+    } else {
+        "legacy_reference"
+    }
+}
+
+fn sqlite_provider_account_value(row: &SqliteRow) -> Value {
+    serde_json::json!({
+        "id": sqlite_string(row, "id"),
+        "accountNo": sqlite_string(row, "account_no"),
+        "providerCode": sqlite_string(row, "provider_code"),
+        "merchantId": sqlite_string(row, "merchant_id"),
+        "accountMode": sqlite_string(row, "account_mode"),
+        "partnerProviderAccountId": sqlite_optional_string(row, "partner_provider_account_id"),
+        "environment": sqlite_string(row, "environment"),
+        "countryCode": sqlite_string(row, "country_code"),
+        "settlementCurrency": sqlite_string(row, "settlement_currency"),
+        "hasPrimarySecret": sqlite_bool(row, "has_primary_secret") || sqlite_string(row, "secret_ref").starts_with("database:"),
+        "hasWebhookSecret": sqlite_bool(row, "has_webhook_secret") || sqlite_optional_string(row, "webhook_secret_ref").is_some_and(|value| value.starts_with("database:")),
+        "hasCertificate": sqlite_bool(row, "has_certificate") || sqlite_optional_string(row, "certificate_ref").is_some_and(|value| value.starts_with("database:")),
+        "credentialStorage": credential_storage(&sqlite_string(row, "secret_ref")),
+        "capabilities": sqlite_json(row, "capabilities"),
+        "metadata": sqlite_json(row, "metadata"),
+        "status": sqlite_string(row, "status"),
+        "createdAt": sqlite_string(row, "created_at"),
+        "updatedAt": sqlite_string(row, "updated_at"),
+    })
+}
+
 fn pg_optional_string(row: &PgRow, column: &str) -> Option<String> {
-    row.try_get::<Option<String>, _>(column).ok().flatten()
+    row.try_get::<Option<String>, _>(column)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            row.try_get::<Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>, _>(
+                column,
+            )
+            .ok()
+            .flatten()
+            .map(|value| value.to_rfc3339())
+        })
 }
 
 fn pg_string(row: &PgRow, column: &str) -> String {
     pg_optional_string(row, column).unwrap_or_default()
+}
+
+fn pg_bool(row: &PgRow, column: &str) -> bool {
+    row.try_get::<bool, _>(column).unwrap_or(false)
+}
+
+fn pg_json(row: &PgRow, column: &str) -> Value {
+    row.try_get::<Value, _>(column)
+        .unwrap_or_else(|_| serde_json::json!({}))
+}
+
+fn pg_provider_account_value(row: &PgRow) -> Value {
+    serde_json::json!({
+        "id": pg_string(row, "id"),
+        "accountNo": pg_string(row, "account_no"),
+        "providerCode": pg_string(row, "provider_code"),
+        "merchantId": pg_string(row, "merchant_id"),
+        "accountMode": pg_string(row, "account_mode"),
+        "partnerProviderAccountId": pg_optional_string(row, "partner_provider_account_id"),
+        "environment": pg_string(row, "environment"),
+        "countryCode": pg_string(row, "country_code"),
+        "settlementCurrency": pg_string(row, "settlement_currency"),
+        "hasPrimarySecret": pg_bool(row, "has_primary_secret") || pg_string(row, "secret_ref").starts_with("database:"),
+        "hasWebhookSecret": pg_bool(row, "has_webhook_secret") || pg_optional_string(row, "webhook_secret_ref").is_some_and(|value| value.starts_with("database:")),
+        "hasCertificate": pg_bool(row, "has_certificate") || pg_optional_string(row, "certificate_ref").is_some_and(|value| value.starts_with("database:")),
+        "credentialStorage": credential_storage(&pg_string(row, "secret_ref")),
+        "capabilities": pg_json(row, "capabilities"),
+        "metadata": pg_json(row, "metadata"),
+        "status": pg_string(row, "status"),
+        "createdAt": pg_string(row, "created_at"),
+        "updatedAt": pg_string(row, "updated_at"),
+    })
 }
 
 #[allow(clippy::result_large_err)]
@@ -2515,12 +3058,219 @@ fn backend_write_header_error(
     validation(ctx, message)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sqlite_provider_account_upsert_preserves_commercial_configuration() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("sqlite pool");
+        sqlx::query(
+            r#"
+            CREATE TABLE commerce_payment_provider_account (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                organization_id TEXT,
+                account_no TEXT NOT NULL,
+                provider_code TEXT NOT NULL,
+                merchant_id TEXT,
+                account_mode TEXT NOT NULL DEFAULT 'direct',
+                partner_provider_account_id TEXT,
+                environment TEXT NOT NULL,
+                country_code TEXT,
+                settlement_currency TEXT NOT NULL,
+                secret_ref TEXT NOT NULL,
+                webhook_secret_ref TEXT,
+                certificate_ref TEXT,
+                capabilities TEXT NOT NULL DEFAULT '{}',
+                metadata TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL,
+                certificate_expires_at TEXT,
+                last_tested_at TEXT,
+                last_test_status TEXT,
+                version INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("provider account table");
+        sqlx::query(
+            "CREATE TABLE commerce_payment_provider_credential (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, credential_kind TEXT NOT NULL, ciphertext TEXT NOT NULL, encryption_key_id TEXT NOT NULL, encryption_algorithm TEXT NOT NULL, fingerprint_sha256 TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, rotated_at TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .expect("provider credential table");
+        sqlx::query(
+            "CREATE UNIQUE INDEX ux_provider_account_scope ON commerce_payment_provider_account (tenant_id, COALESCE(organization_id, ''), account_no) WHERE deleted_at IS NULL",
+        )
+        .execute(&pool)
+        .await
+        .expect("provider account unique index");
+
+        let store = SqliteBackendPaymentAdminStore::new(pool);
+        let payload = BackendProviderAccountPayload {
+            id: None,
+            tenant_id: "100001".to_owned(),
+            organization_id: Some("0".to_owned()),
+            account_no: "wechat-live-primary".to_owned(),
+            provider_code: Some("wechat_pay".to_owned()),
+            merchant_id: Some("1900000109".to_owned()),
+            environment: Some("production".to_owned()),
+            country_code: Some("CN".to_owned()),
+            settlement_currency: Some("CNY".to_owned()),
+            secret_ref: Some("WECHAT_PAY_PRIVATE_KEY_PEM".to_owned()),
+            webhook_secret_ref: Some("WECHAT_PAY_API_V3_KEY".to_owned()),
+            certificate_ref: Some("WECHAT_PAY_PLATFORM_PUBLIC_KEY_PEM".to_owned()),
+            credential_write: sdkwork_payment_repository_sqlx::ProviderCredentialWrite {
+                primary_secret: Some("test-private-key-material".to_owned()),
+                ..sdkwork_payment_repository_sqlx::ProviderCredentialWrite::default()
+            },
+            account_mode: Some("direct".to_owned()),
+            partner_provider_account_id: None,
+            capabilities: Some(serde_json::json!({"pay": true, "refund": true})),
+            metadata: Some(serde_json::json!({
+                "appId": "wx-live-app-id",
+                "merchantSerialNo": "SERIAL-001"
+            })),
+            status: Some("active".to_owned()),
+        };
+
+        let saved = store
+            .upsert_provider_account(payload.clone())
+            .await
+            .expect("upsert provider account");
+        assert_eq!(saved["metadata"]["appId"], "wx-live-app-id");
+        assert_eq!(saved["capabilities"]["refund"], true);
+        assert_eq!(saved["hasPrimarySecret"], false);
+        assert_eq!(saved["credentialStorage"], "legacy_reference");
+        store
+            .upsert_provider_account(payload)
+            .await
+            .expect("idempotently upsert provider account");
+
+        let updated = store
+            .upsert_provider_account(BackendProviderAccountPayload {
+                id: saved["id"].as_str().map(str::to_owned),
+                tenant_id: "100001".to_owned(),
+                organization_id: Some("0".to_owned()),
+                account_no: "wechat-live-primary".to_owned(),
+                provider_code: None,
+                merchant_id: None,
+                environment: None,
+                country_code: None,
+                settlement_currency: None,
+                secret_ref: None,
+                webhook_secret_ref: None,
+                certificate_ref: None,
+                credential_write: sdkwork_payment_repository_sqlx::ProviderCredentialWrite::default(
+                ),
+                account_mode: None,
+                partner_provider_account_id: None,
+                capabilities: None,
+                metadata: Some(serde_json::json!({
+                    "appId": "wx-live-app-id-2",
+                    "merchantSerialNo": "SERIAL-002"
+                })),
+                status: None,
+            })
+            .await
+            .expect("partially update provider account");
+        assert_eq!(updated["merchantId"], "1900000109");
+        assert_eq!(updated["providerCode"], "wechat_pay");
+        assert_eq!(updated["metadata"]["merchantSerialNo"], "SERIAL-002");
+
+        let page = store
+            .list_provider_accounts(BackendTenantListQuery {
+                scope: BackendTenantScope {
+                    tenant_id: "100001".to_owned(),
+                    organization_id: Some("0".to_owned()),
+                },
+                offset: 0,
+                limit: 20,
+            })
+            .await
+            .expect("list provider accounts");
+        assert_eq!(page.total_items, 1);
+        assert_eq!(page.items[0]["metadata"]["merchantSerialNo"], "SERIAL-002");
+        assert_eq!(page.items[0]["hasPrimarySecret"], true);
+        assert_eq!(page.items[0]["hasWebhookSecret"], false);
+        assert!(page.items[0].get("secretRef").is_none());
+        assert!(page.items[0].get("ciphertext").is_none());
+        let ciphertext = sqlx::query_scalar::<_, String>("SELECT ciphertext FROM commerce_payment_provider_credential WHERE provider_account_id = ? AND status = 'active' AND credential_kind = 'primary_secret'")
+            .bind(saved["id"].as_str().expect("provider account id"))
+            .fetch_one(&store.pool)
+            .await
+            .expect("stored encrypted primary secret");
+        assert!(!ciphertext.contains("test-private-key-material"));
+
+        sqlx::query(
+            "UPDATE commerce_payment_provider_account SET last_tested_at = '2026-07-19T12:00:00Z', last_test_status = 'success', updated_at = '2026-07-19T12:00:00Z' WHERE id = ?",
+        )
+        .bind(saved["id"].as_str())
+        .execute(&store.pool)
+        .await
+        .expect("mark dry-run success");
+        assert!(store
+            .provider_account_ready_for_activation(
+                BackendTenantScope {
+                    tenant_id: "100001".to_owned(),
+                    organization_id: Some("0".to_owned()),
+                },
+                saved["id"].as_str().unwrap().to_owned(),
+            )
+            .await
+            .expect("activation readiness"));
+        sqlx::query(
+            "INSERT INTO commerce_payment_provider_account SELECT 'provider-account-duplicate', tenant_id, organization_id, 'wechat-live-secondary', provider_code, merchant_id, account_mode, partner_provider_account_id, environment, country_code, settlement_currency, secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata, 'active', certificate_expires_at, last_tested_at, last_test_status, version, created_at, updated_at, deleted_at FROM commerce_payment_provider_account WHERE id = ?",
+        )
+        .bind(saved["id"].as_str())
+        .execute(&store.pool)
+        .await
+        .expect("insert active duplicate provider account");
+        assert!(!store
+            .provider_account_ready_for_activation(
+                BackendTenantScope {
+                    tenant_id: "100001".to_owned(),
+                    organization_id: Some("0".to_owned()),
+                },
+                saved["id"].as_str().unwrap().to_owned(),
+            )
+            .await
+            .expect("duplicate provider activation readiness"));
+        sqlx::query(
+            "DELETE FROM commerce_payment_provider_account WHERE id = 'provider-account-duplicate'",
+        )
+        .execute(&store.pool)
+        .await
+        .expect("remove active duplicate provider account");
+        sqlx::query(
+            "UPDATE commerce_payment_provider_account SET metadata = '{\"configurationState\":\"mock\"}' WHERE id = ?",
+        )
+        .bind(saved["id"].as_str())
+        .execute(&store.pool)
+        .await
+        .expect("mark mock configuration");
+        assert!(!store
+            .provider_account_ready_for_activation(
+                BackendTenantScope {
+                    tenant_id: "100001".to_owned(),
+                    organization_id: Some("0".to_owned()),
+                },
+                saved["id"].as_str().unwrap().to_owned(),
+            )
+            .await
+            .expect("mock activation readiness"));
+    }
+}
+
 fn current_timestamp_string() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    format!("{seconds}")
+    sqlx::types::chrono::Utc::now().to_rfc3339()
 }
 
 fn stable_storage_id(parts: &[&str]) -> String {

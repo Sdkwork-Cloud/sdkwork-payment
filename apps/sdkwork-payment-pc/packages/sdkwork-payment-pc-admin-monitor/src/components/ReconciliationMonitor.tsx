@@ -45,6 +45,7 @@ import type {
   ReconciliationRunView,
   ReconciliationType,
 } from "../types/monitor-admin-types";
+import { usePaymentRecordsMessages } from "../i18n";
 
 // re-export so consumers can import from a single entry point (kept consistent with monitor-admin-types)
 export type { ReconciliationProviderAccountOption };
@@ -61,22 +62,21 @@ export interface ReconciliationMonitorProps {
   onCreate(draft: CreateReconciliationRunDraft): Promise<void> | void;
 }
 
-const STATUS_OPTIONS: ReadonlyArray<{ label: string; value: ReconciliationRunStatus | "" }> = [
-  { label: "All statuses", value: "" },
-  { label: "Pending", value: "pending" },
-  { label: "Queued", value: "queued" },
-  { label: "Running", value: "running" },
-  { label: "Succeeded", value: "succeeded" },
-  { label: "Failed", value: "failed" },
-  { label: "Canceled", value: "canceled" },
+const FILTER_STATUS_VALUES: readonly ReconciliationRunStatus[] = [
+  "pending",
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "canceled",
 ];
 
-const RECONCILIATION_TYPE_OPTIONS: ReadonlyArray<{ label: string; value: ReconciliationType }> = [
-  { label: "Daily", value: "daily" },
-  { label: "Weekly", value: "weekly" },
-  { label: "Monthly", value: "monthly" },
-  { label: "Manual", value: "manual" },
-  { label: "Settlement", value: "settlement" },
+const RECONCILIATION_TYPE_VALUES: readonly ReconciliationType[] = [
+  "daily",
+  "weekly",
+  "monthly",
+  "manual",
+  "settlement",
 ];
 
 // Supported currency list: currencyCode is now a dropdown, limited to commonly used currencies
@@ -113,15 +113,20 @@ const STATUS_VARIANT: Record<ReconciliationRunStatus, "default" | "success" | "w
   canceled: "secondary",
 };
 
-const RECONCILIATION_TYPE_LABEL: Record<ReconciliationType, string> = {
-  daily: "Daily",
-  weekly: "Weekly",
-  monthly: "Monthly",
-  manual: "Manual",
-  settlement: "Settlement",
-};
-
 export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
+  const messages = usePaymentRecordsMessages();
+  const operations = messages.operations;
+  const statusOptions = [
+    { label: operations.filters.allStatuses, value: "" },
+    ...FILTER_STATUS_VALUES.map((value) => ({
+      label: operations.reconciliation.status[value],
+      value,
+    })),
+  ];
+  const providerOptions = ADMIN_PROVIDER_FILTER_OPTIONS.map((option) => ({
+    ...option,
+    label: option.value ? option.label : operations.filters.allProviders,
+  }));
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [status, setStatus] = React.useState<string>("");
   const [providerCode, setProviderCode] = React.useState<string>("");
@@ -139,7 +144,7 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
       ...(q.trim() ? { q: q.trim() } : {}),
     };
     Promise.resolve(props.onApplyFilter(filter)).catch((err) => {
-      setError(err instanceof Error ? err.message : "Failed to apply filter.");
+      setError(err instanceof Error ? err.message : operations.validation.applyFilterFailed);
     });
   }
 
@@ -148,7 +153,7 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
       await props.onCreate(draft);
       setDialogOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create reconciliation run.");
+      setError(err instanceof Error ? err.message : operations.validation.createReconciliationFailed);
     }
   }
 
@@ -156,8 +161,8 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
     <div className="space-y-4" data-slot="payment-reconciliation-monitor">
       {props.canCreate ? (
         <div className="flex justify-end">
-          <Button type="button" size="sm" onClick={() => setDialogOpen(true)} disabled={props.busy} title={props.busy ? "Cannot create a reconciliation run while another operation is in progress" : "Create a new reconciliation run"}>
-            New reconciliation run
+          <Button type="button" size="sm" onClick={() => setDialogOpen(true)} disabled={props.busy} title={operations.availability.createReconciliation}>
+            {operations.actions.newReconciliation}
           </Button>
         </div>
       ) : null}
@@ -166,53 +171,53 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
         className="grid grid-cols-1 gap-3 rounded-md border border-[var(--sdk-color-border-subtle)] p-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={handleApply}
       >
-        <AdminFieldLabel label="Status" htmlFor="recon-filter-status">
+        <AdminFieldLabel label={operations.filters.status} htmlFor="recon-filter-status">
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger id="recon-filter-status">
-              <SelectValue placeholder="All statuses" />
+              <SelectValue placeholder={operations.filters.allStatuses} />
             </SelectTrigger>
             <SelectContent>
-              {STATUS_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={option.value}>
+              {statusOptions.map((option) => (
+                <SelectItem key={option.value || "all"} value={option.value}>
                   {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Provider" htmlFor="recon-filter-provider">
+        <AdminFieldLabel label={operations.filters.provider} htmlFor="recon-filter-provider">
           <Select value={providerCode} onValueChange={setProviderCode}>
             <SelectTrigger id="recon-filter-provider">
-              <SelectValue placeholder="All providers" />
+              <SelectValue placeholder={operations.filters.allProviders} />
             </SelectTrigger>
             <SelectContent>
-              {ADMIN_PROVIDER_FILTER_OPTIONS.map((option) => (
-                <SelectItem key={option.label} value={option.value}>
+              {providerOptions.map((option) => (
+                <SelectItem key={option.value || "all"} value={option.value}>
                   {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Provider account" htmlFor="recon-filter-account">
+        <AdminFieldLabel label={operations.reconciliation.providerAccount} htmlFor="recon-filter-account">
           <Input
             id="recon-filter-account"
             value={providerAccountId}
             onChange={(event) => setProviderAccountId(event.target.value)}
-            placeholder="Filter by account ID"
+            placeholder={operations.reconciliation.providerAccountPlaceholder}
           />
         </AdminFieldLabel>
-        <AdminFieldLabel label="Search" htmlFor="recon-filter-q">
+        <AdminFieldLabel label={operations.filters.search} htmlFor="recon-filter-q">
           <Input
             id="recon-filter-q"
             value={q}
             onChange={(event) => setQ(event.target.value)}
-            placeholder="Free-text search"
+            placeholder={operations.filters.searchPlaceholder}
           />
         </AdminFieldLabel>
         <div className="col-span-full flex justify-end">
-          <Button type="submit" size="sm" disabled={props.busy} title={props.busy ? "Cannot apply filter while another operation is in progress" : "Apply the current filter"}>
-            Apply filter
+          <Button type="submit" size="sm" disabled={props.busy} title={operations.availability.applyFilter}>
+            {operations.actions.applyFilter}
           </Button>
         </div>
       </form>
@@ -228,11 +233,11 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
 
       {props.runs.length === 0 ? (
         <div className="rounded-md border border-dashed border-[var(--sdk-color-border-subtle)] p-8 text-center text-sm text-[var(--sdk-color-text-secondary)]">
-          No reconciliation runs found. Create one to start a new reconciliation cycle.
+          {operations.reconciliation.empty}
           {props.canCreate ? (
             <div className="mt-3">
-              <Button type="button" variant="primary" size="sm" onClick={() => setDialogOpen(true)} disabled={props.busy} title={props.busy ? "Cannot create a reconciliation run while another operation is in progress" : "Create a new reconciliation run"}>
-                Create reconciliation run
+              <Button type="button" variant="primary" size="sm" onClick={() => setDialogOpen(true)} disabled={props.busy} title={operations.availability.createReconciliation}>
+                {operations.actions.createReconciliation}
               </Button>
             </div>
           ) : null}
@@ -248,38 +253,38 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
                 <Badge variant="outline" className="font-mono">
                   {ADMIN_PROVIDER_LABEL[run.providerCode]}
                 </Badge>
-                <Badge variant="secondary">{RECONCILIATION_TYPE_LABEL[run.reconciliationType]}</Badge>
-                <Badge variant={STATUS_VARIANT[run.status]}>{run.status}</Badge>
+                <Badge variant="secondary">{operations.reconciliation.type[run.reconciliationType]}</Badge>
+                <Badge variant={STATUS_VARIANT[run.status]}>{operations.reconciliation.status[run.status]}</Badge>
               </div>
               <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] sm:grid-cols-4">
                 <div>
-                  <dt className="inline">Account:</dt>{" "}
+                  <dt className="inline">{operations.reconciliation.fields.account}:</dt>{" "}
                   <dd className="inline font-mono">{run.providerAccountId || "—"}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Period:</dt>{" "}
+                  <dt className="inline">{operations.reconciliation.fields.period}:</dt>{" "}
                   <dd className="inline">
                     {formatAdminTimestamp(run.periodStart)} → {formatAdminTimestamp(run.periodEnd)}
                   </dd>
                 </div>
                 <div>
-                  <dt className="inline">Matched:</dt> <dd className="inline">{run.matchedCount}</dd>
+                  <dt className="inline">{operations.reconciliation.fields.matched}:</dt> <dd className="inline">{run.matchedCount}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Mismatched:</dt>{" "}
+                  <dt className="inline">{operations.reconciliation.fields.mismatched}:</dt>{" "}
                   <dd className="inline">{run.mismatchedCount}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Unmatched:</dt> <dd className="inline">{run.unmatchedCount}</dd>
+                  <dt className="inline">{operations.reconciliation.fields.unmatched}:</dt> <dd className="inline">{run.unmatchedCount}</dd>
                 </div>
                 <div>
-                  <dt className="inline">Difference:</dt>{" "}
+                  <dt className="inline">{operations.reconciliation.fields.difference}:</dt>{" "}
                   <dd className="inline">
                     {formatAdminAmount(run.totalDifferenceAmount, run.currencyCode)}
                   </dd>
                 </div>
                 <div>
-                  <dt className="inline">Created:</dt> <dd className="inline">{formatAdminRelativeTime(run.createdAt)}</dd>
+                  <dt className="inline">{operations.reconciliation.fields.created}:</dt> <dd className="inline">{formatAdminRelativeTime(run.createdAt)}</dd>
                 </div>
               </dl>
             </li>
@@ -289,8 +294,12 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
 
       <SdkworkPaymentListPaginationControls
         busy={props.busy ?? false}
+        label={operations.actions.loadMore}
         onLoadMore={props.onLoadMore}
         pageInfo={props.pageInfo}
+        summary={props.pageInfo?.totalItems
+          ? messages.table.paginationSummary(props.runs.length, props.pageInfo.totalItems)
+          : undefined}
       />
 
       <Dialog
@@ -301,7 +310,7 @@ export function ReconciliationMonitor(props: ReconciliationMonitorProps) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New reconciliation run</DialogTitle>
+            <DialogTitle>{operations.actions.newReconciliation}</DialogTitle>
           </DialogHeader>
           <ReconciliationRunForm
             providerAccounts={props.providerAccounts}
@@ -324,6 +333,11 @@ interface ReconciliationRunFormProps {
 }
 
 function ReconciliationRunForm(props: ReconciliationRunFormProps) {
+  const operations = usePaymentRecordsMessages().operations;
+  const reconciliationTypeOptions = RECONCILIATION_TYPE_VALUES.map((value) => ({
+    label: operations.reconciliation.type[value],
+    value,
+  }));
   const [providerCode, setProviderCode] = React.useState<PaymentProviderCode>("alipay");
   const [providerAccountId, setProviderAccountId] = React.useState("");
   const [reconciliationType, setReconciliationType] =
@@ -371,21 +385,21 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
     event.preventDefault();
     setError(undefined);
     if (!providerAccountId) {
-      setError("Provider account is required.");
+      setError(operations.validation.providerAccountRequired);
       return;
     }
     if (!periodStart || !periodEnd) {
-      setError("Period start and end are required.");
+      setError(operations.validation.periodRequired);
       return;
     }
     const start = new Date(periodStart);
     const end = new Date(periodEnd);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      setError("Period start and end must be valid dates.");
+      setError(operations.validation.periodInvalid);
       return;
     }
     if (end <= start) {
-      setError("Period end must be after period start.");
+      setError(operations.validation.periodOrder);
       return;
     }
     try {
@@ -398,14 +412,14 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
         currencyCode,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create reconciliation run.");
+      setError(err instanceof Error ? err.message : operations.validation.createReconciliationFailed);
     }
   }
 
   return (
     <form className="space-y-3" onSubmit={handleSubmit}>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <AdminFieldLabel label="Provider" htmlFor="recon-form-provider" required>
+        <AdminFieldLabel label={operations.reconciliation.form.provider} htmlFor="recon-form-provider" required>
           <Select
             value={providerCode}
             onValueChange={handleProviderCodeChange}
@@ -422,7 +436,7 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Reconciliation type" htmlFor="recon-form-type" required>
+        <AdminFieldLabel label={operations.reconciliation.form.reconciliationType} htmlFor="recon-form-type" required>
           <Select
             value={reconciliationType}
             onValueChange={(value) => setReconciliationType(value as ReconciliationType)}
@@ -431,7 +445,7 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {RECONCILIATION_TYPE_OPTIONS.map((option) => (
+              {reconciliationTypeOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>
@@ -440,10 +454,10 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
           </Select>
         </AdminFieldLabel>
       </div>
-      <AdminFieldLabel label="Provider account" htmlFor="recon-form-account" required>
+      <AdminFieldLabel label={operations.reconciliation.form.providerAccount} htmlFor="recon-form-account" required>
         <Select value={providerAccountId} onValueChange={setProviderAccountId}>
           <SelectTrigger id="recon-form-account">
-            <SelectValue placeholder="Select an account" />
+            <SelectValue placeholder={operations.reconciliation.form.selectAccount} />
           </SelectTrigger>
           <SelectContent>
             {providerAccountOptions.map((account) => (
@@ -456,16 +470,16 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
       </AdminFieldLabel>
       {/* Period quick preset: auto-fills periodStart/periodEnd on click */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-[var(--sdk-color-text-secondary)]">Quick presets:</span>
+        <span className="text-xs text-[var(--sdk-color-text-secondary)]">{operations.reconciliation.form.quickPresets}:</span>
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={() => applyPreset("yesterday")}
           disabled={props.busy}
-          title="Set period to yesterday 00:00 – 23:59"
+          title={operations.reconciliation.form.yesterdayDescription}
         >
-          Yesterday
+          {operations.reconciliation.form.yesterday}
         </Button>
         <Button
           type="button"
@@ -473,9 +487,9 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
           size="sm"
           onClick={() => applyPreset("last7days")}
           disabled={props.busy}
-          title="Set period to 7 days ago 00:00 – today 00:00"
+          title={operations.reconciliation.form.last7DaysDescription}
         >
-          Last 7 days
+          {operations.reconciliation.form.last7Days}
         </Button>
         <Button
           type="button"
@@ -483,13 +497,13 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
           size="sm"
           onClick={() => applyPreset("lastMonth")}
           disabled={props.busy}
-          title="Set period to last month 1st 00:00 – this month 1st 00:00"
+          title={operations.reconciliation.form.lastMonthDescription}
         >
-          Last month
+          {operations.reconciliation.form.lastMonth}
         </Button>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <AdminFieldLabel label="Period start" htmlFor="recon-form-start" required>
+        <AdminFieldLabel label={operations.reconciliation.form.periodStart} htmlFor="recon-form-start" required>
           <Input
             id="recon-form-start"
             type="datetime-local"
@@ -498,7 +512,7 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
             required
           />
         </AdminFieldLabel>
-        <AdminFieldLabel label="Period end" htmlFor="recon-form-end" required>
+        <AdminFieldLabel label={operations.reconciliation.form.periodEnd} htmlFor="recon-form-end" required>
           <Input
             id="recon-form-end"
             type="datetime-local"
@@ -508,7 +522,7 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
           />
         </AdminFieldLabel>
       </div>
-      <AdminFieldLabel label="Currency" htmlFor="recon-form-currency">
+      <AdminFieldLabel label={operations.reconciliation.form.currency} htmlFor="recon-form-currency">
         <Select value={currencyCode} onValueChange={setCurrencyCode}>
           <SelectTrigger id="recon-form-currency">
             <SelectValue />
@@ -531,11 +545,11 @@ function ReconciliationRunForm(props: ReconciliationRunFormProps) {
         </div>
       ) : null}
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={props.onCancel} disabled={props.busy} title={props.busy ? "Cannot cancel while a run is being created" : "Cancel reconciliation run creation"}>
-          Cancel
+        <Button type="button" variant="ghost" onClick={props.onCancel} disabled={props.busy} title={operations.availability.cancelCreate}>
+          {operations.actions.cancel}
         </Button>
-        <Button type="submit" disabled={props.busy} title={props.busy ? "A reconciliation run is being created..." : "Create this reconciliation run"}>
-          Create run
+        <Button type="submit" disabled={props.busy} title={props.busy ? operations.availability.creating : operations.availability.createReconciliation}>
+          {operations.actions.createRun}
         </Button>
       </div>
     </form>

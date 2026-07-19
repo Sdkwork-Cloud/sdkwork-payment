@@ -22,12 +22,12 @@ import {
   TabsTrigger,
 } from "@sdkwork/ui-pc-react";
 import {
-  PaymentAdminI18nBoundary,
   PaymentAdminTabsContent,
   PaymentAdminTabsList,
   PaymentAdminTabsTrigger,
   PaymentAdminWorkspace,
 } from "@sdkwork/payment-pc-admin-core";
+import { usePaymentRecordsMessages } from "../i18n";
 import { AttemptMonitor } from "../components/AttemptMonitor";
 import { IntentMonitor } from "../components/IntentMonitor";
 import { ReconciliationMonitor } from "../components/ReconciliationMonitor";
@@ -46,6 +46,7 @@ import type {
 export interface PaymentMonitorAdminWorkspaceProps {
   controller: PaymentMonitorAdminController;
   capabilities: PaymentMonitorAdminCapabilities;
+  section?: PaymentMonitorAdminSection;
   title?: string;
   description?: string;
 }
@@ -55,16 +56,22 @@ export interface PaymentMonitorAdminCapabilities {
   canReplayWebhookEvent: boolean;
 }
 
-type TabKind = "intents" | "attempts" | "webhooks" | "reconciliation";
+export type PaymentMonitorAdminSection =
+  | "intents"
+  | "attempts"
+  | "webhooks"
+  | "reconciliation";
 
 export function PaymentMonitorAdminWorkspace(
   props: PaymentMonitorAdminWorkspaceProps,
 ) {
   const { controller } = props;
+  const messages = usePaymentRecordsMessages();
   const [state, setState] = React.useState<PaymentMonitorAdminState>(() =>
     controller.getState(),
   );
-  const [tab, setTab] = React.useState<TabKind>("intents");
+  const [tab, setTab] = React.useState<PaymentMonitorAdminSection>("intents");
+  const activeSection = props.section ?? tab;
 
   React.useEffect(() => {
     return controller.subscribe(() => {
@@ -109,20 +116,51 @@ export function PaymentMonitorAdminWorkspace(
   }
 
   return (
-    <PaymentAdminI18nBoundary>
-      <PaymentAdminWorkspace
-        data-slot="payment-monitor-admin-workspace"
-        description={props.description}
-        error={state.lastError}
-        title={props.title ?? "Payment operations monitor"}
-      >
-        <Tabs value={tab} onValueChange={(value) => setTab(value as TabKind)}>
-          <PaymentAdminTabsList aria-label="Payment operation sections">
-            <PaymentAdminTabsTrigger value="intents">Intents</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="attempts">Attempts</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="webhooks">Webhook events</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="reconciliation">Reconciliation</PaymentAdminTabsTrigger>
-          </PaymentAdminTabsList>
+    <PaymentAdminWorkspace
+      data-slot="payment-monitor-admin-workspace"
+      description={props.description ?? messages.workspace.description}
+      error={state.lastError}
+      title={props.title ?? messages.workspace.title}
+    >
+        <Tabs
+          value={activeSection}
+          onValueChange={(value) => {
+            if (!props.section) {
+              setTab(value as PaymentMonitorAdminSection);
+            }
+          }}
+        >
+          {!props.section ? (
+            <PaymentAdminTabsList
+              aria-label={messages.workspace.tabsLabel}
+              className="grid h-9 grid-cols-4 overflow-visible sm:!flex sm:!overflow-x-auto"
+            >
+              <PaymentAdminTabsTrigger
+                className="h-9 min-w-0 shrink whitespace-nowrap px-0.5 leading-tight sm:!min-w-fit sm:!shrink-0 sm:!px-3"
+                value="intents"
+              >
+                {messages.workspace.tabs.paymentRecords}
+              </PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger
+                className="h-9 min-w-0 shrink whitespace-nowrap px-0.5 leading-tight sm:!min-w-fit sm:!shrink-0 sm:!px-3"
+                value="attempts"
+              >
+                {messages.workspace.tabs.attempts}
+              </PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger
+                className="h-9 min-w-0 shrink whitespace-nowrap px-0.5 leading-tight sm:!min-w-fit sm:!shrink-0 sm:!px-3"
+                value="webhooks"
+              >
+                {messages.workspace.tabs.webhooks}
+              </PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger
+                className="h-9 min-w-0 shrink whitespace-nowrap px-0.5 leading-tight sm:!min-w-fit sm:!shrink-0 sm:!px-3"
+                value="reconciliation"
+              >
+                {messages.workspace.tabs.reconciliation}
+              </PaymentAdminTabsTrigger>
+            </PaymentAdminTabsList>
+          ) : null}
 
           <PaymentAdminTabsContent value="intents">
             <IntentMonitor
@@ -132,6 +170,7 @@ export function PaymentMonitorAdminWorkspace(
               selectedIntent={state.selectedIntentDetail}
               onApplyFilter={handleApplyIntentFilter}
               onLoadMore={() => void controller.loadMoreIntents()}
+              onRefresh={() => controller.refreshIntents().then(() => undefined)}
               onSelect={handleSelectIntent}
             />
           </PaymentAdminTabsContent>
@@ -173,8 +212,7 @@ export function PaymentMonitorAdminWorkspace(
             />
           </PaymentAdminTabsContent>
         </Tabs>
-      </PaymentAdminWorkspace>
-    </PaymentAdminI18nBoundary>
+    </PaymentAdminWorkspace>
   );
 }
 

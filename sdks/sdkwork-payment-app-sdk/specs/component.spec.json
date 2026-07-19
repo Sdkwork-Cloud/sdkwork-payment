@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.component.spec",
+  "component": {
+    "name": "sdkwork-payment-app-sdk",
+    "displayName": "SDKWork Payment App SDK",
+    "version": "0.1.0",
+    "type": "sdk-family",
+    "root": "sdks/sdkwork-payment-app-sdk",
+    "domain": "commerce",
+    "capability": "payment-app-sdk",
+    "surface": "app-api",
+    "languages": ["typescript"],
+    "generated": true,
+    "private": false
+  },
+  "canonicalSpecs": [
+    { "file": "SDK_SPEC.md", "path": "../../../sdkwork-specs/SDK_SPEC.md" },
+    { "file": "SDK_WORKSPACE_GENERATION_SPEC.md", "path": "../../../sdkwork-specs/SDK_WORKSPACE_GENERATION_SPEC.md" },
+    { "file": "APP_SDK_INTEGRATION_SPEC.md", "path": "../../../sdkwork-specs/APP_SDK_INTEGRATION_SPEC.md" },
+    { "file": "API_SPEC.md", "path": "../../../sdkwork-specs/API_SPEC.md" },
+    { "file": "TEST_SPEC.md", "path": "../../../sdkwork-specs/TEST_SPEC.md" }
+  ],
+  "sdk": {
+    "family": "sdkwork-payment-app-sdk",
+    "authority": "sdkwork-payment-app-api",
+    "sdkOwner": "sdkwork-payment",
+    "apiPrefix": "/app/v3/api",
+    "packageName": "@sdkwork/payment-app-sdk",
+    "sdkName": "sdkwork-payment-app-sdk",
+    "sdkType": "app",
+    "generatedOutput": "sdkwork-payment-app-sdk-typescript/generated/server-openapi",
+    "standardProfile": "sdkwork-v3"
+  },
+  "contracts": {
+    "sdkDependencies": [],
+    "dependencyApiExports": [],
+    "dependencyApiSurfaces": [],
+    "apiAuthority": "sdkwork-payment-app-api",
+    "apiPrefix": "/app/v3/api",
+    "authMode": "dual-token",
+    "wireProtocol": "sdkwork-v3"
+  }
+}
