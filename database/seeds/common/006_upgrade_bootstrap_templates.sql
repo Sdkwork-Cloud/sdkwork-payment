@@ -11,14 +11,14 @@ SET organization_id = '100002', updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = '100001'
   AND organization_id = '0'
   AND id LIKE 'bootstrap-payment-method-%'
-  AND CAST(metadata AS TEXT) LIKE '%"bootstrap":true%';
+  AND CAST(metadata AS TEXT) LIKE '%bootstrap%';
 
 UPDATE commerce_payment_provider_account
 SET organization_id = '100002', updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = '100001'
   AND organization_id = '0'
   AND id LIKE 'bootstrap-payment-provider-%'
-  AND CAST(metadata AS TEXT) LIKE '%"bootstrap":true%';
+  AND CAST(metadata AS TEXT) LIKE '%bootstrap%';
 
 UPDATE commerce_payment_provider_credential
 SET organization_id = '100002', updated_at = CURRENT_TIMESTAMP
@@ -31,7 +31,7 @@ SET organization_id = '100002', updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = '100001'
   AND organization_id = '0'
   AND id LIKE 'bootstrap-payment-channel-%'
-  AND CAST(metadata AS TEXT) LIKE '%"bootstrap":true%';
+  AND CAST(metadata AS TEXT) LIKE '%bootstrap%';
 
 UPDATE commerce_payment_provider_account
 SET merchant_id = 'mock-stripe-account',
