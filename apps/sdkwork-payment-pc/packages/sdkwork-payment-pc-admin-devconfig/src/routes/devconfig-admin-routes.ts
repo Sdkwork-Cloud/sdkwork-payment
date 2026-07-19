@@ -12,6 +12,40 @@ export const PAYMENT_PC_ADMIN_DEVCONFIG_ROUTES = {
   basePath: "/admin/payments/devconfig",
   defaultPath: "/admin/payments/devconfig",
   permissionPrefix: "commerce.payments.devconfig",
+  sections: {
+    environment: {
+      path: "/admin/payments/devconfig/environments",
+      requiredPermissions: [
+        "commerce.payments.provider_accounts.read",
+        "commerce.payments.provider_accounts.update",
+        "commerce.payments.provider_accounts.test",
+      ],
+    },
+    webhook: {
+      path: "/admin/payments/devconfig/webhook-debugger",
+      requiredPermissions: [
+        "commerce.payments.provider_accounts.read",
+        "commerce.payments.webhook_events.read",
+        "commerce.payments.dev.sandbox_trigger",
+        "commerce.payments.dev.webhook_signature_test",
+      ],
+    },
+    certificates: {
+      path: "/admin/payments/devconfig/certificates",
+      requiredPermissions: [
+        "commerce.payments.certificates.read",
+        "commerce.payments.certificates.create",
+        "commerce.payments.certificates.delete",
+      ],
+    },
+    logs: {
+      path: "/admin/payments/devconfig/logs",
+      requiredPermissions: [
+        "commerce.payments.webhook_events.read",
+        "commerce.payments.webhook_events.replay",
+      ],
+    },
+  },
 } as const;
 
 export type PaymentPcAdminDevConfigRouteManifest = typeof PAYMENT_PC_ADMIN_DEVCONFIG_ROUTES;

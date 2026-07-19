@@ -43,11 +43,11 @@
     "sdkClients": ["@sdkwork/payment-backend-sdk"],
     "events": [],
     "configKeys": ["package.json#sdkwork"],
-    "routeManifest": null
+    "routeManifest": "src/routes/devconfig-admin-routes.ts#PAYMENT_PC_ADMIN_DEVCONFIG_ROUTES"
   },
   "integration": {
     "authority": "Root SDKWork specs remain authoritative. Local specs may extend but must not contradict them.",
-    "dependencyPolicy": "Admin capability package registered through payment-pc-admin-core module registry.",
+    "dependencyPolicy": "Admin capability package registered through payment-pc-admin-core module registry. The route manifest publishes environment, webhook debugger, certificate, and integration log sections as independently permissioned host routes while the standalone workspace preserves its tabbed compatibility surface.",
     "sdkPolicy": "Generated backend SDK clients are injected through @sdkwork/payment-service boundaries; this package MUST NOT import @sdkwork/payment-backend-sdk generator transport directly. Admin controllers consume service.backend.certificates / webhookEvents / dev / providerAccounts.test / providerAccounts.credentials.rotate trees only.",
     "languagePolicy": "TypeScript packages follow workspace manifests while preserving the component contract."
   },

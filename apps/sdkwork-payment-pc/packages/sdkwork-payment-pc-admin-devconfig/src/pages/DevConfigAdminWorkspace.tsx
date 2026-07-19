@@ -189,30 +189,47 @@ export function PaymentDevConfigAdminWorkspace(
         error={state.lastError}
         title={props.title ?? "Payment integration configuration"}
       >
-        {props.section ? sections[props.section] : <Tabs value={tab} onValueChange={(value) => setTab(value as PaymentDevConfigAdminSection)}>
-          <PaymentAdminTabsList aria-label="Payment developer tool sections">
-            <PaymentAdminTabsTrigger value="environment">Environment &amp; Test</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="webhook">Webhook Debugger</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="certificates">Certificates</PaymentAdminTabsTrigger>
-            <PaymentAdminTabsTrigger value="logs">Integration Logs</PaymentAdminTabsTrigger>
-          </PaymentAdminTabsList>
+        {props.section ? (
+          sections[props.section]
+        ) : (
+          <Tabs
+            value={tab}
+            onValueChange={(value) =>
+              setTab(value as PaymentDevConfigAdminSection)
+            }
+          >
+            <PaymentAdminTabsList aria-label="Payment developer tool sections">
+              <PaymentAdminTabsTrigger value="environment">
+                Environment &amp; Test
+              </PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger value="webhook">
+                Webhook Debugger
+              </PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger value="certificates">
+                Certificates
+              </PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger value="logs">
+                Integration Logs
+              </PaymentAdminTabsTrigger>
+            </PaymentAdminTabsList>
 
-          <PaymentAdminTabsContent value="environment">
-            {sections.environment}
-          </PaymentAdminTabsContent>
+            <PaymentAdminTabsContent value="environment">
+              {sections.environment}
+            </PaymentAdminTabsContent>
 
-          <PaymentAdminTabsContent value="webhook">
-            {sections.webhook}
-          </PaymentAdminTabsContent>
+            <PaymentAdminTabsContent value="webhook">
+              {sections.webhook}
+            </PaymentAdminTabsContent>
 
-          <PaymentAdminTabsContent value="certificates">
-            {sections.certificates}
-          </PaymentAdminTabsContent>
+            <PaymentAdminTabsContent value="certificates">
+              {sections.certificates}
+            </PaymentAdminTabsContent>
 
-          <PaymentAdminTabsContent value="logs">
-            {sections.logs}
-          </PaymentAdminTabsContent>
-        </Tabs>}
+            <PaymentAdminTabsContent value="logs">
+              {sections.logs}
+            </PaymentAdminTabsContent>
+          </Tabs>
+        )}
       </PaymentAdminWorkspace>
     </PaymentAdminI18nBoundary>
   );
