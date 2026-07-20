@@ -20,8 +20,8 @@ Updated: 2026-07-13
 | PSP adapters (Stripe/Alipay/WeChat) | `crates/sdkwork-payment-providers/` |
 | SQL repositories | `crates/sdkwork-payment-repository-sqlx/` |
 | HTTP routers | `crates/sdkwork-routes-payment-app-api/`, `crates/sdkwork-routes-payment-backend-api/` |
-| Gateway assembly | `crates/sdkwork-payment-gateway-assembly/` |
-| API server | `crates/sdkwork-payment-standalone-gateway/` |
+| Gateway assembly | `crates/sdkwork-api-payment-assembly/` |
+| API server | `crates/sdkwork-api-payment-standalone-gateway/` |
 | PC application | `apps/sdkwork-payment-pc/` |
 | TypeScript facade | `apps/sdkwork-payment-common/packages/sdkwork-payment-service/` |
 

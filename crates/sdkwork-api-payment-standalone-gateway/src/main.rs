@@ -1,5 +1,5 @@
-use sdkwork_payment_gateway_assembly::{
-    assemble_application_router, gateway_contract_fallback_config,
+use sdkwork_api_payment_assembly::{
+    assemble_api_router, gateway_contract_fallback_config,
 };
 use sdkwork_payment_service_host::PaymentServiceHost;
 use sdkwork_web_bootstrap::{service_router, ServiceRouterConfig};
@@ -20,7 +20,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let host = Arc::new(PaymentServiceHost::new().await);
-    let business = assemble_application_router(host)
+    let business = assemble_api_router(host)
         .await
         .router
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MiB，支付请求体不会超过

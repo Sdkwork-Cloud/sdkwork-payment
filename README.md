@@ -7,7 +7,7 @@ SDKWork commerce **payment** capability building-block repository (domain `comme
 - Domain service: `crates/sdkwork-payment-service/`
 - Repository SQL: `crates/sdkwork-payment-repository-sqlx/`
 - PSP adapters: `crates/sdkwork-payment-providers/`
-- HTTP API server: `crates/sdkwork-payment-standalone-gateway/`
+- HTTP API server: `crates/sdkwork-api-payment-standalone-gateway/`
 - PC application: `apps/sdkwork-payment-pc/` (checkout + admin console)
 
 ## Quick start

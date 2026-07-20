@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/sdkwork-api-payment-assembly",
-    "crates/sdkwork-payment-gateway-assembly",
+    "crates/sdkwork-api-payment-assembly",
   "crates/sdkwork-payment-service",
   "crates/sdkwork-payment-providers",
   "crates/sdkwork-payment-repository-sqlx",
@@ -10,7 +10,7 @@ members = [
   "crates/sdkwork-routes-payment-backend-api",
   "crates/sdkwork-payment-database-host",
   "crates/sdkwork-payment-service-host",
-  "crates/sdkwork-payment-standalone-gateway",
+  "crates/sdkwork-api-payment-standalone-gateway",
 ]
 
 [workspace.package]
@@ -61,4 +61,4 @@ sdkwork_routes_payment_app_api = { path = "crates/sdkwork-routes-payment-app-api
 sdkwork_routes_payment_backend_api = { path = "crates/sdkwork-routes-payment-backend-api", package = "sdkwork-routes-payment-backend-api" }
 sdkwork_payment_database_host = { path = "crates/sdkwork-payment-database-host", package = "sdkwork-payment-database-host" }
 sdkwork_payment_service_host = { path = "crates/sdkwork-payment-service-host", package = "sdkwork-payment-service-host" }
-sdkwork_payment_gateway_assembly = { path = "crates/sdkwork-payment-gateway-assembly", package = "sdkwork-payment-gateway-assembly" }
+sdkwork_api_payment_assembly = { path = "crates/sdkwork-api-payment-assembly", package = "sdkwork-api-payment-assembly" }
