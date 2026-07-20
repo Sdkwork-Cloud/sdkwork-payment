@@ -1,0 +1,32 @@
+{
+  "kind": "sdkwork.api.assembly",
+  "schemaVersion": 1,
+  "applicationCode": "payment",
+  "apiMode": "served",
+  "packageName": "sdkwork-api-payment-assembly",
+  "crateDir": "crates/sdkwork-api-payment-assembly",
+  "routeCrates": [
+    {
+      "packageName": "sdkwork-routes-payment-app-api",
+      "memberDir": "crates/sdkwork-routes-payment-app-api",
+      "libName": "sdkwork_routes_payment_app_api",
+      "surface": "app-api",
+      "pathPrefix": null,
+      "mountOrder": 0,
+      "componentRef": "crates/sdkwork-routes-payment-app-api/specs/component.spec.json",
+      "routeManifestRef": "crates/sdkwork-routes-payment-app-api/sdkwork_routes_payment_app_api::gateway_route_manifest",
+      "sourceRef": "crates/sdkwork-routes-payment-app-api/Cargo.toml"
+    },
+    {
+      "packageName": "sdkwork-routes-payment-backend-api",
+      "memberDir": "crates/sdkwork-routes-payment-backend-api",
+      "libName": "sdkwork_routes_payment_backend_api",
+      "surface": "backend-api",
+      "pathPrefix": null,
+      "mountOrder": 1,
+      "componentRef": "crates/sdkwork-routes-payment-backend-api/specs/component.spec.json",
+      "routeManifestRef": "crates/sdkwork-routes-payment-backend-api/sdkwork_routes_payment_backend_api::gateway_route_manifest",
+      "sourceRef": "crates/sdkwork-routes-payment-backend-api/Cargo.toml"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/sdkwork-api-payment-assembly",
     "crates/sdkwork-payment-gateway-assembly",
   "crates/sdkwork-payment-service",
   "crates/sdkwork-payment-providers",
