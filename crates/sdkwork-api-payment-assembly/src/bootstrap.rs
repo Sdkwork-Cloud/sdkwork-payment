@@ -11,12 +11,10 @@ pub struct ApiAssembly {
 }
 
 pub async fn assemble_api_router(host: Arc<PaymentServiceHost>) -> ApiAssembly {
-    assemble_api_router(host).await
+    assemble_business_routes(host).await
 }
 
-pub async fn assemble_api_router(
-    host: Arc<PaymentServiceHost>,
-) -> ApiAssembly {
+pub async fn assemble_business_routes(host: Arc<PaymentServiceHost>) -> ApiAssembly {
     let mut router = Router::new();
     router =
         router.merge(sdkwork_routes_payment_app_api::gateway_mount_business(host.clone()).await);
@@ -24,9 +22,7 @@ pub async fn assemble_api_router(
     ApiAssembly { router }
 }
 
-pub async fn assemble_backend_business_router(
-    host: Arc<PaymentServiceHost>,
-) -> ApiAssembly {
+pub async fn assemble_backend_business_router(host: Arc<PaymentServiceHost>) -> ApiAssembly {
     ApiAssembly {
         router: sdkwork_routes_payment_backend_api::gateway_mount_business(host).await,
     }

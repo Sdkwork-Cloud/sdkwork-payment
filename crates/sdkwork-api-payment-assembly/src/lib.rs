@@ -6,8 +6,8 @@ mod bootstrap;
 mod generated;
 
 pub use bootstrap::{
-    assemble_api_router, assemble_api_router,
-    assemble_backend_business_router, gateway_contract_fallback_config, ApiAssembly,
+    assemble_api_router, assemble_backend_business_router, assemble_business_routes,
+    gateway_contract_fallback_config, ApiAssembly,
 };
 
 pub async fn assemble_api_router_from_env() -> Result<ApiAssembly, String> {
@@ -16,11 +16,10 @@ pub async fn assemble_api_router_from_env() -> Result<ApiAssembly, String> {
     Ok(assemble_api_router(host).await)
 }
 
-pub async fn assemble_api_router_from_env() -> Result<ApiAssembly, String>
-{
+pub async fn assemble_business_routes_from_env() -> Result<ApiAssembly, String> {
     let host =
         std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);
-    Ok(assemble_api_router(host).await)
+    Ok(assemble_business_routes(host).await)
 }
 
 pub async fn assemble_backend_business_router_from_env() -> Result<ApiAssembly, String> {
