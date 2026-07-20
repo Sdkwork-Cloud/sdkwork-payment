@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_method (
 );
 
 -- Self-heal: back-fill columns when the table was pre-created by another module
--- (e.g. sdkwork-clawrouter commerce_bootstrap). CREATE TABLE IF NOT EXISTS is a
+-- (e.g. sdkwork-clawrouter commerce_bootstrap). Idempotent table creation is a
 -- no-op on existing tables, so ALTER TABLE ensures the payment schema is complete.
 ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS provider_code TEXT;
 ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;

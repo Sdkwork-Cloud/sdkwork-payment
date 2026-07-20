@@ -183,7 +183,12 @@ export default defineConfig({
     setupFiles: [path.join(root, "vitest.setup.ts")],
     server: {
       deps: {
-        inline: [/@radix-ui\/.*/, /@sdkwork\/ui-pc-react/],
+        inline: [
+          /@radix-ui\/.*/,
+          /@sdkwork\/i18n-pc-react/,
+          /@sdkwork\/ui-pc-react/,
+          /react-i18next/,
+        ],
       },
     },
     include: [

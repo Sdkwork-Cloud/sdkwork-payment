@@ -7,7 +7,7 @@ Reference contract for payment capability tables under commerce platform bootstr
 This module is in **initialization state** for greenfield deployments:
 
 1. **Baseline** — `database/ddl/baseline/{engine}/0001_payment_baseline.sql` contains the full DDL snapshot.
-2. **Migrations** — `database/migrations/{engine}/` is reserved for post-GA incremental schema changes only. It is intentionally empty at initialization.
+2. **Migrations** — `database/migrations/{engine}/` contains the incremental provider-credential and encrypted-certificate upgrades applied after the baseline.
 3. **Drift** — run `pnpm db:drift:check` before release.
 
 ## Commands
@@ -16,21 +16,25 @@ This module is in **initialization state** for greenfield deployments:
 pnpm run db:validate
 pnpm run db:materialize:contract
 pnpm run db:plan
+pnpm run db:plan:dev
 pnpm run db:init
 pnpm run db:migrate
 pnpm run db:seed
+pnpm run db:seed:dev
 pnpm run db:status
 pnpm run db:drift:check
 ```
 
 ## Payment bootstrap profiles
 
-The initial payment catalog is selected by
+The initial payment catalog used by an embedded service is selected by
 `SDKWORK_PAYMENT_DATABASE_SEED_PROFILE` and is applied only when
-`SDKWORK_PAYMENT_DATABASE_SEED_ON_BOOT=true` or when `pnpm db:seed` is run with
-the desired profile. `seedOnBoot` remains `false` in the module manifest, so a
-production service never writes bootstrap data unless deployment configuration
-explicitly opts in.
+`SDKWORK_PAYMENT_DATABASE_SEED_ON_BOOT=true`. The lifecycle CLI defaults its
+`seed` and `bootstrap` commands to `standard`; use `pnpm db:seed:dev` or
+`pnpm db:bootstrap:dev` for development, and the explicit `:prod` equivalents
+for a controlled production bootstrap. `seedOnBoot` remains `false` in the
+module manifest, so a production service never writes bootstrap data unless
+deployment configuration explicitly opts in.
 
 | Runtime | Profile | Initial state |
 | --- | --- | --- |
@@ -62,9 +66,9 @@ after that account activation. The same database record is consumed by pay,
 close, refund, and webhook verification paths.
 
 Existing databases created from the legacy templates are upgraded by
-`006_upgrade_bootstrap_templates.sql` on the next `pnpm db:seed` (or lifecycle
-bootstrap) run. The upgrade is limited to inactive rows that still carry the
-bootstrap/mock marker and does not replace already configured merchant data.
+`006_upgrade_bootstrap_templates.sql` on the next selected seed or lifecycle
+bootstrap run. The upgrade is limited to stable bootstrap ids that still carry
+the bootstrap marker and does not replace already configured merchant data.
 
 ## Federated host integration
 

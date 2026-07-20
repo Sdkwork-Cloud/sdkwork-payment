@@ -9,12 +9,6 @@
       "lifecycle_status": "active"
     },
     {
-      "table_name": "is",
-      "owner": "sdkwork-payment",
-      "compliance_level": "L2",
-      "lifecycle_status": "active"
-    },
-    {
       "table_name": "commerce_payment_intent",
       "owner": "sdkwork-payment",
       "compliance_level": "L2",

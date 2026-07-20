@@ -12,9 +12,6 @@ tables:
   - name: commerce_payment_method
     lifecycle_status: active
     owner: sdkwork-payment
-  - name: is
-    lifecycle_status: active
-    owner: sdkwork-payment
   - name: commerce_payment_intent
     lifecycle_status: active
     owner: sdkwork-payment
