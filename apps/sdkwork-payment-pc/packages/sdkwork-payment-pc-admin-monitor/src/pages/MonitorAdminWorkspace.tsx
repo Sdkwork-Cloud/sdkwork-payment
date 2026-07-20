@@ -31,9 +31,11 @@ import { usePaymentRecordsMessages } from "../i18n";
 import { AttemptMonitor } from "../components/AttemptMonitor";
 import { IntentMonitor } from "../components/IntentMonitor";
 import { ReconciliationMonitor } from "../components/ReconciliationMonitor";
+import { RefundCreateDialog, RefundMonitor } from "../components/RefundMonitor";
 import { WebhookEventMonitor } from "../components/WebhookEventMonitor";
 import type {
   CreateReconciliationRunDraft,
+  CreateRefundDraft,
   PaymentAttemptListFilter,
   PaymentIntentListFilter,
   PaymentIntentView,
@@ -41,6 +43,7 @@ import type {
   PaymentMonitorAdminState,
   PaymentWebhookEventListFilter,
   ReconciliationRunListFilter,
+  RefundListFilter,
 } from "../types/monitor-admin-types";
 
 export interface PaymentMonitorAdminWorkspaceProps {
@@ -52,13 +55,16 @@ export interface PaymentMonitorAdminWorkspaceProps {
 }
 
 export interface PaymentMonitorAdminCapabilities {
+  canCreateRefund: boolean;
   canCreateReconciliationRun: boolean;
   canReplayWebhookEvent: boolean;
+  canRetryRefund: boolean;
 }
 
 export type PaymentMonitorAdminSection =
   | "intents"
   | "attempts"
+  | "refunds"
   | "webhooks"
   | "reconciliation";
 
@@ -71,6 +77,8 @@ export function PaymentMonitorAdminWorkspace(
     controller.getState(),
   );
   const [tab, setTab] = React.useState<PaymentMonitorAdminSection>("intents");
+  const [refundDialogOpen, setRefundDialogOpen] = React.useState(false);
+  const [refundIntent, setRefundIntent] = React.useState<PaymentIntentView>();
   const activeSection = props.section ?? tab;
 
   React.useEffect(() => {
@@ -115,6 +123,19 @@ export function PaymentMonitorAdminWorkspace(
     await controller.createReconciliationRun(draft);
   }
 
+  async function handleApplyRefundFilter(filter: RefundListFilter) {
+    await controller.applyRefundFilter(filter);
+  }
+
+  async function handleCreateRefund(draft: CreateRefundDraft) {
+    await controller.createRefund(draft);
+  }
+
+  function handleStartRefund(intent?: PaymentIntentView) {
+    setRefundIntent(intent);
+    setRefundDialogOpen(true);
+  }
+
   return (
     <PaymentAdminWorkspace
       data-slot="payment-monitor-admin-workspace"
@@ -133,7 +154,7 @@ export function PaymentMonitorAdminWorkspace(
           {!props.section ? (
             <PaymentAdminTabsList
               aria-label={messages.workspace.tabsLabel}
-              className="grid h-9 grid-cols-4 overflow-visible sm:!flex sm:!overflow-x-auto"
+              className="grid h-9 grid-cols-5 overflow-visible sm:!flex sm:!overflow-x-auto"
             >
               <PaymentAdminTabsTrigger
                 className="h-9 min-w-0 shrink whitespace-nowrap px-0.5 leading-tight sm:!min-w-fit sm:!shrink-0 sm:!px-3"
@@ -146,6 +167,12 @@ export function PaymentMonitorAdminWorkspace(
                 value="attempts"
               >
                 {messages.workspace.tabs.attempts}
+              </PaymentAdminTabsTrigger>
+              <PaymentAdminTabsTrigger
+                className="h-9 min-w-0 shrink whitespace-nowrap px-0.5 leading-tight sm:!min-w-fit sm:!shrink-0 sm:!px-3"
+                value="refunds"
+              >
+                {messages.workspace.tabs.refunds}
               </PaymentAdminTabsTrigger>
               <PaymentAdminTabsTrigger
                 className="h-9 min-w-0 shrink whitespace-nowrap px-0.5 leading-tight sm:!min-w-fit sm:!shrink-0 sm:!px-3"
@@ -168,10 +195,12 @@ export function PaymentMonitorAdminWorkspace(
               pageInfo={state.listPageInfo?.intents}
               busy={busy}
               selectedIntent={state.selectedIntentDetail}
+              canCreateRefund={props.capabilities.canCreateRefund}
               onApplyFilter={handleApplyIntentFilter}
               onLoadMore={() => void controller.loadMoreIntents()}
               onRefresh={() => controller.refreshIntents().then(() => undefined)}
               onSelect={handleSelectIntent}
+              onRefund={handleStartRefund}
             />
           </PaymentAdminTabsContent>
 
@@ -182,6 +211,20 @@ export function PaymentMonitorAdminWorkspace(
               busy={busy}
               onApplyFilter={handleApplyAttemptFilter}
               onLoadMore={() => void controller.loadMoreAttempts()}
+            />
+          </PaymentAdminTabsContent>
+
+          <PaymentAdminTabsContent value="refunds">
+            <RefundMonitor
+              refunds={state.refunds}
+              pageInfo={state.listPageInfo?.refunds}
+              busy={busy}
+              canCreate={props.capabilities.canCreateRefund}
+              canRetry={props.capabilities.canRetryRefund}
+              onApplyFilter={handleApplyRefundFilter}
+              onLoadMore={() => void controller.loadMoreRefunds()}
+              onStartCreate={() => handleStartRefund()}
+              onRetry={(refundId, confirmRefundNo) => controller.retryRefund(refundId, confirmRefundNo)}
             />
           </PaymentAdminTabsContent>
 
@@ -212,6 +255,17 @@ export function PaymentMonitorAdminWorkspace(
             />
           </PaymentAdminTabsContent>
         </Tabs>
+        <RefundCreateDialog
+          open={props.capabilities.canCreateRefund && refundDialogOpen}
+          intents={state.intents}
+          initialIntent={refundIntent}
+          busy={busy}
+          onOpenChange={(open) => {
+            setRefundDialogOpen(open);
+            if (!open) setRefundIntent(undefined);
+          }}
+          onSubmit={handleCreateRefund}
+        />
     </PaymentAdminWorkspace>
   );
 }

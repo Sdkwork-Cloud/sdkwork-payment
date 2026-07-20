@@ -36,6 +36,7 @@ import {
 import {
   AdminFieldLabel,
   ADMIN_PROVIDER_FORM_OPTIONS,
+  PaymentProviderIcon,
 } from "@sdkwork/payment-pc-admin-core";
 import type {
   PaymentProviderAccountDraft,
@@ -279,7 +280,10 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
             <SelectContent>
               {ADMIN_PROVIDER_FORM_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {option.label}
+                  <span className="inline-flex items-center gap-2">
+                    <PaymentProviderIcon providerCode={option.value} size="xs" />
+                    {option.label}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>

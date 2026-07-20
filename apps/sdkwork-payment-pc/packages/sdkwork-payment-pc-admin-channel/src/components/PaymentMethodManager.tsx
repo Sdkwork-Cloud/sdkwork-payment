@@ -34,6 +34,8 @@ import {
   ADMIN_PROVIDER_LABEL,
   adminPaymentMethodKeysForProvider,
   adminPaymentMethodKeyOption,
+  PaymentMethodIcon,
+  PaymentProviderIcon,
   SdkworkPaymentListPaginationControls,
 } from "@sdkwork/payment-pc-admin-core";
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
@@ -130,38 +132,49 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
             <li
               key={method.id}
               className={
-                "flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between " +
+                "flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between " +
                 (props.selectedId === method.id ? "bg-[var(--sdk-color-bg-subtle)]" : "")
               }
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-[var(--sdk-color-text)]">
-                    {method.displayName}
-                  </span>
-                  <Badge variant="outline" title={method.methodKey}>
-                    {adminPaymentMethodKeyOption(method.methodKey)?.label ?? method.methodKey}
-                  </Badge>
-                  <Badge variant="secondary">{ADMIN_PROVIDER_LABEL[method.providerCode]}</Badge>
-                  <Badge variant="outline">{SCOPE_LABEL[method.scope]}</Badge>
-                  <Badge variant={STATUS_VARIANT[method.status]}>{method.status}</Badge>
+              <div className="flex min-w-0 flex-1 items-start gap-3">
+                <PaymentMethodIcon
+                  label={adminPaymentMethodKeyOption(method.methodKey)?.label ?? method.displayName}
+                  methodKey={method.methodKey}
+                  providerCode={method.providerCode}
+                  size="md"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-[var(--sdk-color-text-primary)]">
+                      {method.displayName}
+                    </span>
+                    <Badge variant="outline" title={method.methodKey}>{method.methodKey}</Badge>
+                    <Badge variant="secondary">{ADMIN_PROVIDER_LABEL[method.providerCode]}</Badge>
+                    <Badge variant="outline">{SCOPE_LABEL[method.scope]}</Badge>
+                    <Badge variant={STATUS_VARIANT[method.status]}>{method.status}</Badge>
+                  </div>
+                  {adminPaymentMethodKeyOption(method.methodKey)?.description ? (
+                    <p className="mt-1.5 max-w-4xl text-xs leading-relaxed text-[var(--sdk-color-text-muted)]">
+                      {adminPaymentMethodKeyOption(method.methodKey)?.description}
+                    </p>
+                  ) : null}
+                  <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] lg:grid-cols-3">
+                    <div>
+                      <dt className="inline">Currency:</dt>{" "}
+                      <dd className="inline font-medium text-[var(--sdk-color-text-primary)]">{method.currencyCode}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline">Country:</dt>{" "}
+                      <dd className="inline">{method.countryCode ?? "--"}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline">Sort order:</dt>{" "}
+                      <dd className="inline tabular-nums">{method.sortOrder}</dd>
+                    </div>
+                  </dl>
                 </div>
-                <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] sm:grid-cols-3">
-                  <div>
-                    <dt className="inline">Currency:</dt>{" "}
-                    <dd className="inline">{method.currencyCode}</dd>
-                  </div>
-                  <div>
-                    <dt className="inline">Country:</dt>{" "}
-                    <dd className="inline">{method.countryCode ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="inline">Sort order:</dt>{" "}
-                    <dd className="inline">{method.sortOrder}</dd>
-                  </div>
-                </dl>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2 sm:self-center">
                 <Button
                   type="button"
                   variant="ghost"
@@ -339,7 +352,10 @@ function PaymentMethodForm(props: PaymentMethodFormProps) {
             <SelectContent>
               {ADMIN_PROVIDER_FORM_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {option.label}
+                  <span className="inline-flex items-center gap-2">
+                    <PaymentProviderIcon providerCode={option.value} size="xs" />
+                    {option.label}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -357,7 +373,10 @@ function PaymentMethodForm(props: PaymentMethodFormProps) {
               <SelectContent>
                 {adminPaymentMethodKeysForProvider(providerCode).map((option) => (
                   <SelectItem key={option.methodKey} value={option.methodKey}>
-                    {option.label}
+                    <span className="inline-flex items-center gap-2">
+                      <PaymentMethodIcon methodKey={option.methodKey} providerCode={option.providerCode} size="xs" />
+                      <span>{option.label}</span>
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

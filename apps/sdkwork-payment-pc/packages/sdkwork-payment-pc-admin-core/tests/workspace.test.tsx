@@ -12,14 +12,15 @@ import {
 afterEach(cleanup);
 
 describe("payment admin workspace", () => {
-  it("renders a compact labelled workspace with an explicit error", () => {
+  it("renders a labelled workspace without a visual page header", () => {
     render(
       <PaymentAdminWorkspace error="Unable to load providers" title="Payment providers">
         <div>Workspace content</div>
       </PaymentAdminWorkspace>,
     );
 
-    expect(screen.getByRole("heading", { level: 1, name: "Payment providers" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Payment providers" })).toBeVisible();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Unable to load providers");
     expect(screen.queryByText(/Configure Stripe/i)).not.toBeInTheDocument();
   });

@@ -9,6 +9,7 @@ import {
   SdkworkPaymentListPaginationControls,
   ADMIN_PROVIDER_LABEL,
   formatAdminTimestamp,
+  PaymentProviderIcon,
 } from "@sdkwork/payment-pc-admin-core";
 import type {
   PaymentProviderAccountView,
@@ -95,45 +96,51 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
                 }
                 data-slot="provider-account-row"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-[var(--sdk-color-text)]">
-                      {account.accountNo}
-                    </span>
-                    <Badge variant="outline">
-                      {ADMIN_PROVIDER_LABEL[account.providerCode]}
-                    </Badge>
-                    <Badge variant="secondary">
-                      {account.accountMode === "partner" ? "Partner / ISV" : "Direct"}
-                    </Badge>
-                    <Badge variant="outline">{ENV_LABEL[account.environment]}</Badge>
-                    <Badge variant={STATUS_TONE[account.status]}>
-                      {STATUS_LABEL[account.status]}
-                    </Badge>
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <PaymentProviderIcon
+                    label={ADMIN_PROVIDER_LABEL[account.providerCode]}
+                    providerCode={account.providerCode}
+                    size="md"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-[var(--sdk-color-text-primary)]">
+                        {account.accountNo}
+                      </span>
+                      <Badge variant="outline">{ADMIN_PROVIDER_LABEL[account.providerCode]}</Badge>
+                      <Badge variant="secondary">
+                        {account.accountMode === "partner" ? "Partner / ISV" : "Direct"}
+                      </Badge>
+                      <Badge variant="outline">{ENV_LABEL[account.environment]}</Badge>
+                      <Badge variant={STATUS_TONE[account.status]}>{STATUS_LABEL[account.status]}</Badge>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="Credential readiness">
+                      <Badge variant={account.hasPrimarySecret ? "success" : "warning"}>Primary secret</Badge>
+                      <Badge variant={account.hasWebhookSecret ? "success" : "secondary"}>Webhook secret</Badge>
+                      <Badge variant={account.hasCertificate ? "success" : "secondary"}>Certificate</Badge>
+                      <Badge variant={account.lastTestStatus === "success" ? "success" : account.lastTestStatus === "failure" ? "danger" : "warning"}>
+                        {TEST_STATUS_LABEL[account.lastTestStatus ?? "unknown"]}
+                      </Badge>
+                    </div>
+                    <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] md:grid-cols-3">
+                      <div>
+                        <dt className="inline">Merchant ID:</dt>{" "}
+                        <dd className="inline font-mono text-[var(--sdk-color-text-primary)]">{account.merchantId ?? "--"}</dd>
+                      </div>
+                      <div>
+                        <dt className="inline">Settlement:</dt>{" "}
+                        <dd className="inline font-medium text-[var(--sdk-color-text-primary)]">
+                          {account.settlementCurrency}{account.countryCode ? ` / ${account.countryCode}` : ""}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="inline">Last test:</dt>{" "}
+                        <dd className="inline">{account.lastTestedAt ? formatAdminTimestamp(account.lastTestedAt) : "Run before activation"}</dd>
+                      </div>
+                    </dl>
                   </div>
-                  <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] sm:grid-cols-3">
-                    <div>
-                      <dt className="inline">Merchant ID:</dt>{" "}
-                      <dd className="inline">{account.merchantId ?? "—"}</dd>
-                    </div>
-                    <div>
-                      <dt className="inline">Currency:</dt>{" "}
-                      <dd className="inline">
-                        {account.settlementCurrency}
-                        {account.countryCode ? ` / ${account.countryCode}` : ""}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="inline">Last test:</dt>{" "}
-                      <dd className="inline">
-                        {account.lastTestedAt
-                          ? `${TEST_STATUS_LABEL[account.lastTestStatus ?? "unknown"]} · ${formatAdminTimestamp(account.lastTestedAt)}`
-                          : "Untested"}
-                      </dd>
-                    </div>
-                  </dl>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2 sm:self-center">
                   {props.canTest ? <Button
                     type="button"
                     variant="ghost"

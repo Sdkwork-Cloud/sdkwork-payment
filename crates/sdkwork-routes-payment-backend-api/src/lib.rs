@@ -2,6 +2,7 @@ pub mod api_response;
 pub mod backend_payment_admin_router;
 pub mod backend_payment_integration_router;
 pub mod backend_payment_intent_router;
+pub mod backend_payment_refund_router;
 pub mod command_headers;
 pub mod http_route_manifest;
 pub mod routes;
@@ -17,6 +18,10 @@ pub use backend_payment_intent_router::{
     backend_payment_intent_router_with_postgres_pool,
     backend_payment_intent_router_with_sqlite_pool, build_backend_payment_intent_router,
     CommerceBackendPaymentIntentStore,
+};
+pub use backend_payment_refund_router::{
+    backend_payment_refund_router_with_postgres_pool,
+    backend_payment_refund_router_with_sqlite_pool,
 };
 pub use routes::build_payment_backend_router_with_framework;
 pub use web_bootstrap::{wrap_router_with_web_framework, wrap_router_with_web_framework_from_env};

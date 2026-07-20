@@ -34,6 +34,8 @@ pub struct CreateOwnerRefundCommand {
     pub owner_user_id: String,
     pub payment_attempt_id: Option<String>,
     pub reason_code: Option<String>,
+    pub requested_by: String,
+    pub requested_by_type: String,
     pub request_no: String,
     pub tenant_id: String,
 }
@@ -156,9 +158,21 @@ impl CreateOwnerRefundCommand {
             owner_user_id: owner_user_id.trim().to_string(),
             payment_attempt_id: optional_text(payment_attempt_id),
             reason_code: optional_text(reason_code),
+            requested_by: owner_user_id.trim().to_string(),
+            requested_by_type: "buyer".to_owned(),
             request_no: request_no.trim().to_string(),
             tenant_id: tenant_id.trim().to_string(),
         })
+    }
+
+    pub fn requested_by_operator(
+        mut self,
+        operator_user_id: &str,
+    ) -> Result<Self, CommerceServiceError> {
+        crate::validation::require_non_empty("operator_user_id", operator_user_id)?;
+        self.requested_by = operator_user_id.trim().to_owned();
+        self.requested_by_type = "operator".to_owned();
+        Ok(self)
     }
 }
 

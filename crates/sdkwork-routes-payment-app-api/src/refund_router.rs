@@ -367,9 +367,24 @@ impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
         let tenant_id = command.tenant_id.clone();
         let organization_id = command.organization_id.clone();
         let reason_code = command.reason_code.clone();
+        let requested_by = command.requested_by.clone();
+        let requested_by_type = command.requested_by_type.clone();
+        let request_no = command.request_no.clone();
+        let idempotency_key = command.idempotency_key.clone();
         Box::pin(async move {
-            let refund = inner.create_owner_refund(command).await?;
+            let mut refund = inner.create_owner_refund(command).await?;
             if refund.status == "submitted" {
+                refund = inner
+                    .mark_owner_refund_provider_submission_processing(
+                        &tenant_id,
+                        organization_id.as_deref(),
+                        &refund.refund_id,
+                        &requested_by_type,
+                        Some(&requested_by),
+                        &request_no,
+                        &idempotency_key,
+                    )
+                    .await?;
                 if let Err(error) = submit_provider_refund_with_retry(
                     &credentials,
                     &pool,
@@ -381,7 +396,15 @@ impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
                 .await
                 {
                     let _ = inner
-                        .mark_owner_refund_provider_submission_failed(&tenant_id, &refund.refund_id)
+                        .mark_owner_refund_provider_submission_failed(
+                            &tenant_id,
+                            organization_id.as_deref(),
+                            &refund.refund_id,
+                            &requested_by_type,
+                            Some(&requested_by),
+                            &request_no,
+                            &idempotency_key,
+                        )
                         .await;
                     return Err(error);
                 }
@@ -418,9 +441,24 @@ impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
         let tenant_id = command.tenant_id.clone();
         let organization_id = command.organization_id.clone();
         let reason_code = command.reason_code.clone();
+        let requested_by = command.requested_by.clone();
+        let requested_by_type = command.requested_by_type.clone();
+        let request_no = command.request_no.clone();
+        let idempotency_key = command.idempotency_key.clone();
         Box::pin(async move {
-            let refund = inner.create_owner_refund(command).await?;
+            let mut refund = inner.create_owner_refund(command).await?;
             if refund.status == "submitted" {
+                refund = inner
+                    .mark_owner_refund_provider_submission_processing(
+                        &tenant_id,
+                        organization_id.as_deref(),
+                        &refund.refund_id,
+                        &requested_by_type,
+                        Some(&requested_by),
+                        &request_no,
+                        &idempotency_key,
+                    )
+                    .await?;
                 if let Err(error) = submit_provider_refund_postgres_with_retry(
                     &credentials,
                     &pool,
@@ -432,7 +470,15 @@ impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
                 .await
                 {
                     let _ = inner
-                        .mark_owner_refund_provider_submission_failed(&tenant_id, &refund.refund_id)
+                        .mark_owner_refund_provider_submission_failed(
+                            &tenant_id,
+                            organization_id.as_deref(),
+                            &refund.refund_id,
+                            &requested_by_type,
+                            Some(&requested_by),
+                            &request_no,
+                            &idempotency_key,
+                        )
                         .await;
                     return Err(error);
                 }

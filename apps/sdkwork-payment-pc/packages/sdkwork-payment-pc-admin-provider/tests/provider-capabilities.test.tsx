@@ -37,6 +37,8 @@ describe("payment provider capabilities", () => {
     );
 
     expect(screen.getByText("stripe-main")).toBeInTheDocument();
+    expect(document.querySelector('[data-provider="stripe"]')).not.toBeNull();
+    expect(screen.getByLabelText("Credential readiness")).toBeInTheDocument();
     for (const action of ["Create provider account", "Edit", "Rotate", "Test"]) {
       expect(screen.queryByRole("button", { name: action })).not.toBeInTheDocument();
     }

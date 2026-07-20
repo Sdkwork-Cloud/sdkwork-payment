@@ -12,6 +12,8 @@ use crate::{
     },
     backend_payment_intent_router_with_postgres_pool,
     backend_payment_intent_router_with_sqlite_pool,
+    backend_payment_refund_router_with_postgres_pool,
+    backend_payment_refund_router_with_sqlite_pool,
 };
 
 pub fn build_payment_backend_router(host: Arc<PaymentServiceHost>) -> Router {
@@ -25,6 +27,9 @@ pub fn build_payment_backend_router(host: Arc<PaymentServiceHost>) -> Router {
                 .merge(backend_payment_intent_router_with_postgres_pool(
                     pool.clone(),
                 ))
+                .merge(backend_payment_refund_router_with_postgres_pool(
+                    pool.clone(),
+                ))
                 .merge(backend_payment_integration_router_with_postgres_pool(
                     pool.clone(),
                 ))
@@ -34,6 +39,7 @@ pub fn build_payment_backend_router(host: Arc<PaymentServiceHost>) -> Router {
             Router::new()
                 .merge(backend_payment_admin_router_with_sqlite_pool(pool.clone()))
                 .merge(backend_payment_intent_router_with_sqlite_pool(pool.clone()))
+                .merge(backend_payment_refund_router_with_sqlite_pool(pool.clone()))
                 .merge(backend_payment_integration_router_with_sqlite_pool(
                     pool.clone(),
                 ))
@@ -58,6 +64,7 @@ mod tests {
         let router = Router::new()
             .merge(backend_payment_admin_router_with_sqlite_pool(pool.clone()))
             .merge(backend_payment_intent_router_with_sqlite_pool(pool.clone()))
+            .merge(backend_payment_refund_router_with_sqlite_pool(pool.clone()))
             .merge(backend_payment_integration_router_with_sqlite_pool(pool));
 
         for route in crate::http_route_manifest::backend_route_manifest().routes() {

@@ -27,6 +27,33 @@
         "replacementCode": null
       },
       {
+        "code": "commerce.payments.refunds.read",
+        "name": "Read payment refunds",
+        "resource": "refunds",
+        "action": "read",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.refunds.create",
+        "name": "Create payment refunds",
+        "resource": "refunds",
+        "action": "create",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
+        "code": "commerce.payments.refunds.retry",
+        "name": "Retry failed payment refunds",
+        "resource": "refunds",
+        "action": "retry",
+        "status": "active",
+        "since": "1.0.0",
+        "replacementCode": null
+      },
+      {
         "code": "commerce.payments.methods.read",
         "name": "Read payment methods",
         "resource": "methods",

@@ -84,6 +84,7 @@ function renderMonitor(overrides: Partial<React.ComponentProps<typeof IntentMoni
     intents,
     onApplyFilter: vi.fn(),
     onLoadMore: vi.fn(),
+    onRefund: vi.fn(),
     onRefresh: vi.fn(),
     onSelect: vi.fn(),
     pageInfo: { hasMore: true, mode: "cursor", nextCursor: "next-1", totalItems: "42" },
@@ -97,6 +98,7 @@ function createIdleController(): PaymentMonitorAdminController {
     attempts: [],
     intents: [],
     reconciliationRuns: [],
+    refunds: [],
     status: "ready",
     webhookEvents: [],
   };
@@ -104,7 +106,11 @@ function createIdleController(): PaymentMonitorAdminController {
     applyAttemptFilter: async () => [],
     applyIntentFilter: async () => [],
     applyReconciliationRunFilter: async () => [],
+    applyRefundFilter: async () => [],
     applyWebhookEventFilter: async () => [],
+    createRefund: async () => {
+      throw new Error("Not used by this test.");
+    },
     createReconciliationRun: async () => {
       throw new Error("Not used by this test.");
     },
@@ -113,6 +119,7 @@ function createIdleController(): PaymentMonitorAdminController {
     loadMoreAttempts: async () => [],
     loadMoreIntents: async () => [],
     loadMoreReconciliationRuns: async () => [],
+    loadMoreRefunds: async () => [],
     loadMoreWebhookEvents: async () => [],
     refreshIntents: async () => [],
     replayWebhookEvent: async (eventId) => ({
@@ -120,6 +127,7 @@ function createIdleController(): PaymentMonitorAdminController {
       ok: true,
       replayedAt: "2026-07-19T00:00:00.000Z",
     }),
+    retryRefund: async () => undefined,
     selectIntent: async () => undefined,
     subscribe: () => () => undefined,
   };
@@ -139,7 +147,12 @@ describe("payment records workspace", () => {
         locale="zh-CN"
       >
         <PaymentMonitorAdminWorkspace
-          capabilities={{ canCreateReconciliationRun: false, canReplayWebhookEvent: false }}
+          capabilities={{
+            canCreateReconciliationRun: false,
+            canCreateRefund: false,
+            canReplayWebhookEvent: false,
+            canRetryRefund: false,
+          }}
           controller={createIdleController()}
         />
       </SdkworkI18nProvider>,
@@ -158,7 +171,12 @@ describe("payment records workspace", () => {
         locale="zh-CN"
       >
         <PaymentMonitorAdminWorkspace
-          capabilities={{ canCreateReconciliationRun: false, canReplayWebhookEvent: false }}
+          capabilities={{
+            canCreateReconciliationRun: false,
+            canCreateRefund: false,
+            canReplayWebhookEvent: false,
+            canRetryRefund: false,
+          }}
           controller={createIdleController()}
           description="审计支付机构回调。"
           section="webhooks"
@@ -170,7 +188,7 @@ describe("payment records workspace", () => {
     await waitFor(() => {
       expect(container.querySelector('[data-slot="payment-webhook-event-monitor"]')).not.toBeNull();
     });
-    expect(screen.getByRole("heading", { name: "Webhook 事件" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Webhook 事件" })).toBeInTheDocument();
     expect(screen.getByText("事件类型")).toBeInTheDocument();
     expect(screen.getByText(/暂无 Webhook 事件/u)).toBeInTheDocument();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();

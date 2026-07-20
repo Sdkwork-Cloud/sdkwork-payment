@@ -5,6 +5,7 @@ import {
   RefreshCw,
   Search,
   SlidersHorizontal,
+  Undo2,
   X,
 } from "lucide-react";
 import {
@@ -51,10 +52,12 @@ export interface IntentMonitorProps {
   pageInfo?: SdkWorkPageInfo;
   busy?: boolean;
   selectedIntent?: PaymentIntentDetail;
+  canCreateRefund?: boolean;
   onApplyFilter(filter: PaymentIntentListFilter): Promise<void> | void;
   onLoadMore(): void;
   onRefresh(): Promise<void> | void;
   onSelect(intent: PaymentIntentView): Promise<void> | void;
+  onRefund(intent: PaymentIntentView): void;
 }
 
 type StatusFilter = PaymentStatus | "all";
@@ -451,16 +454,30 @@ export function IntentMonitor(props: IntentMonitorProps) {
         loading={props.busy && props.intents.length === 0}
         loadingLabel={messages.table.loading}
         rowActions={(intent) => (
-          <Button
-            aria-label={`${messages.actions.viewDetails}: ${intent.paymentIntentNo}`}
-            size="icon"
-            title={messages.actions.viewDetails}
-            type="button"
-            variant="ghost"
-            onClick={() => void handleSelect(intent)}
-          >
-            <Eye aria-hidden="true" className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            {props.canCreateRefund && ["succeeded", "refunding", "refunded"].includes(intent.status) ? (
+              <Button
+                aria-label={`${messages.operations.actions.newRefund}: ${intent.paymentIntentNo}`}
+                size="icon"
+                title={messages.operations.availability.createRefund}
+                type="button"
+                variant="ghost"
+                onClick={() => props.onRefund(intent)}
+              >
+                <Undo2 aria-hidden="true" className="h-4 w-4" />
+              </Button>
+            ) : null}
+            <Button
+              aria-label={`${messages.actions.viewDetails}: ${intent.paymentIntentNo}`}
+              size="icon"
+              title={messages.actions.viewDetails}
+              type="button"
+              variant="ghost"
+              onClick={() => void handleSelect(intent)}
+            >
+              <Eye aria-hidden="true" className="h-4 w-4" />
+            </Button>
+          </div>
         )}
         rowActionsLabel=""
         rows={Array.from(props.intents)}

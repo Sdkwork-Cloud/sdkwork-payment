@@ -332,6 +332,215 @@ async fn refund_create_is_idempotent_by_idempotency_key() {
 
     assert_eq!(first.refund_id, second.refund_id);
     assert_eq!(first.refund_no, second.refund_no);
+
+    let event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM commerce_refund_event WHERE refund_id = ? AND event_type = 'created'",
+    )
+    .bind(&first.refund_id)
+    .fetch_one(store.pool())
+    .await
+    .expect("refund created event count");
+    assert_eq!(event_count, 1);
+}
+
+#[tokio::test]
+async fn operator_refund_persists_requester_and_audit_actor() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let store = SqliteCommerceRefundStore::new(pool.clone());
+    let command = CreateOwnerRefundCommand::new(
+        "100001",
+        None,
+        "user-1",
+        "order-1",
+        Some("pa-1"),
+        Some("500"),
+        Some("customer_request"),
+        "req-operator-refund",
+        "idem-operator-refund",
+    )
+    .and_then(|command| command.requested_by_operator("operator-7"))
+    .expect("operator refund command");
+
+    let refund = store
+        .create_owner_refund(command)
+        .await
+        .expect("operator refund");
+    let requester: (String, Option<String>) =
+        sqlx::query_as("SELECT requested_by_type, requested_by FROM commerce_refund WHERE id = ?")
+            .bind(&refund.refund_id)
+            .fetch_one(&pool)
+            .await
+            .expect("operator refund requester");
+    assert_eq!(
+        requester,
+        ("operator".to_owned(), Some("operator-7".to_owned()))
+    );
+
+    let event: (String, Option<String>, Option<String>, String) = sqlx::query_as(
+        "SELECT actor_type, actor_id, from_status, to_status FROM commerce_refund_event WHERE refund_id = ? AND event_type = 'created'",
+    )
+    .bind(&refund.refund_id)
+    .fetch_one(&pool)
+    .await
+    .expect("operator refund event");
+    assert_eq!(
+        event,
+        (
+            "operator".to_owned(),
+            Some("operator-7".to_owned()),
+            None,
+            "submitted".to_owned(),
+        )
+    );
+}
+
+#[tokio::test]
+async fn refund_transition_is_tenant_and_organization_isolated() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let store = SqliteCommerceRefundStore::new(pool.clone());
+    let refund = store
+        .create_owner_refund(
+            CreateOwnerRefundCommand::new(
+                "100001",
+                None,
+                "user-1",
+                "order-1",
+                Some("pa-1"),
+                Some("500"),
+                None,
+                "req-isolation-refund",
+                "idem-isolation-refund",
+            )
+            .expect("refund command"),
+        )
+        .await
+        .expect("refund");
+
+    let wrong_tenant = store
+        .mark_owner_refund_provider_submission_processing(
+            "another-tenant",
+            None,
+            &refund.refund_id,
+            "operator",
+            Some("operator-7"),
+            "req-wrong-tenant",
+            "idem-wrong-tenant",
+        )
+        .await
+        .expect_err("cross-tenant transition must fail");
+    assert_eq!(wrong_tenant.code(), "not-found");
+
+    let wrong_organization = store
+        .mark_owner_refund_provider_submission_processing(
+            "100001",
+            Some("another-organization"),
+            &refund.refund_id,
+            "operator",
+            Some("operator-7"),
+            "req-wrong-organization",
+            "idem-wrong-organization",
+        )
+        .await
+        .expect_err("cross-organization transition must fail");
+    assert_eq!(wrong_organization.code(), "not-found");
+
+    let status: String = sqlx::query_scalar("SELECT status FROM commerce_refund WHERE id = ?")
+        .bind(&refund.refund_id)
+        .fetch_one(&pool)
+        .await
+        .expect("isolated refund status");
+    assert_eq!(status, "submitted");
+}
+
+#[tokio::test]
+async fn concurrent_failed_refund_retry_is_claimed_exactly_once() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let store = SqliteCommerceRefundStore::new(pool.clone());
+    let refund = store
+        .create_owner_refund(
+            CreateOwnerRefundCommand::new(
+                "100001",
+                None,
+                "user-1",
+                "order-1",
+                Some("pa-1"),
+                Some("500"),
+                None,
+                "req-concurrent-refund",
+                "idem-concurrent-refund",
+            )
+            .expect("refund command"),
+        )
+        .await
+        .expect("refund");
+    store
+        .mark_owner_refund_provider_submission_processing(
+            "100001",
+            None,
+            &refund.refund_id,
+            "operator",
+            Some("operator-7"),
+            "req-initial-submit",
+            "idem-initial-submit",
+        )
+        .await
+        .expect("initial submission claim");
+    store
+        .mark_owner_refund_provider_submission_failed(
+            "100001",
+            None,
+            &refund.refund_id,
+            "operator",
+            Some("operator-7"),
+            "req-provider-failed",
+            "idem-provider-failed",
+        )
+        .await
+        .expect("provider submission failure");
+
+    let first_store = store.clone();
+    let second_store = store.clone();
+    let refund_id = refund.refund_id.clone();
+    let (first, second) = tokio::join!(
+        first_store.mark_owner_refund_provider_submission_processing(
+            "100001",
+            None,
+            &refund_id,
+            "operator",
+            Some("operator-8"),
+            "req-retry-1",
+            "idem-retry-1",
+        ),
+        second_store.mark_owner_refund_provider_submission_processing(
+            "100001",
+            None,
+            &refund_id,
+            "operator",
+            Some("operator-9"),
+            "req-retry-2",
+            "idem-retry-2",
+        )
+    );
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+
+    let retry_events: Vec<(Option<String>, String, String)> = sqlx::query_as(
+        "SELECT from_status, to_status, actor_type FROM commerce_refund_event WHERE refund_id = ? AND event_type = 'status_changed' AND from_status = 'failed'",
+    )
+    .bind(&refund.refund_id)
+    .fetch_all(&pool)
+    .await
+    .expect("retry claim events");
+    assert_eq!(
+        retry_events,
+        vec![(
+            Some("failed".to_owned()),
+            "processing".to_owned(),
+            "operator".to_owned()
+        )]
+    );
 }
 
 #[tokio::test]

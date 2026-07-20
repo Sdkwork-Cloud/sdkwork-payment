@@ -1744,10 +1744,12 @@ mod tests {
         let subject = AppRuntimeSubject {
             tenant_id: "tenant-1".to_owned(),
             organization_id: Some("org-1".to_owned()),
+            user_id: "operator-1".to_owned(),
         };
         let other_subject = AppRuntimeSubject {
             tenant_id: "tenant-1".to_owned(),
             organization_id: Some("org-2".to_owned()),
+            user_id: "operator-2".to_owned(),
         };
         let sub_body = CreateSubMerchantBody {
             provider_account_id: "account-1".to_owned(),

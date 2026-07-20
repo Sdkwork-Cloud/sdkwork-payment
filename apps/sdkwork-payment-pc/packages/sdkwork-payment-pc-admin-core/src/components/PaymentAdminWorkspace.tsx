@@ -25,23 +25,13 @@ export function PaymentAdminWorkspace({
   ...props
 }: PaymentAdminWorkspaceProps) {
   const titleId = React.useId();
+  const descriptionId = React.useId();
   const classes = ["min-w-0 space-y-4", className].filter(Boolean).join(" ");
 
   return (
-    <section aria-labelledby={titleId} className={classes} {...props}>
-      <header className="flex min-h-9 min-w-0 flex-col justify-center gap-1 border-b border-[var(--sdk-color-border-subtle)] pb-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1
-          className="min-w-0 break-words text-base font-semibold text-[var(--sdk-color-text-primary)]"
-          id={titleId}
-        >
-          {title}
-        </h1>
-        {description ? (
-          <p className="max-w-2xl text-xs text-[var(--sdk-color-text-secondary)]">
-            {description}
-          </p>
-        ) : null}
-      </header>
+    <section aria-describedby={description ? descriptionId : undefined} aria-labelledby={titleId} className={classes} {...props}>
+      <span className="sr-only" id={titleId}>{title}</span>
+      {description ? <span className="sr-only" id={descriptionId}>{description}</span> : null}
 
       {error ? (
         <div

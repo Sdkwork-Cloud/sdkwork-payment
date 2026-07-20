@@ -29,6 +29,7 @@ import {
 } from "@sdkwork/payment-pc-admin-core";
 import type {
   CreatePaymentMonitorAdminControllerInput,
+  CreateRefundDraft,
   CreateReconciliationRunDraft,
   PaymentAttemptListFilter,
   PaymentAttemptView,
@@ -46,6 +47,8 @@ import type {
   ReconciliationRunView,
   ReconciliationRunStatus,
   ReconciliationType,
+  RefundListFilter,
+  RefundView,
   WebhookEventStatus,
   WebhookReplayResult,
   WebhookSignatureStatus,
@@ -55,6 +58,8 @@ import {
   PROVIDER_CODES,
   RECONCILIATION_RUN_STATUS_VALUES,
   RECONCILIATION_TYPE_VALUES,
+  REFUND_REASON_VALUES,
+  REFUND_STATUS_VALUES,
   WEBHOOK_EVENT_STATUS_VALUES,
   WEBHOOK_SIGNATURE_STATUS_VALUES,
 } from "../types/monitor-admin-types";
@@ -208,6 +213,52 @@ function mapReconciliationRun(value: unknown): ReconciliationRunView | undefined
   };
 }
 
+function mapRefund(value: unknown): RefundView | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = asString(record.id ?? record.refundId ?? record.refund_id);
+  if (!id) {
+    return undefined;
+  }
+  return {
+    id,
+    refundNo: asRequiredString(record.refundNo ?? record.refund_no, id),
+    orderId: asRequiredString(record.orderId ?? record.order_id, ""),
+    paymentIntentId: asRequiredString(
+      record.paymentIntentId ?? record.payment_intent_id,
+      "",
+    ),
+    paymentAttemptId: asRequiredString(
+      record.paymentAttemptId ?? record.payment_attempt_id,
+      "",
+    ),
+    providerCode: asStatus(
+      record.providerCode ?? record.provider_code,
+      PROVIDER_CODES,
+      "sandbox",
+    ),
+    providerAccountId: asString(record.providerAccountId ?? record.provider_account_id),
+    amount: asRequiredString(record.amount, "0"),
+    currencyCode: asRequiredString(record.currencyCode ?? record.currency_code, "CNY"),
+    status: asStatus(record.status, REFUND_STATUS_VALUES, "submitted"),
+    reasonCode: asStatus(
+      record.reasonCode ?? record.reason_code,
+      REFUND_REASON_VALUES,
+      "other",
+    ),
+    requestedByType: asStatus(
+      record.requestedByType ?? record.requested_by_type,
+      ["buyer", "operator", "system"] as const,
+      "system",
+    ),
+    requestedBy: asString(record.requestedBy ?? record.requested_by),
+    createdAt: asString(record.createdAt ?? record.created_at) ?? new Date(0).toISOString(),
+    updatedAt: asString(record.updatedAt ?? record.updated_at) ?? new Date(0).toISOString(),
+  };
+}
+
 function mapIntentDetail(value: unknown, fallback: PaymentIntentView): PaymentIntentDetail {
   const base = mapIntent(value) ?? fallback;
   const record = asRecord(value);
@@ -249,10 +300,12 @@ interface MonitorAdminSessions {
   attempts: SdkWorkPagedListSession<PaymentAttemptView>;
   webhookEvents: SdkWorkPagedListSession<PaymentWebhookEventView>;
   reconciliationRuns: SdkWorkPagedListSession<ReconciliationRunView>;
+  refunds: SdkWorkPagedListSession<RefundView>;
   intentFilter?: PaymentIntentListFilter;
   attemptFilter?: PaymentAttemptListFilter;
   webhookEventFilter?: PaymentWebhookEventListFilter;
   reconciliationRunFilter?: ReconciliationRunListFilter;
+  refundFilter?: RefundListFilter;
 }
 
 function createSessions(service: SdkworkPaymentBackendService): MonitorAdminSessions {
@@ -273,12 +326,16 @@ function createSessions(service: SdkworkPaymentBackendService): MonitorAdminSess
       fetchPage: (query) => service.reconciliationRuns.list(query),
       mapItem: mapReconciliationRun,
     }),
+    refunds: createSdkWorkPagedListSession<RefundView>({
+      fetchPage: (query) => service.refunds.list(query),
+      mapItem: mapRefund,
+    }),
   };
 }
 
 type Snapshot = Pick<
   PaymentMonitorAdminState,
-  "intents" | "attempts" | "webhookEvents" | "reconciliationRuns"
+  "intents" | "attempts" | "webhookEvents" | "reconciliationRuns" | "refunds"
 >;
 
 const EMPTY_SNAPSHOT: Snapshot = {
@@ -286,6 +343,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   attempts: [],
   webhookEvents: [],
   reconciliationRuns: [],
+  refunds: [],
 };
 
 function cloneSnapshot(snapshot: Snapshot): Snapshot {
@@ -294,6 +352,7 @@ function cloneSnapshot(snapshot: Snapshot): Snapshot {
     attempts: [...snapshot.attempts],
     webhookEvents: [...snapshot.webhookEvents],
     reconciliationRuns: [...snapshot.reconciliationRuns],
+    refunds: [...snapshot.refunds],
   };
 }
 
@@ -303,6 +362,7 @@ function snapshotFromSessions(sessions: MonitorAdminSessions): Snapshot {
     attempts: [...sessions.attempts.getItems()],
     webhookEvents: [...sessions.webhookEvents.getItems()],
     reconciliationRuns: [...sessions.reconciliationRuns.getItems()],
+    refunds: [...sessions.refunds.getItems()],
   };
 }
 
@@ -329,6 +389,7 @@ type ReloadTarget =
   | "attempts"
   | "webhookEvents"
   | "reconciliationRuns"
+  | "refunds"
   | "none";
 
 // ---------------------------------------------------------------------------
@@ -362,6 +423,7 @@ export function createPaymentMonitorAdminController(
         attempts: sessions.attempts.getPageInfo(),
         webhookEvents: sessions.webhookEvents.getPageInfo(),
         reconciliationRuns: sessions.reconciliationRuns.getPageInfo(),
+        refunds: sessions.refunds.getPageInfo(),
       },
     };
     emit();
@@ -383,6 +445,8 @@ export function createPaymentMonitorAdminController(
       await sessions.reconciliationRuns.list(
         filterToRecord({ ...sessions.reconciliationRunFilter }),
       );
+    } else if (target === "refunds") {
+      await sessions.refunds.list(filterToRecord({ ...sessions.refundFilter }));
     }
   }
 
@@ -423,16 +487,19 @@ export function createPaymentMonitorAdminController(
       sessions.attempts.reset();
       sessions.webhookEvents.reset();
       sessions.reconciliationRuns.reset();
+      sessions.refunds.reset();
       sessions.intentFilter = undefined;
       sessions.attemptFilter = undefined;
       sessions.webhookEventFilter = undefined;
       sessions.reconciliationRunFilter = undefined;
+      sessions.refundFilter = undefined;
       try {
         await Promise.all([
           sessions.intents.list(),
           sessions.attempts.list(),
           sessions.webhookEvents.list(),
           sessions.reconciliationRuns.list(),
+          sessions.refunds.list(),
         ]);
         setState({
           status: "ready",
@@ -441,6 +508,7 @@ export function createPaymentMonitorAdminController(
           selectedIntentDetail: undefined,
           lastReplayResult: undefined,
           lastReconciliationRunId: undefined,
+          lastRefundId: undefined,
         });
         return state;
       } catch (error) {
@@ -494,6 +562,14 @@ export function createPaymentMonitorAdminController(
     async loadMoreReconciliationRuns() {
       try {
         return await sessions.reconciliationRuns.loadMore();
+      } finally {
+        setState({});
+      }
+    },
+
+    async loadMoreRefunds() {
+      try {
+        return await sessions.refunds.loadMore();
       } finally {
         setState({});
       }
@@ -567,6 +643,23 @@ export function createPaymentMonitorAdminController(
         setStatus(
           "error",
           error instanceof Error ? error.message : "Failed to apply reconciliation run filter.",
+        );
+        throw error;
+      }
+    },
+
+    async applyRefundFilter(filter) {
+      sessions.refundFilter = filter;
+      sessions.refunds.reset();
+      setStatus("loading", undefined);
+      try {
+        const items = await sessions.refunds.list(filterToRecord({ ...filter }));
+        setState({ status: "ready", lastError: undefined });
+        return items;
+      } catch (error) {
+        setStatus(
+          "error",
+          error instanceof Error ? error.message : "Failed to apply refund filter.",
         );
         throw error;
       }
@@ -656,5 +749,45 @@ export function createPaymentMonitorAdminController(
         return mapped;
       });
     },
+
+    async createRefund(draft: CreateRefundDraft) {
+      return wrapMutation(
+        async () => {
+          const response = await service.refunds.create(draft, {
+            idempotencyKey: paymentCommandIdempotencyKey("refund"),
+          });
+          const item = extractSdkWorkResourceItem<unknown>(response);
+          const mapped = mapRefund(item);
+          if (!mapped) {
+            throw new Error("Failed to parse created refund.");
+          }
+          return mapped;
+        },
+        "Failed to create refund.",
+        { reload: "refunds" },
+      ).then((mapped) => {
+        state = { ...state, lastRefundId: mapped.id };
+        emit();
+        return mapped;
+      });
+    },
+
+    async retryRefund(refundId, confirmRefundNo) {
+      await wrapMutation(
+        async () => {
+          await service.refunds.retry(
+            refundId,
+            { confirmRefundNo, expectedStatus: "failed" },
+            { idempotencyKey: paymentCommandIdempotencyKey("refund-retry") },
+          );
+        },
+        "Failed to retry refund.",
+        { reload: "refunds" },
+      );
+    },
   };
+}
+
+function paymentCommandIdempotencyKey(prefix: string): string {
+  return `${prefix}-${globalThis.crypto.randomUUID()}`;
 }

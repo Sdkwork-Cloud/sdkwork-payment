@@ -59,6 +59,7 @@ export function createSdkworkPaymentPcAdminModuleRegistry(): readonly PaymentPcA
       "additionalPermissionPrefixes": [
         "commerce.payments.intents",
         "commerce.payments.attempts",
+        "commerce.payments.refunds",
         "commerce.payments.webhook_events",
         "commerce.payments.reconciliation_runs",
       ],
@@ -112,6 +113,16 @@ export {
 } from "./components/admin-constants";
 
 export { PaymentAdminI18nBoundary } from "./components/PaymentAdminI18nBoundary";
+export {
+  PaymentMethodIcon,
+  PaymentProviderIcon,
+  PaymentSceneIcon,
+  type PaymentIdentityIconProps,
+  type PaymentIdentityIconSize,
+  type PaymentMethodIconProps,
+  type PaymentProviderIconProps,
+  type PaymentSceneIconProps,
+} from "./components/PaymentIdentityIcon";
 export {
   PaymentAdminTabsContent,
   PaymentAdminTabsList,

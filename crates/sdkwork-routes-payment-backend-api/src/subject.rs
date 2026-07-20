@@ -5,6 +5,7 @@ use sdkwork_iam_context_service::{IamAppContext, LoginScope};
 pub(crate) struct AppRuntimeSubject {
     pub tenant_id: String,
     pub organization_id: Option<String>,
+    pub user_id: String,
 }
 
 /// Backend handler entry enforcing organization-scoped IAM boundaries.
@@ -47,6 +48,7 @@ fn app_runtime_subject_from_iam(context: &IamAppContext) -> Result<AppRuntimeSub
     Ok(AppRuntimeSubject {
         tenant_id,
         organization_id,
+        user_id: required_context_text(&context.user_id, "user_id")?,
     })
 }
 

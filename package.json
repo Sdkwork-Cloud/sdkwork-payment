@@ -5,7 +5,8 @@
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "stop": "node ../sdkwork-specs/tools/stop-sdkwork-workspace-processes.mjs --workspace .",    "dev": "pnpm --dir apps/sdkwork-payment-pc dev",
+    "stop": "node ../sdkwork-specs/tools/stop-sdkwork-workspace-processes.mjs --workspace .",
+    "dev": "pnpm --dir apps/sdkwork-payment-pc dev",
     "build": "pnpm --dir apps/sdkwork-payment-pc build",
     "start": "cargo run -p sdkwork-payment-standalone-gateway --bin payment-server",
     "test": "pnpm test:node && pnpm test:vitest && cargo test --workspace",
@@ -19,8 +20,8 @@
     "check:sdk-consumer": "node ../sdkwork-specs/tools/check-app-sdk-consumer-imports.mjs --workspace .",
     "sdk:check": "node tools/payment_app_sdk_generate.mjs --check && node tools/payment_sdk_generate.mjs --check",
     "sdk:generate": "node tools/payment_app_sdk_generate.mjs && node tools/payment_sdk_generate.mjs",
-    "fmt:rust:check": "cargo fmt --all -- --check",
-    "check": "pnpm run check:app-composition && pnpm db:validate && pnpm gateway:assembly:validate && pnpm fmt:rust:check",
+    "format:check": "cargo fmt --all -- --check",
+    "check": "pnpm run check:app-composition && pnpm db:validate && pnpm api:assembly:validate && pnpm format:check",
     "db:validate": "node ../sdkwork-specs/tools/check-database-framework-standard.mjs --root .",
     "db:materialize:contract": "node ../sdkwork-specs/tools/materialize-database-contract-from-baseline.mjs --root . --baseline database/ddl/baseline/postgres/0001_payment_baseline.sql --module-id payment --owner sdkwork-payment --prefixes commerce_ --engines postgres,sqlite",
     "db:plan": "cargo run --manifest-path ../sdkwork-database/Cargo.toml -p sdkwork-database-cli -- --app-root . plan",
@@ -37,8 +38,8 @@
     "db:bootstrap": "cargo run --manifest-path ../sdkwork-database/Cargo.toml -p sdkwork-database-cli -- --app-root . bootstrap",
     "db:bootstrap:dev": "cargo run --manifest-path ../sdkwork-database/Cargo.toml -p sdkwork-database-cli -- --app-root . bootstrap --profile development",
     "db:bootstrap:prod": "cargo run --manifest-path ../sdkwork-database/Cargo.toml -p sdkwork-database-cli -- --app-root . bootstrap --profile production",
-    "gateway:assembly:materialize": "node scripts/gateway/assembly-materialize.mjs",
-    "gateway:assembly:validate": "node scripts/gateway/assembly-validate.mjs",
+    "api:assembly:materialize": "node scripts/gateway/assembly-materialize.mjs",
+    "api:assembly:validate": "node scripts/gateway/assembly-validate.mjs",
     "check:app-composition": "node ../sdkwork-specs/tools/verify-repo.mjs --root ."
   },
   "devDependencies": {

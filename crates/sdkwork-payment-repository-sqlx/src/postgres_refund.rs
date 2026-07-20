@@ -98,14 +98,14 @@ impl PostgresCommerceRefundStore {
         let refund_no = format!("RF-{}", command.request_no);
         crate::shared::ensure_refund_status_transition(None, "submitted")?;
 
-        sqlx::query(
+        let insert_result = sqlx::query(
             r#"
             INSERT INTO commerce_refund
                 (id, tenant_id, organization_id, order_id, payment_attempt_id, refund_no,
                  amount, currency_code, status, refund_reason_code, requested_by_type,
                  requested_by, request_no, idempotency_key, created_at, updated_at)
             VALUES
-                ($1, $2, $3, $4, $5, $6, $7, $8, 'submitted', $9, 'buyer', $10, $11, $12, $13::timestamptz, $14::timestamptz)
+                ($1, $2, $3, $4, $5, $6, $7, $8, 'submitted', $9, $10, $11, $12, $13, $14::timestamptz, $15::timestamptz)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -118,7 +118,8 @@ impl PostgresCommerceRefundStore {
         .bind(&refund_amount)
         .bind(&command.currency_code)
         .bind(command.reason_code.as_deref())
-        .bind(&command.owner_user_id)
+        .bind(&command.requested_by_type)
+        .bind(&command.requested_by)
         .bind(&command.request_no)
         .bind(&command.idempotency_key)
         .bind(&now)
@@ -127,11 +128,16 @@ impl PostgresCommerceRefundStore {
         .await
         .map_err(|error| store_error("failed to insert refund", error))?;
 
-        if let Some(existing) = find_refund_by_idempotency_in_tx(&mut tx, &command).await? {
-            tx.commit().await.map_err(|error| {
-                store_error("failed to commit refund idempotency replay", error)
-            })?;
-            return Ok(existing);
+        if insert_result.rows_affected() == 0 {
+            if let Some(existing) = find_refund_by_idempotency_in_tx(&mut tx, &command).await? {
+                tx.commit().await.map_err(|error| {
+                    store_error("failed to commit refund idempotency replay", error)
+                })?;
+                return Ok(existing);
+            }
+            return Err(CommerceServiceError::conflict(
+                "refund idempotency identity could not be resolved",
+            ));
         }
 
         insert_refund_event(
@@ -140,7 +146,10 @@ impl PostgresCommerceRefundStore {
             command.organization_id.as_deref(),
             &refund_id,
             "created",
+            None,
             "submitted",
+            &command.requested_by_type,
+            Some(&command.requested_by),
             &command.request_no,
             &command.idempotency_key,
             &now,
@@ -250,7 +259,12 @@ impl PostgresCommerceRefundStore {
     pub async fn mark_owner_refund_provider_submission_failed(
         &self,
         tenant_id: &str,
+        organization_id: Option<&str>,
         refund_id: &str,
+        actor_type: &str,
+        actor_id: Option<&str>,
+        request_no: &str,
+        idempotency_key: &str,
     ) -> Result<RefundView, CommerceServiceError> {
         let now = current_timestamp_string();
         let mut tx = self.pool.begin().await.map_err(|error| {
@@ -263,13 +277,16 @@ impl PostgresCommerceRefundStore {
                    CAST(amount AS TEXT) AS amount, currency_code, status, refund_reason_code
             FROM commerce_refund
             WHERE tenant_id = CAST($1 AS TEXT)
-              AND id = CAST($2 AS TEXT)
+              AND ((organization_id = CAST($2 AS TEXT)) OR (organization_id IS NULL AND $3 IS NULL))
+              AND id = CAST($4 AS TEXT)
               AND deleted_at IS NULL
             LIMIT 1
             FOR UPDATE
            "#,
         )
         .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
         .bind(refund_id)
         .fetch_optional(&mut *tx)
         .await
@@ -285,30 +302,34 @@ impl PostgresCommerceRefundStore {
         sqlx::query(
             r#"
             UPDATE commerce_refund
-            SET status = 'failed', updated_at = $1::timestamptz
+            SET status = 'failed', updated_at = $1::timestamptz, version = version + 1
             WHERE tenant_id = CAST($2 AS TEXT)
-              AND id = CAST($3 AS TEXT)
-              AND status = 'submitted'
+              AND ((organization_id = CAST($3 AS TEXT)) OR (organization_id IS NULL AND $4 IS NULL))
+              AND id = CAST($5 AS TEXT)
+              AND status IN ('submitted', 'processing')
            "#,
         )
         .bind(&now)
         .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
         .bind(refund_id)
         .execute(&mut *tx)
         .await
         .map_err(|error| store_error("failed to mark refund provider submission failed", error))?;
 
-        let request_no = format!("refund-provider-failed-{refund_id}");
-        let idempotency_key = format!("refund-provider-failed-{refund_id}");
         insert_refund_event(
             &mut tx,
             tenant_id,
-            None,
+            organization_id,
             refund_id,
-            "provider_submission_failed",
             "failed",
-            &request_no,
-            &idempotency_key,
+            Some(&current_status),
+            "failed",
+            actor_type,
+            actor_id,
+            request_no,
+            idempotency_key,
             &now,
         )
         .await?;
@@ -322,6 +343,99 @@ impl PostgresCommerceRefundStore {
 
         map_refund_row(row).map(|mut view| {
             view.status = "failed".to_owned();
+            view
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn mark_owner_refund_provider_submission_processing(
+        &self,
+        tenant_id: &str,
+        organization_id: Option<&str>,
+        refund_id: &str,
+        actor_type: &str,
+        actor_id: Option<&str>,
+        request_no: &str,
+        idempotency_key: &str,
+    ) -> Result<RefundView, CommerceServiceError> {
+        let now = current_timestamp_string();
+        let mut tx =
+            self.pool.begin().await.map_err(|error| {
+                store_error("failed to begin refund submission transaction", error)
+            })?;
+        let row = sqlx::query(
+            r#"
+            SELECT id, refund_no, order_id, payment_attempt_id,
+                   CAST(amount AS TEXT) AS amount, currency_code, status, refund_reason_code
+            FROM commerce_refund
+            WHERE tenant_id = CAST($1 AS TEXT)
+              AND ((organization_id = CAST($2 AS TEXT)) OR (organization_id IS NULL AND $3 IS NULL))
+              AND id = CAST($4 AS TEXT)
+              AND deleted_at IS NULL
+            LIMIT 1
+            FOR UPDATE
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(refund_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error("failed to load refund for provider submission", error))?;
+        let Some(row) = row else {
+            return Err(CommerceServiceError::not_found("refund was not found"));
+        };
+        let current_status = string_cell(&row, "status");
+        crate::shared::ensure_refund_status_transition(Some(&current_status), "processing")?;
+        let result = sqlx::query(
+            r#"
+            UPDATE commerce_refund
+            SET status = 'processing', updated_at = $1::timestamptz, version = version + 1
+            WHERE tenant_id = CAST($2 AS TEXT)
+              AND ((organization_id = CAST($3 AS TEXT)) OR (organization_id IS NULL AND $4 IS NULL))
+              AND id = CAST($5 AS TEXT)
+              AND status IN ('submitted', 'failed')
+            "#,
+        )
+        .bind(&now)
+        .bind(tenant_id)
+        .bind(organization_id)
+        .bind(organization_id)
+        .bind(refund_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            store_error(
+                "failed to mark refund provider submission processing",
+                error,
+            )
+        })?;
+        if result.rows_affected() != 1 {
+            return Err(CommerceServiceError::conflict(
+                "refund is already processing or is not retryable",
+            ));
+        }
+        insert_refund_event(
+            &mut tx,
+            tenant_id,
+            organization_id,
+            refund_id,
+            "status_changed",
+            Some(&current_status),
+            "processing",
+            actor_type,
+            actor_id,
+            request_no,
+            idempotency_key,
+            &now,
+        )
+        .await?;
+        tx.commit().await.map_err(|error| {
+            store_error("failed to commit refund submission transaction", error)
+        })?;
+        map_refund_row(row).map(|mut view| {
+            view.status = "processing".to_owned();
             view
         })
     }
@@ -437,7 +551,10 @@ async fn insert_refund_event(
     organization_id: Option<&str>,
     refund_id: &str,
     event_type: &str,
+    from_status: Option<&str>,
     to_status: &str,
+    actor_type: &str,
+    actor_id: Option<&str>,
     request_no: &str,
     idempotency_key: &str,
     now: &str,
@@ -456,7 +573,7 @@ async fn insert_refund_event(
             (id, tenant_id, organization_id, event_no, refund_id, event_type,
              from_status, to_status, actor_type, actor_id, request_id, idempotency_key, created_at)
         VALUES
-            ($1, $2, $3, $4, $5, $6, NULL, $7, 'buyer', NULL, $8, $9, $10::timestamptz)
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::timestamptz)
        "#,
     )
     .bind(&event_id)
@@ -465,7 +582,10 @@ async fn insert_refund_event(
     .bind(&event_no)
     .bind(refund_id)
     .bind(event_type)
+    .bind(from_status)
     .bind(to_status)
+    .bind(actor_type)
+    .bind(actor_id)
     .bind(request_no)
     .bind(idempotency_key)
     .bind(now)

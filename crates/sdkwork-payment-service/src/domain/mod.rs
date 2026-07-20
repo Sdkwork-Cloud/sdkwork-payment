@@ -221,6 +221,7 @@ impl RefundTransition {
             | (RefundStatus::Processing, RefundStatus::Succeeded)
             | (RefundStatus::Processing, RefundStatus::Failed)
             | (RefundStatus::Processing, RefundStatus::Closed)
+            | (RefundStatus::Failed, RefundStatus::Processing)
             | (RefundStatus::Requested, RefundStatus::Closed) => Ok(()),
             _ => Err(CommerceServiceError::invalid_state(
                 "invalid refund status transition",

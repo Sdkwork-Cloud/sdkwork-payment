@@ -59,6 +59,15 @@ export type ReconciliationRunStatus =
   | "failed"
   | "canceled";
 
+export type RefundStatus = "submitted" | "processing" | "succeeded" | "failed" | "closed";
+
+export type RefundReasonCode =
+  | "customer_request"
+  | "duplicate"
+  | "fraud"
+  | "service_failure"
+  | "other";
+
 export type ReconciliationType = "daily" | "weekly" | "monthly" | "manual" | "settlement";
 
 export const PAYMENT_STATUS_VALUES: readonly PaymentStatus[] = [
@@ -105,6 +114,22 @@ export const RECONCILIATION_TYPE_VALUES: readonly ReconciliationType[] = [
   "settlement",
 ] as const;
 
+export const REFUND_STATUS_VALUES: readonly RefundStatus[] = [
+  "submitted",
+  "processing",
+  "succeeded",
+  "failed",
+  "closed",
+] as const;
+
+export const REFUND_REASON_VALUES: readonly RefundReasonCode[] = [
+  "customer_request",
+  "duplicate",
+  "fraud",
+  "service_failure",
+  "other",
+] as const;
+
 export const PROVIDER_CODES: readonly PaymentProviderCode[] = [
   "stripe",
   "alipay",
@@ -145,6 +170,13 @@ export interface ReconciliationRunListFilter {
   readonly status?: ReconciliationRunStatus;
   readonly providerCode?: PaymentProviderCode;
   readonly providerAccountId?: string;
+  readonly q?: string;
+}
+
+export interface RefundListFilter {
+  readonly status?: RefundStatus;
+  readonly orderId?: string;
+  readonly paymentIntentId?: string;
   readonly q?: string;
 }
 
@@ -230,6 +262,24 @@ export interface ReconciliationRunView {
   readonly createdAt: string;
 }
 
+export interface RefundView {
+  readonly id: string;
+  readonly refundNo: string;
+  readonly orderId: string;
+  readonly paymentIntentId: string;
+  readonly paymentAttemptId: string;
+  readonly providerCode: PaymentProviderCode;
+  readonly providerAccountId?: string;
+  readonly amount: string;
+  readonly currencyCode: string;
+  readonly status: RefundStatus;
+  readonly reasonCode?: RefundReasonCode;
+  readonly requestedByType: "buyer" | "operator" | "system";
+  readonly requestedBy?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 /**
  * Provider account dropdown option structure.
  *
@@ -270,6 +320,13 @@ export interface CreateReconciliationRunDraft {
   readonly currencyCode: string;
 }
 
+export interface CreateRefundDraft {
+  readonly paymentIntentId: string;
+  readonly amount?: string;
+  readonly reasonCode: RefundReasonCode;
+  readonly confirmPaymentIntentNo: string;
+}
+
 export interface WebhookReplayResult {
   readonly ok: boolean;
   readonly eventId: string;
@@ -290,16 +347,19 @@ export interface PaymentMonitorAdminState {
   readonly attempts: readonly PaymentAttemptView[];
   readonly webhookEvents: readonly PaymentWebhookEventView[];
   readonly reconciliationRuns: readonly ReconciliationRunView[];
+  readonly refunds: readonly RefundView[];
   readonly listPageInfo?: Partial<{
     intents: import("@sdkwork/payment-contracts").SdkWorkPageInfo;
     attempts: import("@sdkwork/payment-contracts").SdkWorkPageInfo;
     webhookEvents: import("@sdkwork/payment-contracts").SdkWorkPageInfo;
     reconciliationRuns: import("@sdkwork/payment-contracts").SdkWorkPageInfo;
+    refunds: import("@sdkwork/payment-contracts").SdkWorkPageInfo;
   }>;
   readonly selectedIntentId?: string;
   readonly selectedIntentDetail?: PaymentIntentDetail;
   readonly lastReplayResult?: WebhookReplayResult;
   readonly lastReconciliationRunId?: string;
+  readonly lastRefundId?: string;
   // Provider account dropdown data source for reconciliation run creation form; optional, injected by caller as needed
   readonly providerAccounts?: readonly ReconciliationProviderAccountOption[];
 }
@@ -317,6 +377,7 @@ export interface PaymentMonitorAdminController {
   loadMoreAttempts(): Promise<readonly PaymentAttemptView[]>;
   loadMoreWebhookEvents(): Promise<readonly PaymentWebhookEventView[]>;
   loadMoreReconciliationRuns(): Promise<readonly ReconciliationRunView[]>;
+  loadMoreRefunds(): Promise<readonly RefundView[]>;
   applyIntentFilter(filter: PaymentIntentListFilter): Promise<readonly PaymentIntentView[]>;
   applyAttemptFilter(filter: PaymentAttemptListFilter): Promise<readonly PaymentAttemptView[]>;
   applyWebhookEventFilter(
@@ -325,7 +386,10 @@ export interface PaymentMonitorAdminController {
   applyReconciliationRunFilter(
     filter: ReconciliationRunListFilter,
   ): Promise<readonly ReconciliationRunView[]>;
+  applyRefundFilter(filter: RefundListFilter): Promise<readonly RefundView[]>;
   selectIntent(id?: string): Promise<PaymentIntentDetail | undefined>;
   replayWebhookEvent(eventId: string): Promise<WebhookReplayResult>;
   createReconciliationRun(draft: CreateReconciliationRunDraft): Promise<ReconciliationRunView>;
+  createRefund(draft: CreateRefundDraft): Promise<RefundView>;
+  retryRefund(refundId: string, confirmRefundNo: string): Promise<void>;
 }

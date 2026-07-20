@@ -122,6 +122,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_refund_idempotency
     ON commerce_refund (tenant_id, order_id, idempotency_key)
     WHERE deleted_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS commerce_refund_event (
+    id TEXT NOT NULL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    organization_id TEXT,
+    event_no TEXT NOT NULL,
+    refund_id TEXT NOT NULL,
+    event_type TEXT NOT NULL
+        CHECK (event_type IN ('created', 'status_changed', 'succeeded', 'failed', 'canceled')),
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    actor_type TEXT NOT NULL DEFAULT 'buyer'
+        CHECK (actor_type IN ('buyer', 'operator', 'system')),
+    actor_id TEXT,
+    request_id TEXT,
+    idempotency_key TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_refund_event_idempotency
+    ON commerce_refund_event (tenant_id, refund_id, event_type, idempotency_key);
+
+CREATE INDEX IF NOT EXISTS idx_commerce_refund_event_refund
+    ON commerce_refund_event (tenant_id, refund_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS commerce_payment_method (
     id TEXT NOT NULL PRIMARY KEY,
     tenant_id TEXT NOT NULL,

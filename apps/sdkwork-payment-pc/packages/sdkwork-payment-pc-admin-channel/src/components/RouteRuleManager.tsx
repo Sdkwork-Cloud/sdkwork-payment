@@ -35,6 +35,8 @@ import {
 import {
   AdminFieldLabel,
   ConfirmDialog,
+  PaymentProviderIcon,
+  PaymentSceneIcon,
   SdkworkPaymentListPaginationControls,
 } from "@sdkwork/payment-pc-admin-core";
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
@@ -148,17 +150,28 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
             .map((rule) => {
             const channel = props.channels.find((c) => c.id === rule.channelId);
             return (
-              <li key={rule.id} className="space-y-2 p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-[var(--sdk-color-text)]">
-                    {rule.ruleNo}
+              <li key={rule.id} className="grid gap-3 p-4 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-start">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-10 min-w-10 items-center justify-center rounded-md border border-[var(--sdk-color-border-default)] bg-[var(--sdk-color-surface-panel-muted)] px-2 text-sm font-bold tabular-nums text-[var(--sdk-color-text-primary)]" title="Lower priority numbers run first">
+                    {rule.priority}
                   </span>
-                  <Badge variant="outline">Priority: {rule.priority}</Badge>
-                  <Badge variant={STATUS_VARIANT[rule.status]}>{rule.status}</Badge>
-                  <span className="text-xs text-[var(--sdk-color-text-muted)]">
-                    → {channel ? channel.channelNo : rule.channelId}
-                  </span>
+                  {channel ? (
+                    <PaymentProviderIcon providerCode={channel.providerCode ?? "unknown"} size="md" />
+                  ) : null}
                 </div>
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-[var(--sdk-color-text-primary)]">{rule.ruleNo}</span>
+                    <Badge variant={STATUS_VARIANT[rule.status]}>{rule.status}</Badge>
+                    {channel ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-[var(--sdk-color-text-secondary)]">
+                        <PaymentSceneIcon sceneCode={channel.sceneCode} size="xs" />
+                        {channel.channelName ?? channel.channelNo}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-[var(--sdk-color-text-muted)]">Missing channel · {rule.channelId}</span>
+                    )}
+                  </div>
                 <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] sm:grid-cols-3">
                   {rule.purchaseType ? (
                     <div>
@@ -210,7 +223,8 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
                     Valid window: {rule.startsAt ?? "now"} → {rule.endsAt ?? "forever"}
                   </div>
                 ) : null}
-                <div className="flex justify-end gap-2">
+                </div>
+                <div className="flex justify-end gap-2 lg:self-center">
                   {props.canUpdate ? <Button
                     type="button"
                     variant="ghost"

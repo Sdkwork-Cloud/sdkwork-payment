@@ -32,6 +32,10 @@ import {
 } from "@sdkwork/ui-pc-react";
 import {
   AdminFieldLabel,
+  adminPaymentMethodKeyOption,
+  PaymentMethodIcon,
+  PaymentProviderIcon,
+  PaymentSceneIcon,
   SdkworkPaymentListPaginationControls,
 } from "@sdkwork/payment-pc-admin-core";
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
@@ -131,37 +135,49 @@ export function ChannelManager(props: ChannelManagerProps) {
             const method = props.methods.find((m) => m.id === channel.methodId);
             const providerAccount = props.providerAccounts.find((p) => p.id === channel.providerAccountId);
             return (
-              <li key={channel.id} className="space-y-2 p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-[var(--sdk-color-text)]">
-                    {channel.channelName ?? channel.channelNo}
-                  </span>
-                  <Badge variant="outline" className="font-mono">
-                    {channel.channelNo}
-                  </Badge>
-                  <Badge variant="secondary">{SCENE_LABEL[channel.sceneCode]}</Badge>
-                  <Badge variant="outline">
-                    {channel.currencyCode} · {channel.countryCode}
-                  </Badge>
-                  <Badge variant={STATUS_VARIANT[channel.status]}>{channel.status}</Badge>
-                  <Badge variant="outline">Priority: {channel.priority}</Badge>
+              <li key={channel.id} className="flex flex-col gap-3 p-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <div className="flex shrink-0 items-center -space-x-1.5" aria-label="Payment method to provider route">
+                    <PaymentMethodIcon
+                      label={method ? adminPaymentMethodKeyOption(method.methodKey)?.label ?? method.displayName : "Payment method"}
+                      methodKey={method?.methodKey ?? channel.methodId}
+                      providerCode={method?.providerCode ?? channel.providerCode}
+                      size="md"
+                    />
+                    <PaymentProviderIcon
+                      className="ring-2 ring-[var(--sdk-color-surface-panel)]"
+                      label={providerAccount?.providerCode ?? channel.providerCode ?? "Payment provider"}
+                      providerCode={providerAccount?.providerCode ?? channel.providerCode ?? "unknown"}
+                      size="md"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-[var(--sdk-color-text-primary)]">
+                        {channel.channelName ?? channel.channelNo}
+                      </span>
+                      <Badge variant="outline" className="font-mono">{channel.channelNo}</Badge>
+                      <Badge variant={STATUS_VARIANT[channel.status]}>{channel.status}</Badge>
+                      <Badge variant="outline">Priority {channel.priority}</Badge>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--sdk-color-text-secondary)]">
+                      <span className="font-medium text-[var(--sdk-color-text-primary)]">
+                        {method ? method.displayName : channel.methodId}
+                      </span>
+                      <span aria-hidden="true" className="text-[var(--sdk-color-text-muted)]">→</span>
+                      <span className="font-mono">
+                        {providerAccount ? providerAccount.accountNo : channel.providerAccountId}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-[var(--sdk-color-text-secondary)] sm:grid-cols-2">
-                  <div>
-                    <dt className="inline">Method:</dt>{" "}
-                    <dd className="inline">
-                      {method ? `${method.displayName} (${method.methodKey})` : channel.methodId}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="inline">Provider account:</dt>{" "}
-                    <dd className="inline">
-                      {providerAccount
-                        ? `${providerAccount.accountNo} (${providerAccount.providerCode})`
-                        : channel.providerAccountId}
-                    </dd>
-                  </div>
-                </dl>
+                <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-[var(--sdk-color-text-secondary)]">
+                    <PaymentSceneIcon sceneCode={channel.sceneCode} size="xs" />
+                    {SCENE_LABEL[channel.sceneCode]}
+                  </span>
+                  <Badge variant="outline">{channel.currencyCode} · {channel.countryCode || "Global"}</Badge>
+                </div>
               </li>
             );
           })}

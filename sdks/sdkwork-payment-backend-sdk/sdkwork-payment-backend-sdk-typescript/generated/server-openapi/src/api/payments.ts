@@ -1,7 +1,7 @@
 import { backendApiPath } from './paths';
 import type { HttpClient } from '../http/client';
 
-import type { Certificate, CreateCertificateCommand, CreatePaymentChannelCommand, CreatePaymentMethodCommand, CreateProviderAccountCommand, CreateReconciliationRunCommand, CreateRouteRuleCommand, CreateSubMerchantCommand, CredentialRotateCommand, PageInfo, PaymentAttempt, PaymentChannel, PaymentIntent, PaymentMethod, ProviderAccount, ProviderAccountTestCommand, ProviderAccountTestResult, ReconciliationRun, RouteRule, SandboxTriggerCommand, SdkWorkAsyncData, SdkWorkCommandData, SubMerchant, UpdatePaymentMethodCommand, UpdateProviderAccountCommand, UpdateRouteRuleCommand, UpdateSubMerchantCommand, WebhookEvent, WebhookEventsReplayRequest, WebhookSignatureTestCommand, WebhookSignatureTestResult } from '../types';
+import type { Certificate, CreateCertificateCommand, CreatePaymentChannelCommand, CreatePaymentMethodCommand, CreateProviderAccountCommand, CreateReconciliationRunCommand, CreateRefundCommand, CreateRouteRuleCommand, CreateSubMerchantCommand, CredentialRotateCommand, PageInfo, PaymentAttempt, PaymentChannel, PaymentIntent, PaymentMethod, ProviderAccount, ProviderAccountTestCommand, ProviderAccountTestResult, ReconciliationRun, Refund, RetryRefundCommand, RouteRule, SandboxTriggerCommand, SdkWorkAsyncData, SdkWorkCommandData, SubMerchant, UpdatePaymentMethodCommand, UpdateProviderAccountCommand, UpdateRouteRuleCommand, UpdateSubMerchantCommand, WebhookEvent, WebhookEventsReplayRequest, WebhookSignatureTestCommand, WebhookSignatureTestResult } from '../types';
 
 
 export interface PaymentsDevSandboxTriggerParams {
@@ -572,6 +572,72 @@ export class PaymentsMethodsApi {
   }
 }
 
+export interface PaymentsRefundsListParams {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+  status?: 'submitted' | 'processing' | 'succeeded' | 'failed' | 'closed';
+  orderId?: string;
+  paymentIntentId?: string;
+}
+
+export interface PaymentsRefundsCreateParams {
+  idempotencyKey?: string;
+}
+
+export interface PaymentsRefundsRetryParams {
+  idempotencyKey?: string;
+}
+
+export class PaymentsRefundsApi {
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
+
+
+/** Refunds list. */
+  async list(params?: PaymentsRefundsListParams): Promise<Record<string, unknown>> {
+    const query = buildQueryString([
+      { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
+      { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
+      { name: 'q', value: params?.q, style: 'form', explode: true, allowReserved: false },
+      { name: 'status', value: params?.status, style: 'form', explode: true, allowReserved: false },
+      { name: 'order_id', value: params?.orderId, style: 'form', explode: true, allowReserved: false },
+      { name: 'payment_intent_id', value: params?.paymentIntentId, style: 'form', explode: true, allowReserved: false },
+    ]);
+    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/refunds`), query));
+  }
+
+/** Refund create. */
+  async create(body: CreateRefundCommand, params?: PaymentsRefundsCreateParams): Promise<Refund> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<Refund>(backendApiPath(`/payments/refunds`), body, undefined, requestHeaders, 'application/json');
+  }
+
+/** Refund retrieve. */
+  async retrieve(refundId: string): Promise<Refund> {
+    return this.client.get<Refund>(backendApiPath(`/payments/refunds/${serializePathParameter(refundId, { name: 'refundId', style: 'simple', explode: false })}`));
+  }
+
+/** Refund provider submission retry. */
+  async retry(refundId: string, body: RetryRefundCommand, params?: PaymentsRefundsRetryParams): Promise<SdkWorkCommandData> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.post<SdkWorkCommandData>(backendApiPath(`/payments/refunds/${serializePathParameter(refundId, { name: 'refundId', style: 'simple', explode: false })}/retry`), body, undefined, requestHeaders, 'application/json');
+  }
+}
+
 export interface PaymentsIntentsListParams {
   page?: number;
   pageSize?: number;
@@ -613,6 +679,7 @@ export class PaymentsIntentsApi {
 export class PaymentsApi {
   private client: HttpClient;
   public readonly intents: PaymentsIntentsApi;
+  public readonly refunds: PaymentsRefundsApi;
   public readonly methods: PaymentsMethodsApi;
   public readonly providerAccounts: PaymentsProviderAccountsApi;
   public readonly channels: PaymentsChannelsApi;
@@ -627,6 +694,7 @@ export class PaymentsApi {
   constructor(client: HttpClient) {
     this.client = client;
     this.intents = new PaymentsIntentsApi(client);
+    this.refunds = new PaymentsRefundsApi(client);
     this.methods = new PaymentsMethodsApi(client);
     this.providerAccounts = new PaymentsProviderAccountsApi(client);
     this.channels = new PaymentsChannelsApi(client);

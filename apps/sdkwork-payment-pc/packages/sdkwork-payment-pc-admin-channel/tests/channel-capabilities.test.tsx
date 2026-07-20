@@ -32,6 +32,7 @@ describe("payment channel capabilities", () => {
     expect(screen.queryByRole("button", { name: "Create payment method" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Select" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-method-key="stripe_card"]')).not.toBeNull();
     unmount();
 
     render(
@@ -69,6 +70,7 @@ describe("payment channel capabilities", () => {
     );
 
     expect(screen.getByText("route-main")).toBeInTheDocument();
+    expect(document.querySelector('[data-provider="unknown"]')).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Create route rule" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();

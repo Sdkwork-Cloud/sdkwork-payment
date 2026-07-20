@@ -26,6 +26,8 @@ Buyers, finance operators, payment integrators, and reconciliation staff.
 
 - Own payment SQL, app payment/refund surfaces, and backend payment admin routes.
 - Keep write operations protected by command headers and tenant-scoped stores.
+- Make payment accounts the primary provider configuration object and expose advanced channel and routing composition progressively.
+- Give payment operators a tenant-scoped, auditable refund execution and recovery workflow without replacing order-domain approval.
 
 ### Non-Goals
 
@@ -37,7 +39,7 @@ Buyers, finance operators, payment integrators, and reconciliation staff.
 - Payment methods, records, statistics, reconcile flows.
 - Payment intents, attempts, and owner-order payment orchestration.
 - Refunds.
-- Backend payment admin: methods, providers, channels, route rules, sub-merchants, certificates, webhook event management, reconciliation.
+- Backend payment admin: methods, payment accounts, channels, route rules, sub-merchants, certificates, refund operations, webhook event management, reconciliation.
 
 Primary API prefixes:
 
@@ -93,7 +95,9 @@ Reconciliation runs compare internal payment records against PSP settlement repo
 ## 8. User Scenarios
 
 - A buyer pays for a pending order; payment record transitions to success with idempotent writes.
-- An operator configures provider accounts, manages sub-merchants, reviews webhook event signatures, and replays failed events from the admin console.
+- An operator creates a payment account first, then optionally composes methods, channels, and routing rules for advanced traffic orchestration.
+- An authorized operator initiates or retries a refund against the original successful payment attempt and provider account, with tenant isolation, amount bounds, idempotency, and audit attribution.
+- An operator manages sub-merchants, reviews webhook event signatures, and replays failed events from the admin console.
 - A reconciliation staff member creates reconciliation runs and reviews matched / mismatched / unmatched counts.
 
 ## 9. Success Metrics
@@ -111,6 +115,7 @@ Reconciliation runs compare internal payment records against PSP settlement repo
 
 ## 11. Linked Requirements
 
+- Payment account and refund operations: `../requirements/REQ-2026-0001-payment-account-refund-operations.md`
 - Commerce repository dissolution: `../sdkwork-specs/MIGRATION_SPEC.md` §8
 - Component contract: `specs/component.spec.json`
 - Machine contracts: local `specs/`, `database/ddl/`, route manifests
@@ -118,4 +123,4 @@ Reconciliation runs compare internal payment records against PSP settlement repo
 ## 12. Open Questions
 
 - Provider credential storage encryption policy and `PaymentProviderPort` implementation before external channel go-live.
-- Dedicated async refund-retry worker deployment topology (queue consumer) for multi-instance gateways when inline PSP retries are insufficient.
+- Dedicated async refund-retry worker deployment topology (queue consumer) remains a later reliability enhancement; bounded operator retry is owned by REQ-2026-0001.

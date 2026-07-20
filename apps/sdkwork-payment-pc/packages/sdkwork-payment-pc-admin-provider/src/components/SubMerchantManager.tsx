@@ -28,6 +28,7 @@ import {
   SdkworkPaymentListPaginationControls,
   AdminFieldLabel,
   ConfirmDialog,
+  PaymentProviderIcon,
 } from "@sdkwork/payment-pc-admin-core";
 import type {
   PaymentProviderAccountView,
@@ -217,12 +218,15 @@ export function SubMerchantManager(props: SubMerchantManagerProps) {
   return (
     <div className="space-y-3" data-slot="sub-merchant-manager">
       <div className="flex items-center justify-between">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--sdk-color-text-muted)]">
-            Sub-Merchants · {partnerAccount.accountNo}
-          </div>
-          <div className="mt-1 text-xs text-[var(--sdk-color-text-secondary)]">
-            {providerHint}
+        <div className="flex min-w-0 items-start gap-3">
+          <PaymentProviderIcon providerCode={partnerAccount.providerCode} size="md" />
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase text-[var(--sdk-color-text-muted)]">
+              Sub-Merchants · {partnerAccount.accountNo}
+            </div>
+            <div className="mt-1 text-xs text-[var(--sdk-color-text-secondary)]">
+              {providerHint}
+            </div>
           </div>
         </div>
         {props.canCreate ? <Button type="button" size="sm" onClick={openCreate}>
@@ -247,26 +251,25 @@ export function SubMerchantManager(props: SubMerchantManagerProps) {
               className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
               data-slot="sub-merchant-row"
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-[var(--sdk-color-text)]">
-                    {merchant.subMerchantName || merchant.subMerchantNo}
-                  </span>
-                  <Badge variant="outline">{merchant.subMerchantNo}</Badge>
-                  {merchant.subAppId ? (
-                    <Badge variant="secondary">sub_appid: {merchant.subAppId}</Badge>
-                  ) : null}
-                  {merchant.subMchId ? (
-                    <Badge variant="secondary">sub_mch_id: {merchant.subMchId}</Badge>
-                  ) : null}
-                  {merchant.stripeConnectedAccountId ? (
-                    <Badge variant="secondary">
-                      stripe: {merchant.stripeConnectedAccountId}
-                    </Badge>
-                  ) : null}
-                  <Badge variant={STATUS_TONE[merchant.status]}>
-                    {STATUS_LABEL[merchant.status]}
-                  </Badge>
+              <div className="flex min-w-0 flex-1 items-start gap-3">
+                <PaymentProviderIcon providerCode={merchant.providerCode} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-[var(--sdk-color-text)]">
+                      {merchant.subMerchantName || merchant.subMerchantNo}
+                    </span>
+                    <Badge variant="outline">{merchant.subMerchantNo}</Badge>
+                    {merchant.subAppId ? (
+                      <Badge variant="secondary">sub_appid: {merchant.subAppId}</Badge>
+                    ) : null}
+                    {merchant.subMchId ? (
+                      <Badge variant="secondary">sub_mch_id: {merchant.subMchId}</Badge>
+                    ) : null}
+                    {merchant.stripeConnectedAccountId ? (
+                      <Badge variant="secondary">stripe: {merchant.stripeConnectedAccountId}</Badge>
+                    ) : null}
+                    <Badge variant={STATUS_TONE[merchant.status]}>{STATUS_LABEL[merchant.status]}</Badge>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">

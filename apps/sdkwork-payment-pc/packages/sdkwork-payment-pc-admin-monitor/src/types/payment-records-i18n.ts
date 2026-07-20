@@ -2,6 +2,8 @@ import type {
   PaymentStatus,
   ReconciliationRunStatus,
   ReconciliationType,
+  RefundReasonCode,
+  RefundStatus,
   WebhookEventStatus,
   WebhookSignatureStatus,
 } from "./monitor-admin-types";
@@ -89,19 +91,24 @@ export interface PaymentRecordsMessages {
       clearFilters: string;
       createReconciliation: string;
       createRun: string;
+      createRefund: string;
       loadMore: string;
       newReconciliation: string;
+      newRefund: string;
       replay: string;
+      retryRefund: string;
       view: string;
     };
     availability: {
       applyFilter: string;
       cancelCreate: string;
       createReconciliation: string;
+      createRefund: string;
       creating: string;
       openDetails: string;
       replay: string;
       replayDisabled: string;
+      retryRefund: string;
     };
     attempts: {
       empty: string;
@@ -158,15 +165,66 @@ export interface PaymentRecordsMessages {
       status: Record<ReconciliationRunStatus, string>;
       type: Record<ReconciliationType, string>;
     };
+    refunds: {
+      availability: {
+        viewDetails: string;
+      };
+      confirmationDescription: (refundNo: string) => string;
+      confirmationTitle: string;
+      createDescription: string;
+      detailDescription: (reason: string) => string;
+      empty: string;
+      emptyFiltered: string;
+      fields: {
+        actions: string;
+        amount: string;
+        created: string;
+        order: string;
+        payment: string;
+        paymentAttempt: string;
+        providerAccount: string;
+        reason: string;
+        requestedBy: string;
+        status: string;
+        updated: string;
+      };
+      form: {
+        amount: string;
+        amountHint: string;
+        confirmation: string;
+        confirmationHint: string;
+        noEligiblePayments: string;
+        payment: string;
+        paymentPlaceholder: string;
+        reason: string;
+        retryConfirmation: string;
+      };
+      reason: Record<RefundReasonCode, string>;
+      status: Record<RefundStatus, string>;
+      summary: {
+        completed: string;
+        inFlight: string;
+        label: string;
+        loaded: string;
+        needsAttention: string;
+      };
+      tableDescription: (count: number) => string;
+    };
     validation: {
       applyFilterFailed: string;
       clearFiltersFailed: string;
       createReconciliationFailed: string;
+      createRefundFailed: string;
       periodInvalid: string;
       periodOrder: string;
       periodRequired: string;
       providerAccountRequired: string;
       replayFailed: string;
+      refundAmountExceedsPayment: string;
+      refundAmountInvalid: string;
+      refundConfirmationRequired: string;
+      refundPaymentRequired: string;
+      retryRefundFailed: string;
     };
     webhooks: {
       confirmationDescription: (eventType: string, eventId: string) => string;
@@ -218,6 +276,7 @@ export interface PaymentRecordsMessages {
       attempts: string;
       paymentRecords: string;
       reconciliation: string;
+      refunds: string;
       webhooks: string;
     };
     title: string;
