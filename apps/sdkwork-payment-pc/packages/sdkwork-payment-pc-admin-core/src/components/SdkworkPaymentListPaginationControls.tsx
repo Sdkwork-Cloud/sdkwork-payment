@@ -1,5 +1,6 @@
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
 import { Button } from "@sdkwork/ui-pc-react";
+import { ChevronDown, LoaderCircle } from "lucide-react";
 
 export interface SdkworkPaymentListPaginationControlsProps {
   busy?: boolean;
@@ -16,25 +17,47 @@ export function SdkworkPaymentListPaginationControls({
   pageInfo,
   summary,
 }: SdkworkPaymentListPaginationControlsProps) {
-  if (!pageInfo?.hasMore || !onLoadMore) {
-    return null;
-  }
-
-  const totalItems = pageInfo.totalItems ? Number(pageInfo.totalItems) : undefined;
-  const loadedCount = pageInfo.page && pageInfo.pageSize ? pageInfo.page * pageInfo.pageSize : undefined;
+  const totalItems = pageInfo?.totalItems ? Number(pageInfo.totalItems) : undefined;
+  const loadedCount = pageInfo?.page && pageInfo.pageSize ? pageInfo.page * pageInfo.pageSize : undefined;
   const defaultSummary =
     totalItems !== undefined && Number.isFinite(totalItems)
       ? `Showing ${Math.min(loadedCount ?? totalItems, totalItems)} of ${totalItems}`
       : undefined;
+  const resolvedSummary = summary ?? defaultSummary;
+  const canLoadMore = Boolean(pageInfo?.hasMore && onLoadMore);
+
+  if (!resolvedSummary && !canLoadMore) {
+    return null;
+  }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 pt-2">
-      {summary || defaultSummary ? (
-        <span className="text-sm text-[var(--sdk-color-text-muted)]">{summary ?? defaultSummary}</span>
+    <div
+      className="flex min-w-0 flex-1 flex-col gap-3 py-0.5 sm:flex-row sm:items-center sm:justify-between"
+      data-sdk-region="payment-list-pagination"
+    >
+      {resolvedSummary ? (
+        <span className="min-w-0 text-sm tabular-nums text-[var(--sdk-color-text-secondary)]">
+          {resolvedSummary}
+        </span>
       ) : null}
-      <Button disabled={busy} onClick={() => void onLoadMore()} type="button" variant="outline">
-        {label}
-      </Button>
+      {canLoadMore ? (
+        <Button
+          aria-busy={busy}
+          className="w-full shrink-0 sm:w-auto"
+          disabled={busy}
+          onClick={() => void onLoadMore?.()}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {busy ? (
+            <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <ChevronDown aria-hidden="true" className="mr-2 h-4 w-4" />
+          )}
+          {label}
+        </Button>
+      ) : null}
     </div>
   );
 }
