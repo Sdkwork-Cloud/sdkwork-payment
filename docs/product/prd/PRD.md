@@ -116,6 +116,7 @@ Reconciliation runs compare internal payment records against PSP settlement repo
 ## 11. Linked Requirements
 
 - Payment account and refund operations: `../requirements/REQ-2026-0001-payment-account-refund-operations.md`
+- Payment execution hardening and simplification: `../requirements/REQ-2026-0002-payment-execution-hardening.md`
 - Commerce repository dissolution: `../sdkwork-specs/MIGRATION_SPEC.md` §8
 - Component contract: `specs/component.spec.json`
 - Machine contracts: local `specs/`, `database/ddl/`, route manifests

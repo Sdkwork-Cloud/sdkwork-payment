@@ -10,11 +10,20 @@ const SDK_FAMILY = 'sdkwork-payment-app-sdk';
 const SDK_OWNER = 'sdkwork-payment';
 const API_AUTHORITY = 'sdkwork-payment-app-api';
 const API_PREFIX = '/app/v3/api';
+const ROUTE_PACKAGE = 'sdkwork-routes-payment-app-api';
+const API_SURFACE = 'app-api';
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const familyRoot = path.join(workspaceRoot, 'sdks', SDK_FAMILY);
 const sourcePath = path.join(workspaceRoot, 'apis', 'app-api', 'payment', `${API_AUTHORITY}.openapi.yaml`);
 const authorityPath = path.join(familyRoot, 'openapi', `${API_AUTHORITY}.openapi.json`);
 const sdkgenPath = path.join(familyRoot, 'openapi', `${API_AUTHORITY}.sdkgen.json`);
+const routeManifestPath = path.join(
+  workspaceRoot,
+  'sdks',
+  '_route-manifests',
+  API_SURFACE,
+  `${ROUTE_PACKAGE}.route-manifest.json`,
+);
 const generatedRoot = path.join(familyRoot, `${SDK_FAMILY}-typescript`, 'generated', 'server-openapi');
 const generatorBin = path.resolve(workspaceRoot, '..', 'sdkwork-sdk-generator', 'bin', 'sdkgen.js');
 const checkMode = process.argv.includes('--check');
@@ -60,6 +69,26 @@ function inlineResponseReferences(openapi) {
   return derived;
 }
 
+function routeManifest(openapi) {
+  const openApiAuthority = path.relative(workspaceRoot, sourcePath).replaceAll('\\', '/');
+  return {
+    schemaVersion: 1,
+    kind: 'sdkwork.route.manifest',
+    packageName: ROUTE_PACKAGE,
+    surface: API_SURFACE,
+    source: { openApiAuthority },
+    routes: collectOperations(openapi).map(({ method, operation, operationPath }) => ({
+      method: method.toUpperCase(),
+      path: operationPath,
+      operationId: operation.operationId,
+      source: {
+        routeCrate: ROUTE_PACKAGE,
+        openApiAuthority,
+      },
+    })),
+  };
+}
+
 function synchronize(target, content) {
   const current = existsSync(target) ? readFileSync(target, 'utf8') : '';
   if (checkMode && current !== content) throw new Error(`${path.relative(workspaceRoot, target)} is not synchronized`);
@@ -75,6 +104,7 @@ try {
   const operationCount = validate(openapi);
   synchronize(authorityPath, stableJson(openapi));
   synchronize(sdkgenPath, stableJson(inlineResponseReferences(openapi)));
+  synchronize(routeManifestPath, stableJson(routeManifest(openapi)));
   if (!checkMode) {
     const result = spawnSync('node', [
       generatorBin,

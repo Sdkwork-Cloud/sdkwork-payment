@@ -3,6 +3,7 @@ use std::fmt;
 use hmac::{Hmac, Mac};
 use serde_json::Value;
 use sha2::Sha256;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::adapter::{
     metadata_string, normalized_optional, require_non_empty, require_positive_amount,
@@ -56,6 +57,8 @@ pub struct StripePaymentProviderAdapter {
     config: StripePaymentProviderConfig,
     http: ReqwestHttpClient,
 }
+
+const STRIPE_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: i64 = 300;
 
 impl StripePaymentProviderAdapter {
     pub fn with_default_http_client(config: StripePaymentProviderConfig) -> ProviderResult<Self> {
@@ -435,9 +438,38 @@ pub(crate) fn verify_stripe_signature(
     signature_header: &str,
     body: &[u8],
 ) -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_secs()).ok());
+    let Some(now) = now else {
+        return false;
+    };
+    verify_stripe_signature_at(
+        webhook_secret,
+        signature_header,
+        body,
+        now,
+        STRIPE_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
+    )
+}
+
+fn verify_stripe_signature_at(
+    webhook_secret: &str,
+    signature_header: &str,
+    body: &[u8],
+    now: i64,
+    tolerance_seconds: i64,
+) -> bool {
     let Some(timestamp) = stripe_signature_value(signature_header, "t") else {
         return false;
     };
+    let Ok(timestamp) = timestamp.parse::<i64>() else {
+        return false;
+    };
+    if tolerance_seconds < 0 || now.abs_diff(timestamp) > tolerance_seconds as u64 {
+        return false;
+    }
     let signatures = stripe_signature_values(signature_header, "v1");
     if signatures.is_empty() {
         return false;
@@ -550,7 +582,23 @@ mod tests {
         let timestamp = 1_700_000_000_i64;
         let signature = stripe_test_signature(secret, timestamp, body);
 
-        assert!(verify_stripe_signature(secret, &signature, body));
+        assert!(verify_stripe_signature_at(
+            secret, &signature, body, timestamp, 300
+        ));
+        assert!(!verify_stripe_signature_at(
+            secret,
+            &signature,
+            body,
+            timestamp + 301,
+            300
+        ));
+        assert!(!verify_stripe_signature_at(
+            secret,
+            &signature,
+            body,
+            timestamp - 301,
+            300
+        ));
         assert!(!verify_stripe_signature(secret, "t=1,v1=deadbeef", body));
     }
 

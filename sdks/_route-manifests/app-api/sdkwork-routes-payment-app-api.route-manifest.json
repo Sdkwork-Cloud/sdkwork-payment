@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.route.manifest",
+  "packageName": "sdkwork-routes-payment-app-api",
+  "surface": "app-api",
+  "source": {
+    "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/app/v3/api/payments/intents",
+      "operationId": "payments.intents.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/intents/{paymentIntentId}",
+      "operationId": "payments.intents.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/app/v3/api/payments/intents/{paymentIntentId}/cancel",
+      "operationId": "payments.intents.cancel",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/app/v3/api/payments/intents/{paymentIntentId}/attempts",
+      "operationId": "payments.intents.attempts.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/methods",
+      "operationId": "payments.methods.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/records",
+      "operationId": "payments.records.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/records/{paymentId}",
+      "operationId": "payments.records.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/attempts/{paymentAttemptId}",
+      "operationId": "payments.attempts.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/statistics/summary",
+      "operationId": "payments.statistics.summary.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/checkout/{paymentId}",
+      "operationId": "payments.checkout.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/status/{paymentId}",
+      "operationId": "payments.status.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/payments/status/out_trade_no/{outTradeNo}",
+      "operationId": "payments.status.outTradeNo.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/app/v3/api/payments",
+      "operationId": "payments.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/app/v3/api/payments/reconcile",
+      "operationId": "payments.reconcile",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/app/v3/api/payments/{paymentId}/close",
+      "operationId": "payments.close",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/refunds",
+      "operationId": "refunds.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/app/v3/api/refunds",
+      "operationId": "refunds.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/app/v3/api/refunds/{refundId}",
+      "operationId": "refunds.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-app-api",
+        "openApiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml"
+      }
+    }
+  ]
+}

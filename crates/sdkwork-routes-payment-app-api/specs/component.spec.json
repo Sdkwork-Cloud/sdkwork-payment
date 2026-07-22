@@ -21,7 +21,7 @@
   "contracts": {
     "apiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml",
     "apiPrefix": "/app/v3/api",
-    "routeManifest": "sdkwork_routes_payment_app_api::gateway_route_manifest",
+    "routeManifest": "sdks/_route-manifests/app-api/sdkwork-routes-payment-app-api.route-manifest.json",
     "runtimeEntrypoints": ["sdkwork_routes_payment_app_api::gateway_mount_business"],
     "requestContext": "WebRequestContext",
     "authMode": "dual-token",

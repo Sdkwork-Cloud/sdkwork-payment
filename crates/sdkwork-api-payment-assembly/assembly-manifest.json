@@ -14,7 +14,7 @@
       "pathPrefix": null,
       "mountOrder": 0,
       "componentRef": "crates/sdkwork-routes-payment-app-api/specs/component.spec.json",
-      "routeManifestRef": "crates/sdkwork-routes-payment-app-api/sdkwork_routes_payment_app_api::gateway_route_manifest",
+      "routeManifestRef": "sdks/_route-manifests/app-api/sdkwork-routes-payment-app-api.route-manifest.json",
       "sourceRef": "crates/sdkwork-routes-payment-app-api/Cargo.toml"
     },
     {
@@ -25,7 +25,7 @@
       "pathPrefix": null,
       "mountOrder": 1,
       "componentRef": "crates/sdkwork-routes-payment-backend-api/specs/component.spec.json",
-      "routeManifestRef": "crates/sdkwork-routes-payment-backend-api/sdkwork_routes_payment_backend_api::gateway_route_manifest",
+      "routeManifestRef": "sdks/_route-manifests/backend-api/sdkwork-routes-payment-backend-api.route-manifest.json",
       "sourceRef": "crates/sdkwork-routes-payment-backend-api/Cargo.toml"
     }
   ]

@@ -9,6 +9,8 @@ const SDK_FAMILY = "sdkwork-payment-backend-sdk";
 const SDK_OWNER = "sdkwork-payment";
 const API_AUTHORITY = "sdkwork-payment-backend-api";
 const API_PREFIX = "/backend/v3/api";
+const ROUTE_PACKAGE = "sdkwork-routes-payment-backend-api";
+const API_SURFACE = "backend-api";
 const STANDARD_PROFILE = "sdkwork-v3";
 const FIXED_SDK_VERSION = "0.1.0";
 
@@ -23,6 +25,13 @@ const sourceOpenapiPath = path.join(
 );
 const authorityOpenapiPath = path.join(familyRoot, "openapi", `${API_AUTHORITY}.openapi.yaml`);
 const sdkgenOpenapiPath = path.join(familyRoot, "openapi", `${API_AUTHORITY}.sdkgen.yaml`);
+const routeManifestPath = path.join(
+  workspaceRoot,
+  "sdks",
+  "_route-manifests",
+  API_SURFACE,
+  `${ROUTE_PACKAGE}.route-manifest.json`,
+);
 const generatedRoot = path.join(
   familyRoot,
   `${SDK_FAMILY}-typescript`,
@@ -68,6 +77,26 @@ function collectOperations(openapi) {
     }
   }
   return operations;
+}
+
+function routeManifest(openapi) {
+  const openApiAuthority = path.relative(workspaceRoot, sourceOpenapiPath).replaceAll("\\", "/");
+  return {
+    schemaVersion: 1,
+    kind: "sdkwork.route.manifest",
+    packageName: ROUTE_PACKAGE,
+    surface: API_SURFACE,
+    source: { openApiAuthority },
+    routes: collectOperations(openapi).map(({ method, operation, path: operationPath }) => ({
+      method: method.toUpperCase(),
+      path: operationPath,
+      operationId: operation.operationId,
+      source: {
+        routeCrate: ROUTE_PACKAGE,
+        openApiAuthority,
+      },
+    })),
+  };
 }
 
 function validateOpenapi(openapi) {
@@ -126,6 +155,7 @@ function synchronizeOpenapi(openapi, sdkgenOpenapi, checkMode) {
   for (const [targetPath, expected] of [
     [authorityOpenapiPath, sourceOpenapi],
     [sdkgenOpenapiPath, stableJson(sdkgenOpenapi)],
+    [routeManifestPath, stableJson(routeManifest(openapi))],
   ]) {
     const current = existsSync(targetPath) ? readFileSync(targetPath, "utf8") : "";
     if (checkMode && current !== expected) {

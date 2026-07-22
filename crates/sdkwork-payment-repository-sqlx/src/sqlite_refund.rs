@@ -9,8 +9,10 @@ use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::order_reference::{load_order_payment_reference_sqlite, order_status_is_refundable};
 use crate::shared::{
-    current_timestamp_string, ensure_refund_status_transition, money_to_minor_units,
-    resolve_refund_amount, stable_storage_id, store_error, validate_refund_bounds,
+    current_timestamp_string, ensure_refund_idempotency_replay_matches,
+    ensure_refund_requester_idempotency_replay_matches, ensure_refund_status_transition,
+    money_to_minor_units, resolve_refund_amount, stable_storage_id, store_error,
+    validate_refund_bounds,
 };
 
 #[derive(Debug, Clone)]
@@ -34,6 +36,7 @@ impl SqliteCommerceRefundStore {
         command: CreateOwnerRefundCommand,
     ) -> Result<RefundView, CommerceServiceError> {
         if let Some(existing) = self.find_refund_by_idempotency(&command).await? {
+            ensure_refund_idempotency_replay_matches(&command, &existing)?;
             return Ok(existing);
         }
 
@@ -60,12 +63,9 @@ impl SqliteCommerceRefundStore {
             ));
         }
 
-        let payment_attempt_id = match command.payment_attempt_id.as_deref() {
-            Some(value) => value.to_owned(),
-            None => find_latest_succeeded_payment_attempt_in_tx(&mut tx, &command)
-                .await?
-                .ok_or_else(|| CommerceServiceError::not_found("payment attempt was not found"))?,
-        };
+        let payment_attempt_id = find_succeeded_payment_attempt_in_tx(&mut tx, &command)
+            .await?
+            .ok_or_else(|| CommerceServiceError::not_found("payment attempt was not found"))?;
 
         let refund_amount = resolve_refund_amount(&command, &order_ref.total_amount)?;
         let total_minor = money_to_minor_units(order_ref.total_amount.as_str())?;
@@ -115,6 +115,7 @@ impl SqliteCommerceRefundStore {
 
         if insert_result.rows_affected() == 0 {
             if let Some(existing) = find_refund_by_idempotency_in_tx(&mut tx, &command).await? {
+                ensure_refund_idempotency_replay_matches(&command, &existing)?;
                 tx.commit().await.map_err(|error| {
                     store_error("failed to commit refund idempotency replay", error)
                 })?;
@@ -432,27 +433,45 @@ impl SqliteCommerceRefundStore {
     ) -> Result<Option<RefundView>, CommerceServiceError> {
         let row = sqlx::query(
             r#"
-            SELECT id, refund_no, order_id, payment_attempt_id,
-                   CAST(amount AS TEXT) AS amount, currency_code, status, refund_reason_code
-            FROM commerce_refund
-            WHERE tenant_id = CAST(? AS TEXT)
-              AND order_id = CAST(? AS TEXT)
-              AND idempotency_key = CAST(? AS TEXT)
+            SELECT r.id AS id, r.refund_no, r.order_id, r.payment_attempt_id,
+                   CAST(r.amount AS TEXT) AS amount, r.currency_code, r.status,
+                   r.refund_reason_code, r.requested_by_type, r.requested_by
+            FROM commerce_refund r
+            INNER JOIN commerce_order o
+                ON o.tenant_id = r.tenant_id
+               AND o.id = r.order_id
+            WHERE r.tenant_id = CAST(? AS TEXT)
+              AND r.order_id = CAST(? AS TEXT)
+              AND r.idempotency_key = CAST(? AS TEXT)
+              AND ((r.organization_id = CAST(? AS TEXT)) OR (r.organization_id IS NULL AND ? IS NULL))
+              AND o.owner_user_id = CAST(? AS TEXT)
+              AND r.deleted_at IS NULL
             LIMIT 1
             "#,
         )
         .bind(&command.tenant_id)
         .bind(&command.order_id)
         .bind(&command.idempotency_key)
+        .bind(command.organization_id.as_deref())
+        .bind(command.organization_id.as_deref())
+        .bind(&command.owner_user_id)
         .fetch_optional(self.pool())
         .await
         .map_err(|error| store_error("failed to load refund idempotency replay", error))?;
 
-        row.map(map_refund_row).transpose()
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        ensure_refund_requester_idempotency_replay_matches(
+            command,
+            &string_cell(&row, "requested_by_type"),
+            &string_cell(&row, "requested_by"),
+        )?;
+        map_refund_row(row).map(Some)
     }
 }
 
-async fn find_latest_succeeded_payment_attempt_in_tx(
+async fn find_succeeded_payment_attempt_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     command: &CreateOwnerRefundCommand,
 ) -> Result<Option<String>, CommerceServiceError> {
@@ -461,16 +480,25 @@ async fn find_latest_succeeded_payment_attempt_in_tx(
         SELECT id
         FROM commerce_payment_attempt
         WHERE tenant_id = CAST(? AS TEXT)
+          AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
           AND owner_user_id = CAST(? AS TEXT)
           AND order_id = CAST(? AS TEXT)
+          AND currency_code = CAST(? AS TEXT)
+          AND (? IS NULL OR id = CAST(? AS TEXT))
           AND LOWER(COALESCE(status, '')) IN ('succeeded', 'success', 'paid')
+          AND deleted_at IS NULL
         ORDER BY created_at DESC, id DESC
         LIMIT 1
         "#,
     )
     .bind(&command.tenant_id)
+    .bind(command.organization_id.as_deref())
+    .bind(command.organization_id.as_deref())
     .bind(&command.owner_user_id)
     .bind(&command.order_id)
+    .bind(&command.currency_code)
+    .bind(command.payment_attempt_id.as_deref())
+    .bind(command.payment_attempt_id.as_deref())
     .fetch_optional(&mut **tx)
     .await
     .map_err(|error| store_error("failed to load payment attempt for refund", error))?;
@@ -488,12 +516,15 @@ async fn sum_refunded_amount_in_tx(
         FROM commerce_refund
         WHERE tenant_id = CAST(? AS TEXT)
           AND order_id = CAST(? AS TEXT)
+          AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
           AND LOWER(COALESCE(status, '')) IN ('submitted', 'processing', 'succeeded')
           AND deleted_at IS NULL
         "#,
     )
     .bind(&command.tenant_id)
     .bind(&command.order_id)
+    .bind(command.organization_id.as_deref())
+    .bind(command.organization_id.as_deref())
     .fetch_all(&mut **tx)
     .await
     .map_err(|error| store_error("failed to sum refunded amount", error))?;
@@ -512,23 +543,41 @@ async fn find_refund_by_idempotency_in_tx(
 ) -> Result<Option<RefundView>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT id, refund_no, order_id, payment_attempt_id,
-               CAST(amount AS TEXT) AS amount, currency_code, status, refund_reason_code
-        FROM commerce_refund
-        WHERE tenant_id = CAST(? AS TEXT)
-          AND order_id = CAST(? AS TEXT)
-          AND idempotency_key = CAST(? AS TEXT)
+        SELECT r.id AS id, r.refund_no, r.order_id, r.payment_attempt_id,
+               CAST(r.amount AS TEXT) AS amount, r.currency_code, r.status,
+               r.refund_reason_code, r.requested_by_type, r.requested_by
+        FROM commerce_refund r
+        INNER JOIN commerce_order o
+            ON o.tenant_id = r.tenant_id
+           AND o.id = r.order_id
+        WHERE r.tenant_id = CAST(? AS TEXT)
+          AND r.order_id = CAST(? AS TEXT)
+          AND r.idempotency_key = CAST(? AS TEXT)
+          AND ((r.organization_id = CAST(? AS TEXT)) OR (r.organization_id IS NULL AND ? IS NULL))
+          AND o.owner_user_id = CAST(? AS TEXT)
+          AND r.deleted_at IS NULL
         LIMIT 1
         "#,
     )
     .bind(&command.tenant_id)
     .bind(&command.order_id)
     .bind(&command.idempotency_key)
+    .bind(command.organization_id.as_deref())
+    .bind(command.organization_id.as_deref())
+    .bind(&command.owner_user_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|error| store_error("failed to load refund idempotency replay in tx", error))?;
 
-    row.map(map_refund_row).transpose()
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    ensure_refund_requester_idempotency_replay_matches(
+        command,
+        &string_cell(&row, "requested_by_type"),
+        &string_cell(&row, "requested_by"),
+    )?;
+    map_refund_row(row).map(Some)
 }
 
 async fn insert_refund_event(

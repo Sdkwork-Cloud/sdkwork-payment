@@ -19,6 +19,7 @@ test("payment seed profiles select a complete and safe environment template", as
     "002_production_templates.sql",
     "006_upgrade_bootstrap_templates.sql",
     "005_production_sandbox_template.sql",
+    "008_production_recharge_checkout_wechat_pay.sql",
   ]);
   assert.deepEqual(manifest.profiles.production.common, manifest.profiles.standard.common);
   assert.deepEqual(manifest.profiles.development.common, [
@@ -26,17 +27,30 @@ test("payment seed profiles select a complete and safe environment template", as
     "002_production_templates.sql",
     "006_upgrade_bootstrap_templates.sql",
     "003_development_templates.sql",
+    "007_development_demo_data.sql",
+    "008_development_recharge_checkout_wechat_pay.sql",
   ]);
   assert.deepEqual(manifest.profiles.test.common, [
     "001_payment_method_catalog.sql",
     "002_production_templates.sql",
     "006_upgrade_bootstrap_templates.sql",
     "004_test_templates.sql",
+    "008_test_recharge_checkout_wechat_pay.sql",
   ]);
 });
 
 test("payment seeds keep real PSP accounts gated and sandbox profiles operable", async () => {
-  const [catalog, externalTemplates, productionSandbox, development, testProfile, upgrade] =
+  const [
+    catalog,
+    externalTemplates,
+    productionSandbox,
+    development,
+    testProfile,
+    upgrade,
+    productionRecharge,
+    developmentRecharge,
+    testRecharge,
+  ] =
     await Promise.all([
       readSeed("common/001_payment_method_catalog.sql"),
       readSeed("common/002_production_templates.sql"),
@@ -44,6 +58,9 @@ test("payment seeds keep real PSP accounts gated and sandbox profiles operable",
       readSeed("common/003_development_templates.sql"),
       readSeed("common/004_test_templates.sql"),
       readSeed("common/006_upgrade_bootstrap_templates.sql"),
+      readSeed("common/008_production_recharge_checkout_wechat_pay.sql"),
+      readSeed("common/008_development_recharge_checkout_wechat_pay.sql"),
+      readSeed("common/008_test_recharge_checkout_wechat_pay.sql"),
     ]);
 
   for (const methodKey of ["stripe_card", "alipay_qr", "wechat_native"]) {
@@ -62,6 +79,30 @@ test("payment seeds keep real PSP accounts gated and sandbox profiles operable",
   assert.match(development, /'sandbox_test'[\s\S]*'active'/);
   assert.match(testProfile, /'sandbox_test'[\s\S]*'active'/);
   assert.match(upgrade, /mock-wechat-mch-id/);
+  assert.match(productionRecharge, /'wechat_pay'[\s\S]*bootstrap-payment-provider-wechat-pay/);
+  assert.match(developmentRecharge, /'wechat_pay'[\s\S]*bootstrap-payment-provider-sandbox/);
+  assert.match(testRecharge, /'wechat_pay'[\s\S]*bootstrap-payment-provider-sandbox/);
+
+  for (const [name, sql] of [
+    ["production sandbox", productionSandbox],
+    ["development sandbox", development],
+    ["test sandbox", testProfile],
+    ["production recharge", productionRecharge],
+    ["development recharge", developmentRecharge],
+    ["test recharge", testRecharge],
+  ]) {
+    assert.doesNotMatch(sql, /'100001',\s*'100002'/, name);
+    assert.match(sql, /'100001',\s*'0'/, name);
+  }
+
+  assert.match(
+    upgrade,
+    /SET organization_id = '0'[\s\S]*AND organization_id = '100002'/,
+  );
+  assert.doesNotMatch(
+    upgrade,
+    /SET organization_id = '100002'[\s\S]*AND organization_id = '0'/,
+  );
 });
 
 test("payment JSON seeds preserve PostgreSQL jsonb and SQLite portability", async () => {
@@ -71,6 +112,9 @@ test("payment JSON seeds preserve PostgreSQL jsonb and SQLite portability", asyn
     "common/003_development_templates.sql",
     "common/004_test_templates.sql",
     "common/005_production_sandbox_template.sql",
+    "common/008_production_recharge_checkout_wechat_pay.sql",
+    "common/008_development_recharge_checkout_wechat_pay.sql",
+    "common/008_test_recharge_checkout_wechat_pay.sql",
   ];
 
   for (const relativePath of seedFiles) {

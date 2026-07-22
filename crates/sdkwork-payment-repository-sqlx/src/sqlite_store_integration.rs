@@ -1,6 +1,6 @@
 use sdkwork_payment_service::{
-    CancelOwnerPaymentIntentCommand, CreateOwnerRefundCommand, OrderPaymentSettlementAttempt,
-    PaymentIntentDetailQuery, RefundListQuery,
+    CancelOwnerPaymentIntentCommand, CreateOwnerPaymentIntentCommand, CreateOwnerRefundCommand,
+    OrderPaymentSettlementAttempt, PaymentIntentDetailQuery, RefundListQuery,
 };
 
 use crate::{
@@ -341,6 +341,134 @@ async fn refund_create_is_idempotent_by_idempotency_key() {
     .await
     .expect("refund created event count");
     assert_eq!(event_count, 1);
+}
+
+#[tokio::test]
+async fn payment_intent_idempotency_replay_rejects_changed_method() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let store = SqliteCommercePaymentIntentStore::new(pool);
+    let command = CreateOwnerPaymentIntentCommand::new(
+        "100001",
+        None,
+        "user-1",
+        "order-1",
+        "alipay",
+        "request-payment-replay",
+        "pi-idem-1",
+    )
+    .expect("payment intent replay command");
+
+    let error = store
+        .create_owner_payment_intent(command)
+        .await
+        .expect_err("changed payment method must conflict");
+    assert_eq!(error.code(), "conflict");
+}
+
+#[tokio::test]
+async fn payment_intent_idempotency_replay_is_owner_scoped() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let store = SqliteCommercePaymentIntentStore::new(pool);
+    let command = CreateOwnerPaymentIntentCommand::new(
+        "100001",
+        None,
+        "user-2",
+        "order-1",
+        "wechat_pay",
+        "request-cross-owner",
+        "pi-idem-1",
+    )
+    .expect("cross-owner payment intent command");
+
+    let error = store
+        .create_owner_payment_intent(command)
+        .await
+        .expect_err("another owner must not receive the idempotent payment record");
+    assert_eq!(error.code(), "not-found");
+}
+
+#[tokio::test]
+async fn refund_idempotency_replay_rejects_changed_amount() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let store = SqliteCommerceRefundStore::new(pool);
+    let original = CreateOwnerRefundCommand::new(
+        "100001",
+        None,
+        "user-1",
+        "order-1",
+        Some("pa-1"),
+        Some("500"),
+        Some("buyer_request"),
+        "req-refund-original",
+        "idem-refund-conflict",
+    )
+    .expect("original refund command");
+    store
+        .create_owner_refund(original)
+        .await
+        .expect("original refund");
+
+    let changed = CreateOwnerRefundCommand::new(
+        "100001",
+        None,
+        "user-1",
+        "order-1",
+        Some("pa-1"),
+        Some("400"),
+        Some("buyer_request"),
+        "req-refund-changed",
+        "idem-refund-conflict",
+    )
+    .expect("changed refund command");
+    let error = store
+        .create_owner_refund(changed)
+        .await
+        .expect_err("changed refund amount must conflict");
+    assert_eq!(error.code(), "conflict");
+}
+
+#[tokio::test]
+async fn refund_rejects_payment_attempt_from_another_order() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let now = "2026-07-05T10:00:01Z";
+    sqlx::query(
+        r#"
+        INSERT INTO commerce_payment_attempt
+            (id, tenant_id, owner_user_id, payment_intent_id, order_id, amount, currency_code,
+             status, paid_at, idempotency_key, created_at, updated_at)
+        VALUES ('pa-other-order', '100001', 'user-1', 'pi-other-order', 'order-other', '1000',
+                'CNY', 'succeeded', ?, 'pa-other-idem', ?, ?)
+        "#,
+    )
+    .bind(now)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("seed cross-order payment attempt");
+
+    let store = SqliteCommerceRefundStore::new(pool);
+    let command = CreateOwnerRefundCommand::new(
+        "100001",
+        None,
+        "user-1",
+        "order-1",
+        Some("pa-other-order"),
+        Some("500"),
+        Some("buyer_request"),
+        "req-cross-order-attempt",
+        "idem-cross-order-attempt",
+    )
+    .expect("cross-order refund command");
+    let error = store
+        .create_owner_refund(command)
+        .await
+        .expect_err("refund attempt must belong to the refunded order");
+    assert_eq!(error.code(), "not-found");
 }
 
 #[tokio::test]

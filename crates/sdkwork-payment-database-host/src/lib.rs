@@ -138,7 +138,7 @@ mod tests {
                 .await
                 .expect("bootstrap payment module through registry");
 
-            assert_eq!(results, vec![("payment".to_owned(), 2, 4)]);
+            assert_eq!(results, vec![("payment".to_owned(), 2, 5)]);
             let DatabasePool::Sqlite(sqlite_pool, _) = &pool else {
                 panic!("expected sqlite pool");
             };
@@ -148,7 +148,36 @@ mod tests {
             .fetch_one(sqlite_pool)
             .await
             .expect("active payment method count");
-            assert_eq!(method_count, 15);
+            assert_eq!(method_count, 16);
+
+            let recharge_channel_count = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COUNT(*)
+                FROM commerce_payment_method m
+                INNER JOIN commerce_payment_channel c
+                    ON c.tenant_id = m.tenant_id
+                   AND c.method_id = m.id
+                INNER JOIN commerce_payment_provider_account a
+                    ON a.id = c.provider_account_id
+                   AND a.tenant_id = c.tenant_id
+                WHERE m.tenant_id = '100001'
+                  AND m.organization_id = '100002'
+                  AND m.method_key = 'wechat_pay'
+                  AND m.status = 'active'
+                  AND m.deleted_at IS NULL
+                  AND c.organization_id = '100002'
+                  AND c.currency_code = 'CNY'
+                  AND c.status = 'active'
+                  AND c.deleted_at IS NULL
+                  AND a.organization_id = '100002'
+                  AND a.status = 'active'
+                  AND a.deleted_at IS NULL
+                "#,
+            )
+            .fetch_one(sqlite_pool)
+            .await
+            .expect("eligible recharge checkout channel count");
+            assert_eq!(recharge_channel_count, 1);
             sqlite_pool.close().await;
         }
         .await;

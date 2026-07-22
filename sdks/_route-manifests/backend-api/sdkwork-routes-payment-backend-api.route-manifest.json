@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.route.manifest",
+  "packageName": "sdkwork-routes-payment-backend-api",
+  "surface": "backend-api",
+  "source": {
+    "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/intents",
+      "operationId": "intents.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/intents/{paymentIntentId}",
+      "operationId": "intents.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/refunds",
+      "operationId": "refunds.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/refunds",
+      "operationId": "refunds.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/refunds/{refundId}",
+      "operationId": "refunds.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/refunds/{refundId}/retry",
+      "operationId": "refunds.retry",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/methods",
+      "operationId": "methods.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/methods",
+      "operationId": "methods.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/backend/v3/api/payments/methods/{methodKey}",
+      "operationId": "methods.update",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/provider_accounts",
+      "operationId": "providerAccounts.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/provider_accounts",
+      "operationId": "providerAccounts.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/backend/v3/api/payments/provider_accounts/{providerAccountId}",
+      "operationId": "providerAccounts.update",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/provider_accounts/{providerAccountId}/test",
+      "operationId": "providerAccounts.test",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/provider_accounts/{providerAccountId}/credentials/rotate",
+      "operationId": "providerAccounts.credentials.rotate",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/channels",
+      "operationId": "channels.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/channels",
+      "operationId": "channels.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/route_rules",
+      "operationId": "routeRules.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/route_rules",
+      "operationId": "routeRules.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/backend/v3/api/payments/route_rules/{routeRuleId}",
+      "operationId": "routeRules.update",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/backend/v3/api/payments/route_rules/{routeRuleId}",
+      "operationId": "routeRules.delete",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/sub_merchants",
+      "operationId": "subMerchants.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/sub_merchants",
+      "operationId": "subMerchants.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
+      "operationId": "subMerchants.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
+      "operationId": "subMerchants.update",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/backend/v3/api/payments/sub_merchants/{subMerchantId}",
+      "operationId": "subMerchants.delete",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/certificates",
+      "operationId": "certificates.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/certificates",
+      "operationId": "certificates.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/certificates/{certificateId}",
+      "operationId": "certificates.retrieve",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/backend/v3/api/payments/certificates/{certificateId}",
+      "operationId": "certificates.delete",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/attempts",
+      "operationId": "attempts.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/webhook_events",
+      "operationId": "webhookEvents.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/webhook_events/{eventId}/replay",
+      "operationId": "webhookEvents.replay",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/backend/v3/api/payments/reconciliation_runs",
+      "operationId": "reconciliationRuns.list",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/reconciliation_runs",
+      "operationId": "reconciliationRuns.create",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/dev/sandbox_trigger",
+      "operationId": "dev.sandboxTrigger",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/backend/v3/api/payments/dev/webhook_signature_test",
+      "operationId": "dev.webhookSignatureTest",
+      "source": {
+        "routeCrate": "sdkwork-routes-payment-backend-api",
+        "openApiAuthority": "apis/backend-api/payment/sdkwork-payment-backend-api.openapi.yaml"
+      }
+    }
+  ]
+}

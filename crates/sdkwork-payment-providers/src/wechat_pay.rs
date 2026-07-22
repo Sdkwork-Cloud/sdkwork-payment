@@ -25,6 +25,7 @@ use crate::http::ReqwestHttpClient;
 
 const WECHAT_PAY_PROVIDER_CODE: &str = "wechat_pay";
 const WECHAT_PAY_API_BASE_URL: &str = "https://api.mch.weixin.qq.com";
+const WECHAT_PAY_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: u64 = 300;
 
 static WECHAT_PAY_CAPABILITIES: PaymentProviderCapabilities = PaymentProviderCapabilities {
     provider_code: WECHAT_PAY_PROVIDER_CODE,
@@ -513,6 +514,16 @@ impl PaymentProviderAdapter for WeChatPayProviderAdapter {
             let timestamp = require_header(&request.headers, "wechatpay-timestamp")?;
             let nonce = require_header(&request.headers, "wechatpay-nonce")?;
             let signature = require_header(&request.headers, "wechatpay-signature")?;
+            if !wechat_webhook_timestamp_is_fresh(
+                &timestamp,
+                unix_timestamp(),
+                WECHAT_PAY_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
+            ) {
+                return Ok(PaymentWebhookVerificationOutcome {
+                    verified: false,
+                    provider_event_id: None,
+                });
+            }
             let body = std::str::from_utf8(&request.body).map_err(|error| {
                 ProviderError::invalid_response(
                     PaymentAdapterOperation::VerifyWebhook,
@@ -668,6 +679,14 @@ fn unix_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
+fn wechat_webhook_timestamp_is_fresh(timestamp: &str, now: u64, tolerance_seconds: u64) -> bool {
+    timestamp
+        .trim()
+        .parse::<u64>()
+        .map(|timestamp| now.abs_diff(timestamp) <= tolerance_seconds)
+        .unwrap_or(false)
+}
+
 /// Maps a method_key to the WeChat Pay V3 API path.
 ///
 /// Supported method_keys (mirrors `commerce_payment_method.method_key` DB rows):
@@ -682,5 +701,34 @@ fn wechat_pay_path_for_key(method_key: &str) -> &'static str {
         "wechat_h5" => "/v3/pay/transactions/h5",
         "wechat_app" => "/v3/pay/transactions/app",
         _ => "/v3/pay/transactions/native",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wechat_webhook_timestamp_is_fresh;
+
+    #[test]
+    fn webhook_timestamp_requires_five_minute_freshness() {
+        assert!(wechat_webhook_timestamp_is_fresh(
+            "1700000000",
+            1_700_000_000,
+            300
+        ));
+        assert!(wechat_webhook_timestamp_is_fresh(
+            "1700000300",
+            1_700_000_000,
+            300
+        ));
+        assert!(!wechat_webhook_timestamp_is_fresh(
+            "1700000301",
+            1_700_000_000,
+            300
+        ));
+        assert!(!wechat_webhook_timestamp_is_fresh(
+            "not-a-timestamp",
+            1_700_000_000,
+            300
+        ));
     }
 }

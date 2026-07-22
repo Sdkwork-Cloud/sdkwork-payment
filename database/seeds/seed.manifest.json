@@ -9,7 +9,8 @@
                                                      "001_payment_method_catalog.sql",
                                                      "002_production_templates.sql",
                                                      "006_upgrade_bootstrap_templates.sql",
-                                                     "005_production_sandbox_template.sql"
+                                                     "005_production_sandbox_template.sql",
+                                                     "008_production_recharge_checkout_wechat_pay.sql"
                                                  ]
                                   },
                      "production":  {
@@ -18,7 +19,8 @@
                                                        "001_payment_method_catalog.sql",
                                                        "002_production_templates.sql",
                                                        "006_upgrade_bootstrap_templates.sql",
-                                                       "005_production_sandbox_template.sql"
+                                                       "005_production_sandbox_template.sql",
+                                                       "008_production_recharge_checkout_wechat_pay.sql"
                                                    ]
                                     },
                      "development":  {
@@ -28,7 +30,8 @@
                                                          "002_production_templates.sql",
                                                          "006_upgrade_bootstrap_templates.sql",
                                                          "003_development_templates.sql",
-                                                         "007_development_demo_data.sql"
+                                                         "007_development_demo_data.sql",
+                                                         "008_development_recharge_checkout_wechat_pay.sql"
                                                      ]
                                      },
                      "test":  {
@@ -37,7 +40,8 @@
                                                  "001_payment_method_catalog.sql",
                                                  "002_production_templates.sql",
                                                  "006_upgrade_bootstrap_templates.sql",
-                                                 "004_test_templates.sql"
+                                                 "004_test_templates.sql",
+                                                 "008_test_recharge_checkout_wechat_pay.sql"
                                              ]
                               }
                  },

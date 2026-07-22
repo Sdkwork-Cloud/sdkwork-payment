@@ -6,7 +6,7 @@ INSERT INTO commerce_payment_method (
     idempotency_key, created_at, updated_at
 )
 VALUES
-    ('bootstrap-payment-method-sandbox-test', '100001', '100002', 'sandbox_test', 'Sandbox Test', 'sandbox', 'active', 900, 'organization', 'CNY', NULL, '{"bootstrap":true,"environment":"test"}', 'bootstrap-payment-method-sandbox-test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ('bootstrap-payment-method-sandbox-test', '100001', '0', 'sandbox_test', 'Sandbox Test', 'sandbox', 'active', 900, 'organization', 'CNY', NULL, '{"bootstrap":true,"environment":"test"}', 'bootstrap-payment-method-sandbox-test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO commerce_payment_provider_account (
@@ -15,7 +15,7 @@ INSERT INTO commerce_payment_provider_account (
     certificate_ref, capabilities, status, metadata, created_at, updated_at
 )
 VALUES
-    ('bootstrap-payment-provider-sandbox', '100001', '100002', 'bootstrap-sandbox-default', 'sandbox', NULL, 'sandbox', 'CNY', 'database:primary_secret', NULL, NULL, '{"pay":true,"refund":true,"close":true,"query":true}', 'active', '{"bootstrap":true,"environment":"test"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ('bootstrap-payment-provider-sandbox', '100001', '0', 'bootstrap-sandbox-default', 'sandbox', NULL, 'sandbox', 'CNY', 'database:primary_secret', NULL, NULL, '{"pay":true,"refund":true,"close":true,"query":true}', 'active', '{"bootstrap":true,"environment":"test"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO commerce_payment_channel (
@@ -24,5 +24,5 @@ INSERT INTO commerce_payment_channel (
     priority, sort_order, metadata, created_at, updated_at
 )
 VALUES
-    ('bootstrap-payment-channel-sandbox-test', '100001', '100002', 'bootstrap-sandbox-test', 'Sandbox Test', 'bootstrap-payment-provider-sandbox', 'bootstrap-payment-method-sandbox-test', 'sandbox', 'api', 'CNY', NULL, 'active', 900, 900, '{"bootstrap":true,"environment":"test"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ('bootstrap-payment-channel-sandbox-test', '100001', '0', 'bootstrap-sandbox-test', 'Sandbox Test', 'bootstrap-payment-provider-sandbox', 'bootstrap-payment-method-sandbox-test', 'sandbox', 'api', 'CNY', NULL, 'active', 900, 900, '{"bootstrap":true,"environment":"test"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;

@@ -10,8 +10,8 @@ use crate::owner_payment_params::owner_order_payment_params;
 use crate::payment_channel::select_payment_channel_postgres;
 use crate::shared::{
     current_timestamp_string, ensure_confirmation_intent_update,
-    payment_attempt_is_terminal_success, required_persisted_paid_at,
-    resolve_confirmation_attempt_replayed, stable_storage_id,
+    ensure_owner_payment_idempotency_replay_matches, payment_attempt_is_terminal_success,
+    required_persisted_paid_at, resolve_confirmation_attempt_replayed, stable_storage_id,
 };
 
 const LOAD_OWNER_ORDER_FOR_CONFIRMATION: &str = r#"
@@ -748,7 +748,8 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
         WHERE pi.tenant_id = CAST($1 AS TEXT)
           AND pi.order_id = CAST($2 AS TEXT)
           AND pi.idempotency_key = CAST($3 AS TEXT)
-          AND pi.owner_user_id = CAST($4 AS TEXT)
+          AND ((pi.organization_id = CAST($4 AS TEXT)) OR (pi.organization_id IS NULL AND $4::text IS NULL))
+          AND pi.owner_user_id = CAST($5 AS TEXT)
           AND pi.deleted_at IS NULL
         ORDER BY pa.created_at DESC, pa.id DESC
         LIMIT 1
@@ -757,6 +758,7 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
     .bind(&command.tenant_id)
     .bind(&command.order_id)
     .bind(&command.idempotency_key)
+    .bind(command.organization_id.as_deref())
     .bind(&command.owner_user_id)
     .fetch_optional(&mut **tx)
     .await
@@ -779,7 +781,7 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
         payment_params.insert("channelId".to_owned(), channel_id);
     }
 
-    Ok(Some(PayOwnerOrderOutcome {
+    let outcome = PayOwnerOrderOutcome {
         amount,
         order_id: command.order_id.clone(),
         out_trade_no,
@@ -787,7 +789,9 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
         payment_method: string_cell(&row, "payment_method"),
         status: string_cell(&row, "status"),
         payment_params,
-    }))
+    };
+    ensure_owner_payment_idempotency_replay_matches(command, &outcome)?;
+    Ok(Some(outcome))
 }
 
 async fn load_reusable_owner_payment_in_tx(

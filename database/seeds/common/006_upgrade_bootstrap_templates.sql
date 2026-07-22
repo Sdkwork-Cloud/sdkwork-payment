@@ -2,34 +2,43 @@
 -- templates. Only untouched bootstrap rows are changed; administrator-owned
 -- provider accounts no longer carry the mock/configure marker and are skipped.
 --
--- Organization id 0 is an IAM login sentinel and cannot back an organization
--- session. Payment backend-admin routes require an organization session, so
--- move untouched platform bootstrap templates into the stable bootstrap admin
--- organization used by Manager development and initial production setup.
+-- Organization id 0 is the default tenant-user organization scope. Keep
+-- untouched payment bootstrap templates in that scope so app users can resolve
+-- the default methods and channels without selecting an admin organization.
 UPDATE commerce_payment_method
-SET organization_id = '100002', updated_at = CURRENT_TIMESTAMP
+SET organization_id = '0', updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = '100001'
-  AND organization_id = '0'
+  AND organization_id = '100002'
   AND id LIKE 'bootstrap-payment-method-%'
   AND CAST(metadata AS TEXT) LIKE '%bootstrap%';
 
 UPDATE commerce_payment_provider_account
-SET organization_id = '100002', updated_at = CURRENT_TIMESTAMP
+SET organization_id = '0', updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = '100001'
-  AND organization_id = '0'
-  AND id LIKE 'bootstrap-payment-provider-%'
+  AND organization_id = '100002'
+  AND id IN (
+      'bootstrap-payment-provider-stripe',
+      'bootstrap-payment-provider-alipay',
+      'bootstrap-payment-provider-wechat-pay',
+      'bootstrap-payment-provider-sandbox'
+  )
   AND CAST(metadata AS TEXT) LIKE '%bootstrap%';
 
 UPDATE commerce_payment_provider_credential
-SET organization_id = '100002', updated_at = CURRENT_TIMESTAMP
+SET organization_id = '0', updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = '100001'
-  AND organization_id = '0'
-  AND provider_account_id LIKE 'bootstrap-payment-provider-%';
+  AND organization_id = '100002'
+  AND provider_account_id IN (
+      'bootstrap-payment-provider-stripe',
+      'bootstrap-payment-provider-alipay',
+      'bootstrap-payment-provider-wechat-pay',
+      'bootstrap-payment-provider-sandbox'
+  );
 
 UPDATE commerce_payment_channel
-SET organization_id = '100002', updated_at = CURRENT_TIMESTAMP
+SET organization_id = '0', updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = '100001'
-  AND organization_id = '0'
+  AND organization_id = '100002'
   AND id LIKE 'bootstrap-payment-channel-%'
   AND CAST(metadata AS TEXT) LIKE '%bootstrap%';
 

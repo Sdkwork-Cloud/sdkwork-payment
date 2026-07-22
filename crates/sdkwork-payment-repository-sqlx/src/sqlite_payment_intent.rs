@@ -10,6 +10,10 @@ use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::order_reference::{load_order_payment_reference_sqlite, order_status_is_payable};
 use crate::payment_channel::select_payment_channel_sqlite;
+use crate::shared::{
+    ensure_payment_attempt_idempotency_replay_matches,
+    ensure_payment_intent_idempotency_replay_matches,
+};
 
 #[derive(Debug, Clone)]
 struct ResolvedPaymentMethod {
@@ -41,6 +45,7 @@ impl SqliteCommercePaymentIntentStore {
             .find_owner_payment_intent_by_idempotency(&command)
             .await?
         {
+            ensure_payment_intent_idempotency_replay_matches(&command, &existing)?;
             return Ok(existing);
         }
 
@@ -111,6 +116,7 @@ impl SqliteCommercePaymentIntentStore {
                 .find_owner_payment_intent_by_idempotency(&command)
                 .await?
             {
+                ensure_payment_intent_idempotency_replay_matches(&command, &existing)?;
                 return Ok(existing);
             }
             return Err(CommerceServiceError::conflict(
@@ -240,6 +246,7 @@ impl SqliteCommercePaymentIntentStore {
             .find_owner_payment_attempt_by_idempotency(&command)
             .await?
         {
+            ensure_payment_attempt_idempotency_replay_matches(&command, &existing)?;
             return Ok(existing);
         }
 
@@ -418,12 +425,18 @@ impl SqliteCommercePaymentIntentStore {
             WHERE tenant_id = CAST(? AS TEXT)
               AND order_id = CAST(? AS TEXT)
               AND idempotency_key = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+              AND owner_user_id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
             LIMIT 1
             "#,
         )
         .bind(&command.tenant_id)
         .bind(&command.order_id)
         .bind(&command.idempotency_key)
+        .bind(command.organization_id.as_deref())
+        .bind(command.organization_id.as_deref())
+        .bind(&command.owner_user_id)
         .fetch_optional(self.pool())
         .await
         .map_err(|error| store_error("failed to load payment intent idempotency replay", error))?;
@@ -442,12 +455,16 @@ impl SqliteCommercePaymentIntentStore {
                    payment_method, provider_code, channel_id, status
             FROM commerce_payment_attempt
             WHERE tenant_id = CAST(? AS TEXT)
+              AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
               AND owner_user_id = CAST(? AS TEXT)
               AND id = CAST(? AS TEXT)
+              AND deleted_at IS NULL
             LIMIT 1
             "#,
         )
         .bind(&command.tenant_id)
+        .bind(command.organization_id.as_deref())
+        .bind(command.organization_id.as_deref())
         .bind(&command.owner_user_id)
         .bind(&attempt_id)
         .fetch_optional(self.pool())
@@ -531,14 +548,18 @@ async fn load_reusable_payment_attempt(
                payment_method, provider_code, channel_id, status
         FROM commerce_payment_attempt
         WHERE tenant_id = CAST(? AS TEXT)
+          AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
           AND owner_user_id = CAST(? AS TEXT)
           AND payment_intent_id = CAST(? AS TEXT)
           AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
+          AND deleted_at IS NULL
         ORDER BY created_at DESC, id DESC
         LIMIT 1
         "#,
     )
     .bind(&command.tenant_id)
+    .bind(command.organization_id.as_deref())
+    .bind(command.organization_id.as_deref())
     .bind(&command.owner_user_id)
     .bind(&command.payment_intent_id)
     .fetch_optional(pool)

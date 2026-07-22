@@ -7,7 +7,10 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use sdkwork_payment_service::{
-    validate_payment_wire_transition, validate_refund_wire_transition, CreateOwnerRefundCommand,
+    validate_payment_wire_transition, validate_refund_wire_transition,
+    CreateOwnerPaymentAttemptCommand, CreateOwnerPaymentAttemptOutcome,
+    CreateOwnerPaymentIntentCommand, CreateOwnerRefundCommand, PayOwnerOrderCommand,
+    PayOwnerOrderOutcome, PaymentIntentView, RefundView,
 };
 use sqlx::postgres::PgRow;
 use sqlx::sqlite::SqliteRow;
@@ -102,6 +105,98 @@ pub(crate) fn ensure_refund_status_transition(
     to: &str,
 ) -> Result<(), CommerceServiceError> {
     validate_refund_wire_transition(from, to)
+}
+
+pub(crate) fn ensure_payment_intent_idempotency_replay_matches(
+    command: &CreateOwnerPaymentIntentCommand,
+    existing: &PaymentIntentView,
+) -> Result<(), CommerceServiceError> {
+    if existing.order_id != command.order_id
+        || !existing
+            .payment_method
+            .eq_ignore_ascii_case(&command.payment_method)
+    {
+        return Err(idempotency_parameter_conflict("payment intent"));
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_payment_attempt_idempotency_replay_matches(
+    command: &CreateOwnerPaymentAttemptCommand,
+    existing: &CreateOwnerPaymentAttemptOutcome,
+) -> Result<(), CommerceServiceError> {
+    if existing.payment_intent_id != command.payment_intent_id {
+        return Err(idempotency_parameter_conflict("payment attempt"));
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_owner_payment_idempotency_replay_matches(
+    command: &PayOwnerOrderCommand,
+    existing: &PayOwnerOrderOutcome,
+) -> Result<(), CommerceServiceError> {
+    if existing.order_id != command.order_id
+        || !existing
+            .payment_method
+            .eq_ignore_ascii_case(&command.payment_method)
+    {
+        return Err(idempotency_parameter_conflict("order payment"));
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_refund_idempotency_replay_matches(
+    command: &CreateOwnerRefundCommand,
+    existing: &RefundView,
+) -> Result<(), CommerceServiceError> {
+    let amount_matches = match command.amount.as_deref() {
+        Some(amount) => {
+            money_to_minor_units(amount)? == money_to_minor_units(existing.amount.as_str())?
+        }
+        None => true,
+    };
+    let attempt_matches = command
+        .payment_attempt_id
+        .as_deref()
+        .map(|attempt_id| attempt_id == existing.payment_attempt_id)
+        .unwrap_or(true);
+    let reason_matches = normalized_optional_text(command.reason_code.as_deref())
+        == normalized_optional_text(existing.reason_code.as_deref());
+
+    if existing.order_id != command.order_id
+        || !existing
+            .currency_code
+            .eq_ignore_ascii_case(&command.currency_code)
+        || !amount_matches
+        || !attempt_matches
+        || !reason_matches
+    {
+        return Err(idempotency_parameter_conflict("refund"));
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_refund_requester_idempotency_replay_matches(
+    command: &CreateOwnerRefundCommand,
+    requested_by_type: &str,
+    requested_by: &str,
+) -> Result<(), CommerceServiceError> {
+    if !requested_by_type.eq_ignore_ascii_case(&command.requested_by_type)
+        || requested_by != command.requested_by
+    {
+        return Err(idempotency_parameter_conflict("refund"));
+    }
+    Ok(())
+}
+
+fn normalized_optional_text(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn idempotency_parameter_conflict(resource: &str) -> CommerceServiceError {
+    CommerceServiceError::conflict(format!(
+        "{resource} idempotency key was already used with different parameters"
+    ))
 }
 
 /// Wrap a storage-layer error with a descriptive context message.
@@ -223,9 +318,11 @@ impl StringCellRow for PgRow {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_confirmation_intent_update, required_persisted_paid_at,
-        resolve_confirmation_attempt_replayed,
+        ensure_confirmation_intent_update, ensure_refund_idempotency_replay_matches,
+        required_persisted_paid_at, resolve_confirmation_attempt_replayed,
     };
+    use sdkwork_contract_service::CommerceMoney;
+    use sdkwork_payment_service::{CreateOwnerRefundCommand, RefundView};
 
     #[test]
     fn confirmation_replay_requires_and_preserves_persisted_paid_at() {
@@ -250,5 +347,36 @@ mod tests {
         ensure_confirmation_intent_update(0, Some("succeeded")).expect("intent replay");
         assert!(ensure_confirmation_intent_update(0, Some("pending")).is_err());
         assert!(ensure_confirmation_intent_update(0, None).is_err());
+    }
+
+    #[test]
+    fn refund_idempotency_replay_rejects_changed_financial_parameters() {
+        let command = CreateOwnerRefundCommand::new_with_currency(
+            "tenant-1",
+            None,
+            "user-1",
+            "order-1",
+            Some("attempt-1"),
+            Some("500"),
+            Some("CNY"),
+            Some("customer_request"),
+            "request-2",
+            "idempotency-1",
+        )
+        .expect("refund command");
+        let existing = RefundView {
+            amount: CommerceMoney::new("400").expect("amount"),
+            currency_code: "CNY".to_owned(),
+            order_id: "order-1".to_owned(),
+            payment_attempt_id: "attempt-1".to_owned(),
+            reason_code: Some("customer_request".to_owned()),
+            refund_id: "refund-1".to_owned(),
+            refund_no: "RF-1".to_owned(),
+            status: "submitted".to_owned(),
+        };
+
+        let error = ensure_refund_idempotency_replay_matches(&command, &existing)
+            .expect_err("changed amount must conflict");
+        assert_eq!(error.code(), "conflict");
     }
 }

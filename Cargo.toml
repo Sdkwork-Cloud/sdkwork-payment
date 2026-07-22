@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "crates/sdkwork-api-payment-assembly",
-    "crates/sdkwork-api-payment-assembly",
   "crates/sdkwork-payment-service",
   "crates/sdkwork-payment-providers",
   "crates/sdkwork-payment-repository-sqlx",
