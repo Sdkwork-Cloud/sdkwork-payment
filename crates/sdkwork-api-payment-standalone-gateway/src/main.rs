@@ -1,6 +1,4 @@
-use sdkwork_api_payment_assembly::{
-    assemble_api_router, gateway_contract_fallback_config,
-};
+use sdkwork_api_payment_assembly::{assemble_api_router, gateway_contract_fallback_config};
 use sdkwork_payment_service_host::PaymentServiceHost;
 use sdkwork_web_bootstrap::{service_router, ServiceRouterConfig};
 use std::sync::Arc;
