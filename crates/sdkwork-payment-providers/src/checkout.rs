@@ -16,6 +16,7 @@ pub struct CheckoutContext {
     pub tenant_id: String,
     pub order_id: String,
     pub idempotency_key: String,
+    pub expires_at: Option<String>,
     pub notify_url: Option<String>,
     pub payment_scene: Option<String>,
     pub payment_metadata: Option<Value>,
@@ -48,6 +49,7 @@ pub async fn enrich_pay_owner_order_outcome(
         merchant_order_no: Some(outcome.out_trade_no.clone()),
         amount_minor: Some(amount_minor),
         currency: Some(context.currency_code.clone()),
+        expires_at: context.expires_at.clone(),
         payment_scene: Some(provider_method_key),
         metadata,
     };
@@ -55,6 +57,11 @@ pub async fn enrich_pay_owner_order_outcome(
     let provider_outcome = adapter.create_payment_intent(request).await?;
     let payment_params = payment_params_from_provider(&provider_code, &provider_outcome);
     outcome.payment_params.extend(payment_params);
+    if let Some(expires_at) = context.expires_at.as_ref() {
+        outcome
+            .payment_params
+            .insert("expiresAt".to_owned(), expires_at.clone());
+    }
     if let Some(url) = cashier_url_from_provider(&provider_code, &provider_outcome) {
         outcome.payment_params.insert("cashierUrl".to_owned(), url);
     }
@@ -71,7 +78,7 @@ fn provider_request_context(
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}));
     metadata["order_id"] = json!(context.order_id);
-    metadata["idempotency_key"] = json!(context.idempotency_key);
+    metadata["idempotency_key"] = json!(provider_checkout_idempotency_key(context, outcome));
     metadata["subject"] = json!(format!(
         "Order {}",
         outcome
@@ -85,6 +92,27 @@ fn provider_request_context(
         .clone()
         .unwrap_or_else(|| outcome.payment_method.clone()));
     (outcome.payment_method.clone(), metadata)
+}
+
+fn provider_checkout_idempotency_key(
+    context: &CheckoutContext,
+    outcome: &PayOwnerOrderOutcome,
+) -> String {
+    let fingerprint = format!(
+        "payment-provider-checkout:v1|{}:{}|{}:{}|{}:{}|{}:{}",
+        context.tenant_id.len(),
+        context.tenant_id,
+        context.order_id.len(),
+        context.order_id,
+        outcome.out_trade_no.len(),
+        outcome.out_trade_no,
+        context.idempotency_key.len(),
+        context.idempotency_key,
+    );
+    format!(
+        "sdkwork-create-{}",
+        sdkwork_utils_rust::crypto::sha256_hash(fingerprint.as_bytes())
+    )
 }
 
 fn payment_params_from_provider(
@@ -150,7 +178,7 @@ fn cashier_url_from_provider(
 
 #[cfg(test)]
 mod tests {
-    use super::{provider_request_context, CheckoutContext};
+    use super::{provider_checkout_idempotency_key, provider_request_context, CheckoutContext};
     use sdkwork_contract_service::CommerceMoney;
     use sdkwork_payment_service::PayOwnerOrderOutcome;
 
@@ -162,6 +190,7 @@ mod tests {
             tenant_id: "tenant-1".to_owned(),
             order_id: "order-1".to_owned(),
             idempotency_key: "idem-1".to_owned(),
+            expires_at: Some("2026-07-26T15:00:00Z".to_owned()),
             notify_url: Some("https://pay.example.test/webhook".to_owned()),
             payment_scene: Some("mini_program".to_owned()),
             payment_metadata: Some(serde_json::json!({"openid":"payer-openid"})),
@@ -180,5 +209,13 @@ mod tests {
         assert_eq!(method_key, "wechat_jsapi");
         assert_eq!(metadata["openid"], "payer-openid");
         assert_eq!(metadata["payment_scene"], "mini_program");
+        assert_eq!(
+            metadata["idempotency_key"],
+            provider_checkout_idempotency_key(&context, &outcome)
+        );
+        assert!(metadata["idempotency_key"]
+            .as_str()
+            .expect("provider idempotency key")
+            .is_ascii());
     }
 }

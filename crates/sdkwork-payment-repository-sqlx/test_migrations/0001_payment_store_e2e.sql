@@ -92,10 +92,15 @@ CREATE TABLE IF NOT EXISTS commerce_payment_attempt (
     request_no TEXT,
     idempotency_key TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_attempt_provider_trade
+    ON commerce_payment_attempt (tenant_id, provider_code, out_trade_no)
+    WHERE out_trade_no IS NOT NULL AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS commerce_refund (
     id TEXT NOT NULL PRIMARY KEY,

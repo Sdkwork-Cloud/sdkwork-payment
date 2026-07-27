@@ -1288,9 +1288,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.37.5"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
 ]
@@ -1610,6 +1610,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "sdkwork-api-payment-assembly"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "sdkwork-payment-service-host",
+ "sdkwork-routes-payment-app-api",
+ "sdkwork-routes-payment-backend-api",
+ "sdkwork-web-bootstrap",
+ "sdkwork-web-core",
+ "tokio",
+]
+
+[[package]]
+name = "sdkwork-api-payment-standalone-gateway"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "sdkwork-api-payment-assembly",
+ "sdkwork-payment-service-host",
+ "sdkwork-web-bootstrap",
+ "tokio",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sdkwork-contract-service"
 version = "0.1.0"
 
@@ -1786,19 +1813,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sdkwork-payment-gateway-assembly"
-version = "0.1.0"
-dependencies = [
- "axum",
- "sdkwork-payment-service-host",
- "sdkwork-routes-payment-app-api",
- "sdkwork-routes-payment-backend-api",
- "sdkwork-web-bootstrap",
- "sdkwork-web-core",
- "tokio",
-]
-
-[[package]]
 name = "sdkwork-payment-providers"
 version = "0.1.0"
 dependencies = [
@@ -1852,20 +1866,6 @@ dependencies = [
  "sdkwork-database-spi",
  "sdkwork-database-sqlx",
  "sdkwork-payment-database-host",
-]
-
-[[package]]
-name = "sdkwork-payment-standalone-gateway"
-version = "0.1.0"
-dependencies = [
- "axum",
- "sdkwork-payment-gateway-assembly",
- "sdkwork-payment-service-host",
- "sdkwork-web-bootstrap",
- "tokio",
- "tower-http 0.5.2",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

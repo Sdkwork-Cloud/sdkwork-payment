@@ -5,12 +5,13 @@ use sdkwork_payment_service::{
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
-use crate::order_reference::order_status_is_payable;
+use crate::order_reference::{order_expiration_is_payable, order_status_is_payable};
 use crate::owner_payment_params::owner_order_payment_params;
 use crate::payment_channel::select_payment_channel_postgres;
 use crate::shared::{
     current_timestamp_string, ensure_confirmation_intent_update,
-    ensure_owner_payment_idempotency_replay_matches, payment_attempt_is_terminal_success,
+    ensure_owner_payment_idempotency_replay_matches, owner_payment_callback_payload,
+    owner_payment_reuse_matches, payment_attempt_is_terminal_success, provider_out_trade_no,
     required_persisted_paid_at, resolve_confirmation_attempt_replayed, stable_storage_id,
 };
 
@@ -266,6 +267,7 @@ impl PostgresCommerceOwnerOrderPaymentStore {
                 o.order_no AS order_sn,
                 o.subject AS order_subject,
                 o.status,
+                o.expired_at,
                 CAST(
                     COALESCE(
                         (
@@ -302,9 +304,12 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         let order_status = string_cell(&order_row, "status");
         let order_sn = string_cell(&order_row, "order_sn");
         let order_subject = optional_string_cell(&order_row, "order_subject");
+        let order_expires_at = optional_string_cell(&order_row, "expired_at");
         let total_amount = CommerceMoney::new(&string_cell(&order_row, "total_amount"))
             .map_err(CommerceServiceError::storage)?;
-        if !order_status_is_payable(&order_status) {
+        if !order_status_is_payable(&order_status)
+            || !order_expiration_is_payable(order_expires_at.as_deref())
+        {
             return Err(CommerceServiceError::conflict(
                 "order is not pending payment",
             ));
@@ -361,10 +366,10 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             &command.order_id,
             &command.idempotency_key,
         ]);
-        let out_trade_no = format!(
-            "OT-{}-{}",
-            order_sn,
-            &command.idempotency_key[..command.idempotency_key.len().min(24)]
+        let out_trade_no = provider_out_trade_no(
+            &command.tenant_id,
+            &command.order_id,
+            &command.idempotency_key,
         );
 
         sqlx::query(
@@ -410,19 +415,17 @@ impl PostgresCommerceOwnerOrderPaymentStore {
             return Ok(existing);
         }
 
-        let callback_payload = command
-            .payment_attempt_callback_payload
-            .as_deref()
-            .unwrap_or("{}");
+        let callback_payload =
+            owner_payment_callback_payload(&command, channel.provider_account_id.as_deref());
 
         sqlx::query(
             r#"
             INSERT INTO commerce_payment_attempt
                 (id, tenant_id, organization_id, owner_user_id, payment_intent_id, order_id,
                  payment_method, provider_code, channel_id, out_trade_no, amount, currency_code, status,
-                 callback_payload, request_no, idempotency_key, created_at, paid_at, updated_at)
+                 callback_payload, request_no, idempotency_key, expires_at, created_at, paid_at, updated_at)
             VALUES
-                ($1, CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10, $11::numeric, 'CNY', $12, $13::jsonb, $14, $15, $16::timestamptz, NULL, $17::timestamptz)
+                ($1, CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10, $11::numeric, 'CNY', $12, $13::jsonb, $14, $15, $16::timestamptz, $17::timestamptz, NULL, $18::timestamptz)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -438,9 +441,10 @@ impl PostgresCommerceOwnerOrderPaymentStore {
         .bind(&out_trade_no)
         .bind(total_amount.as_str())
         .bind(CommercePaymentStatus::Pending.as_str())
-        .bind(callback_payload)
+        .bind(&callback_payload)
         .bind(&command.request_no)
         .bind(&command.idempotency_key)
+        .bind(order_expires_at.as_deref())
         .bind(&now)
         .bind(&now)
         .execute(&mut *tx)
@@ -738,6 +742,7 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
                pa.payment_method,
                pa.provider_code,
                pa.channel_id,
+               CAST(pa.callback_payload AS TEXT) AS callback_payload,
                pa.status
         FROM commerce_payment_intent pi
         INNER JOIN commerce_payment_attempt pa
@@ -790,7 +795,11 @@ async fn load_owner_payment_outcome_by_idempotency_in_tx(
         status: string_cell(&row, "status"),
         payment_params,
     };
-    ensure_owner_payment_idempotency_replay_matches(command, &outcome)?;
+    ensure_owner_payment_idempotency_replay_matches(
+        command,
+        &outcome,
+        &string_cell(&row, "callback_payload"),
+    )?;
     Ok(Some(outcome))
 }
 
@@ -800,11 +809,12 @@ async fn load_reusable_owner_payment_in_tx(
     order_sn: &str,
     order_subject: Option<&str>,
 ) -> Result<Option<PayOwnerOrderOutcome>, CommerceServiceError> {
-    let row = sqlx::query(
+    let rows = sqlx::query(
         r#"
         SELECT pa.id, pa.out_trade_no,
                CAST(pa.amount AS BIGINT)::TEXT AS amount,
-               pa.payment_method, pa.provider_code, pa.channel_id, pa.status
+               pa.payment_method, pa.provider_code, pa.channel_id, pa.status,
+               CAST(pa.callback_payload AS TEXT) AS callback_payload
         FROM commerce_payment_attempt pa
         INNER JOIN commerce_order o
             ON o.id = pa.order_id
@@ -815,19 +825,27 @@ async fn load_reusable_owner_payment_in_tx(
           AND pa.order_id = CAST($3 AS TEXT)
           AND pa.payment_method = CAST($4 AS TEXT)
           AND LOWER(COALESCE(pa.status, '')) IN ('created', 'pending', 'processing')
+          AND pa.deleted_at IS NULL
+          AND pa.expires_at IS NOT NULL
+          AND pa.expires_at > NOW()
+          AND o.expired_at IS NOT NULL
+          AND o.expired_at > NOW()
         ORDER BY pa.created_at DESC, pa.id DESC
-        LIMIT 1
+        LIMIT 64
         "#,
     )
     .bind(&command.tenant_id)
     .bind(&command.owner_user_id)
     .bind(&command.order_id)
     .bind(&command.payment_method)
-    .fetch_optional(&mut **tx)
+    .fetch_all(&mut **tx)
     .await
     .map_err(|error| store_error("failed to load reusable owner payment", error))?;
 
-    let Some(row) = row else {
+    let Some(row) = rows
+        .into_iter()
+        .find(|row| owner_payment_reuse_matches(command, &string_cell(row, "callback_payload")))
+    else {
         return Ok(None);
     };
 

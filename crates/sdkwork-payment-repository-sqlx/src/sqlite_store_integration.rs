@@ -1,6 +1,8 @@
 use sdkwork_payment_service::{
-    CancelOwnerPaymentIntentCommand, CreateOwnerPaymentIntentCommand, CreateOwnerRefundCommand,
-    OrderPaymentSettlementAttempt, PaymentIntentDetailQuery, RefundListQuery,
+    CancelOwnerPaymentIntentCommand, CreateOwnerPaymentAttemptCommand,
+    CreateOwnerPaymentIntentCommand, CreateOwnerRefundCommand, OrderPaymentSettlementAttempt,
+    PayOwnerOrderCommand, PayOwnerOrderCommandInput, PaymentIntentDetailQuery, RefundDetailQuery,
+    RefundListQuery,
 };
 
 use crate::{
@@ -344,6 +346,44 @@ async fn refund_create_is_idempotent_by_idempotency_key() {
 }
 
 #[tokio::test]
+async fn owner_refund_retrieval_excludes_soft_deleted_records() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let store = SqliteCommerceRefundStore::new(pool.clone());
+    let command = CreateOwnerRefundCommand::new(
+        "100001",
+        None,
+        "user-1",
+        "order-1",
+        Some("pa-1"),
+        Some("500"),
+        Some("buyer_request"),
+        "req-refund-soft-delete",
+        "idem-refund-soft-delete",
+    )
+    .expect("soft-delete refund command");
+    let refund = store
+        .create_owner_refund(command)
+        .await
+        .expect("soft-delete refund");
+    sqlx::query("UPDATE commerce_refund SET deleted_at = ? WHERE id = ?")
+        .bind("2026-07-27T00:00:00Z")
+        .bind(&refund.refund_id)
+        .execute(&pool)
+        .await
+        .expect("soft-delete refund record");
+
+    let query = RefundDetailQuery::new("100001", None, "user-1", &refund.refund_id)
+        .expect("soft-delete refund query");
+    let retrieved = store
+        .retrieve_owner_refund(query)
+        .await
+        .expect("retrieve soft-deleted refund");
+
+    assert!(retrieved.is_none());
+}
+
+#[tokio::test]
 async fn payment_intent_idempotency_replay_rejects_changed_method() {
     let pool = payment_store_e2e_sqlite_memory_pool().await;
     seed_paid_order_with_attempt(&pool).await;
@@ -387,6 +427,179 @@ async fn payment_intent_idempotency_replay_is_owner_scoped() {
         .await
         .expect_err("another owner must not receive the idempotent payment record");
     assert_eq!(error.code(), "not-found");
+}
+
+#[tokio::test]
+async fn payment_attempt_creation_persists_command_identity_and_provider_trade_number() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    let now = "2026-07-27T00:00:00Z";
+    sqlx::query(
+        "INSERT INTO commerce_order (id, tenant_id, owner_user_id, order_no, status, subject, expired_at, created_at, updated_at) VALUES ('order-attempt', 'tenant-attempt', 'user-attempt', 'ORDER-ATTEMPT', 'pending_payment', 'Attempt test', '2099-01-01T00:00:00Z', ?, ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("attempt order");
+    sqlx::query(
+        "INSERT INTO commerce_order_amount_breakdown (id, tenant_id, order_id, allocation_type, payable_amount, discount_amount, created_at) VALUES ('breakdown-attempt', 'tenant-attempt', 'order-attempt', 'order_total', '9900', '0', ?)",
+    )
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("attempt order amount");
+    sqlx::query(
+        "INSERT INTO commerce_payment_method (id, tenant_id, method_key, display_name, provider_code, status, idempotency_key, created_at, updated_at) VALUES ('method-attempt', 'tenant-attempt', 'sandbox_test', 'Sandbox', 'sandbox', 'active', 'method-attempt-idem', ?, ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("attempt payment method");
+    sqlx::query(
+        "INSERT INTO commerce_payment_intent (id, tenant_id, owner_user_id, order_id, payment_intent_no, payment_method, provider_code, amount, currency_code, status, request_no, idempotency_key, created_at, updated_at) VALUES ('intent-attempt', 'tenant-attempt', 'user-attempt', 'order-attempt', 'PI-ATTEMPT', 'sandbox_test', 'sandbox', '9900', 'CNY', 'pending', 'intent-request', 'intent-idem', ?, ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("attempt payment intent");
+    let store = SqliteCommercePaymentIntentStore::new(pool.clone());
+    let command = CreateOwnerPaymentAttemptCommand::new(
+        "tenant-attempt",
+        None,
+        "user-attempt",
+        "intent-attempt",
+        "attempt-request",
+        "尝试:幂等键",
+    )
+    .expect("attempt command");
+
+    let outcome = store
+        .create_owner_payment_attempt(command)
+        .await
+        .expect("create payment attempt");
+    let persisted: (String, String, String) = sqlx::query_as(
+        "SELECT request_no, idempotency_key, out_trade_no FROM commerce_payment_attempt WHERE id = ?",
+    )
+    .bind(&outcome.attempt_id)
+    .fetch_one(&pool)
+    .await
+    .expect("persisted payment attempt identity");
+
+    assert_eq!(persisted.0, "attempt-request");
+    assert_eq!(persisted.1, "尝试:幂等键");
+    assert_eq!(persisted.2, outcome.out_trade_no);
+    assert_eq!(persisted.2.len(), 32);
+    assert!(persisted.2.is_ascii());
+}
+
+#[tokio::test]
+async fn reusable_owner_payment_requires_the_same_scene_and_metadata_snapshot() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    let now = "2026-07-27T00:00:00Z";
+    sqlx::query(
+        r#"
+        INSERT INTO commerce_order
+            (id, tenant_id, owner_user_id, order_no, status, subject, currency_code,
+             payment_status, expired_at, created_at, updated_at)
+        VALUES ('order-reuse', 'tenant-reuse', 'user-reuse', 'ORDER-REUSE',
+                'pending_payment', 'Reuse test', 'CNY', 'pending',
+                '2099-01-01T00:00:00Z', ?, ?)
+        "#,
+    )
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("reusable payment order");
+    sqlx::query(
+        r#"
+        INSERT INTO commerce_order_amount_breakdown
+            (id, tenant_id, order_id, allocation_type, payable_amount, discount_amount, created_at)
+        VALUES ('breakdown-reuse', 'tenant-reuse', 'order-reuse', 'order_total', '9900', '0', ?)
+        "#,
+    )
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("reusable payment amount");
+    sqlx::query(
+        r#"
+        INSERT INTO commerce_payment_method
+            (id, tenant_id, method_key, display_name, provider_code, status,
+             idempotency_key, created_at, updated_at)
+        VALUES ('method-reuse', 'tenant-reuse', 'sandbox_test', 'Sandbox', 'sandbox',
+                'active', 'method-reuse-idem', ?, ?)
+        "#,
+    )
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("reusable payment method");
+
+    let store = SqliteCommerceOwnerOrderPaymentStore::new(pool.clone());
+    let command = |scene: &str, metadata: serde_json::Value, idempotency_key: &str| {
+        PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
+            tenant_id: "tenant-reuse".to_owned(),
+            organization_id: None,
+            owner_user_id: "user-reuse".to_owned(),
+            order_id: "order-reuse".to_owned(),
+            payment_method: "sandbox_test".to_owned(),
+            payment_scene: Some(scene.to_owned()),
+            payment_attempt_callback_payload: None,
+            payment_metadata: metadata,
+            request_no: format!("request-{idempotency_key}"),
+            idempotency_key: idempotency_key.to_owned(),
+        })
+        .expect("owner payment command")
+    };
+
+    let first = store
+        .pay_owner_order(command(
+            "mobile_cashier_h5",
+            serde_json::json!({"payer": "one"}),
+            "reuse-first",
+        ))
+        .await
+        .expect("first owner payment");
+    let same_snapshot = store
+        .pay_owner_order(command(
+            "mobile_cashier_h5",
+            serde_json::json!({"payer": "one"}),
+            "reuse-second",
+        ))
+        .await
+        .expect("same-snapshot owner payment");
+    let changed_scene = store
+        .pay_owner_order(command(
+            "mini_program",
+            serde_json::json!({"payer": "one"}),
+            "reuse-third",
+        ))
+        .await
+        .expect("changed-scene owner payment");
+    let changed_metadata = store
+        .pay_owner_order(command(
+            "mobile_cashier_h5",
+            serde_json::json!({"payer": "two"}),
+            "reuse-fourth",
+        ))
+        .await
+        .expect("changed-metadata owner payment");
+
+    assert_eq!(first.payment_id, same_snapshot.payment_id);
+    assert_ne!(first.payment_id, changed_scene.payment_id);
+    assert_ne!(first.payment_id, changed_metadata.payment_id);
+    assert_ne!(changed_scene.payment_id, changed_metadata.payment_id);
+    let attempt_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM commerce_payment_attempt WHERE order_id = 'order-reuse'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("reusable payment attempt count");
+    assert_eq!(3, attempt_count);
 }
 
 #[tokio::test]
@@ -580,6 +793,71 @@ async fn refund_transition_is_tenant_and_organization_isolated() {
         .await
         .expect("isolated refund status");
     assert_eq!(status, "submitted");
+}
+
+#[tokio::test]
+async fn explicit_provider_success_persists_terminal_refund_and_audit_event() {
+    let pool = payment_store_e2e_sqlite_memory_pool().await;
+    seed_paid_order_with_attempt(&pool).await;
+    let store = SqliteCommerceRefundStore::new(pool.clone());
+    let refund = store
+        .create_owner_refund(
+            CreateOwnerRefundCommand::new(
+                "100001",
+                None,
+                "user-1",
+                "order-1",
+                Some("pa-1"),
+                Some("500"),
+                None,
+                "req-terminal-refund",
+                "idem-terminal-refund",
+            )
+            .expect("refund command"),
+        )
+        .await
+        .expect("refund");
+    store
+        .mark_owner_refund_provider_submission_processing(
+            "100001",
+            None,
+            &refund.refund_id,
+            "system",
+            None,
+            "req-terminal-processing",
+            "idem-terminal-processing",
+        )
+        .await
+        .expect("processing transition");
+    let succeeded = store
+        .mark_owner_refund_provider_submission_succeeded(
+            "100001",
+            None,
+            &refund.refund_id,
+            "system",
+            None,
+            "req-terminal-succeeded",
+            "idem-terminal-succeeded",
+        )
+        .await
+        .expect("succeeded transition");
+    assert_eq!(succeeded.status, "succeeded");
+
+    let event: (Option<String>, String, String) = sqlx::query_as(
+        "SELECT from_status, to_status, event_type FROM commerce_refund_event WHERE refund_id = ? AND event_type = 'succeeded'",
+    )
+    .bind(&refund.refund_id)
+    .fetch_one(&pool)
+    .await
+    .expect("succeeded refund event");
+    assert_eq!(
+        event,
+        (
+            Some("processing".to_owned()),
+            "succeeded".to_owned(),
+            "succeeded".to_owned(),
+        )
+    );
 }
 
 #[tokio::test]

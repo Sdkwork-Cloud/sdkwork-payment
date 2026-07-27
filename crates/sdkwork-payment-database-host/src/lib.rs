@@ -161,15 +161,15 @@ mod tests {
                     ON a.id = c.provider_account_id
                    AND a.tenant_id = c.tenant_id
                 WHERE m.tenant_id = '100001'
-                  AND m.organization_id = '100002'
+                  AND m.organization_id IN ('100002', '0')
                   AND m.method_key = 'wechat_pay'
                   AND m.status = 'active'
                   AND m.deleted_at IS NULL
-                  AND c.organization_id = '100002'
+                  AND c.organization_id IN ('100002', '0')
                   AND c.currency_code = 'CNY'
                   AND c.status = 'active'
                   AND c.deleted_at IS NULL
-                  AND a.organization_id = '100002'
+                  AND a.organization_id IN ('100002', '0')
                   AND a.status = 'active'
                   AND a.deleted_at IS NULL
                 "#,

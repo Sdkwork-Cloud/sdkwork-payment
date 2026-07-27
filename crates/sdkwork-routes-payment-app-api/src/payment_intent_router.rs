@@ -206,7 +206,6 @@ impl CommercePaymentIntentStore for ProviderEnrichedSqlitePaymentIntents {
         Box::pin(async move {
             let tenant_id = command.tenant_id.clone();
             let organization_id = command.organization_id.clone();
-            let idempotency_key = command.idempotency_key.clone();
             let outcome = inner.create_owner_payment_attempt(command).await?;
             let order_id = outcome.order_id.clone();
             enrich_owner_payment_attempt_sqlite(
@@ -217,9 +216,7 @@ impl CommercePaymentIntentStore for ProviderEnrichedSqlitePaymentIntents {
                     tenant_id: &tenant_id,
                     organization_id: organization_id.as_deref(),
                     order_id: &order_id,
-                    idempotency_key: &idempotency_key,
                     payment_scene: None,
-                    payment_metadata: None,
                 },
                 outcome,
             )
@@ -264,7 +261,6 @@ impl CommercePaymentIntentStore for ProviderEnrichedPostgresPaymentIntents {
         Box::pin(async move {
             let tenant_id = command.tenant_id.clone();
             let organization_id = command.organization_id.clone();
-            let idempotency_key = command.idempotency_key.clone();
             let outcome = inner.create_owner_payment_attempt(command).await?;
             let order_id = outcome.order_id.clone();
             enrich_owner_payment_attempt_postgres(
@@ -275,9 +271,7 @@ impl CommercePaymentIntentStore for ProviderEnrichedPostgresPaymentIntents {
                     tenant_id: &tenant_id,
                     organization_id: organization_id.as_deref(),
                     order_id: &order_id,
-                    idempotency_key: &idempotency_key,
                     payment_scene: None,
-                    payment_metadata: None,
                 },
                 outcome,
             )

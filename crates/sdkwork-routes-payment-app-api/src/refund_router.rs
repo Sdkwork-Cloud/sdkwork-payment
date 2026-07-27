@@ -11,12 +11,13 @@ use axum::{Json, Router};
 use sdkwork_contract_service::CommerceServiceError;
 use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{
-    create_provider_refund, provider_registry_for_account, PaymentProviderRegistry,
-    ProviderAccountBinding, ProviderCredentialBundle,
+    create_provider_refund, provider_registry_for_account, query_provider_refund,
+    PaymentProviderRegistry, ProviderAccountBinding, ProviderCredentialBundle,
+    ProviderRefundSubmissionState,
 };
 use sdkwork_payment_repository_sqlx::{
-    load_active_provider_account_postgres, load_active_provider_account_sqlite,
-    load_payment_attempt_provider_context_by_id_postgres,
+    ensure_provider_account_matches, load_active_provider_account_postgres,
+    load_active_provider_account_sqlite, load_payment_attempt_provider_context_by_id_postgres,
     load_payment_attempt_provider_context_by_id_sqlite,
     load_provider_account_for_existing_payment_postgres,
     load_provider_account_for_existing_payment_sqlite, PaymentProviderAccountRecord,
@@ -174,7 +175,7 @@ async fn submit_provider_refund(
     organization_id: Option<&str>,
     refund: &RefundView,
     reason_code: Option<String>,
-) -> Result<(), CommerceServiceError> {
+) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
     let Some(ctx) =
         load_payment_attempt_provider_context_by_id_sqlite(pool, &refund.payment_attempt_id)
             .await?
@@ -208,16 +209,31 @@ async fn submit_provider_refund(
             .await?
         }
     };
+    ensure_provider_account_matches(account.as_ref(), &ctx.provider_code)?;
     let registry = provider_registry_for_account(
         credentials,
         account.map(|record| provider_account_binding(&record)),
     );
     let total_amount = sdkwork_contract_service::CommerceMoney::new(&ctx.amount)
         .map_err(CommerceServiceError::storage)?;
+    if refund.status == "processing" {
+        if let Some(state) = query_provider_refund(
+            &registry,
+            &ctx.provider_code,
+            &ctx.out_trade_no,
+            ctx.provider_transaction_id.as_deref(),
+            &refund.refund_no,
+        )
+        .await?
+        {
+            return Ok(state);
+        }
+    }
     create_provider_refund(
         &registry,
         &ctx.provider_code,
         &ctx.out_trade_no,
+        ctx.provider_transaction_id.as_deref(),
         &refund.refund_no,
         &refund.amount,
         &total_amount,
@@ -233,7 +249,7 @@ async fn submit_provider_refund_postgres(
     organization_id: Option<&str>,
     refund: &RefundView,
     reason_code: Option<String>,
-) -> Result<(), CommerceServiceError> {
+) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
     let Some(ctx) =
         load_payment_attempt_provider_context_by_id_postgres(pool, &refund.payment_attempt_id)
             .await?
@@ -267,16 +283,31 @@ async fn submit_provider_refund_postgres(
             .await?
         }
     };
+    ensure_provider_account_matches(account.as_ref(), &ctx.provider_code)?;
     let registry = provider_registry_for_account(
         credentials,
         account.map(|record| provider_account_binding(&record)),
     );
     let total_amount = sdkwork_contract_service::CommerceMoney::new(&ctx.amount)
         .map_err(CommerceServiceError::storage)?;
+    if refund.status == "processing" {
+        if let Some(state) = query_provider_refund(
+            &registry,
+            &ctx.provider_code,
+            &ctx.out_trade_no,
+            ctx.provider_transaction_id.as_deref(),
+            &refund.refund_no,
+        )
+        .await?
+        {
+            return Ok(state);
+        }
+    }
     create_provider_refund(
         &registry,
         &ctx.provider_code,
         &ctx.out_trade_no,
+        ctx.provider_transaction_id.as_deref(),
         &refund.refund_no,
         &refund.amount,
         &total_amount,
@@ -290,8 +321,16 @@ const REFUND_PROVIDER_SUBMIT_ATTEMPTS: u32 = 3;
 fn refund_submission_retryable(error: &CommerceServiceError) -> bool {
     !matches!(
         error.code(),
-        "not-found" | "validation-failed" | "forbidden" | "conflict"
+        "not-found" | "validation" | "validation-failed" | "forbidden" | "conflict"
     )
+}
+
+fn refund_requires_provider_submission(status: &str) -> bool {
+    matches!(status, "submitted" | "processing" | "failed")
+}
+
+fn refund_requires_processing_claim(status: &str) -> bool {
+    matches!(status, "submitted" | "failed")
 }
 
 async fn submit_provider_refund_with_retry(
@@ -301,7 +340,7 @@ async fn submit_provider_refund_with_retry(
     organization_id: Option<&str>,
     refund: &RefundView,
     reason_code: Option<String>,
-) -> Result<(), CommerceServiceError> {
+) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
     let mut last_error = None;
     for attempt in 0..REFUND_PROVIDER_SUBMIT_ATTEMPTS {
         if attempt > 0 {
@@ -317,7 +356,7 @@ async fn submit_provider_refund_with_retry(
         )
         .await
         {
-            Ok(()) => return Ok(()),
+            Ok(state) => return Ok(state),
             Err(error) if refund_submission_retryable(&error) => last_error = Some(error),
             Err(error) => return Err(error),
         }
@@ -332,7 +371,7 @@ async fn submit_provider_refund_postgres_with_retry(
     organization_id: Option<&str>,
     refund: &RefundView,
     reason_code: Option<String>,
-) -> Result<(), CommerceServiceError> {
+) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
     let mut last_error = None;
     for attempt in 0..REFUND_PROVIDER_SUBMIT_ATTEMPTS {
         if attempt > 0 {
@@ -348,7 +387,7 @@ async fn submit_provider_refund_postgres_with_retry(
         )
         .await
         {
-            Ok(()) => return Ok(()),
+            Ok(state) => return Ok(state),
             Err(error) if refund_submission_retryable(&error) => last_error = Some(error),
             Err(error) => return Err(error),
         }
@@ -373,19 +412,21 @@ impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
         let idempotency_key = command.idempotency_key.clone();
         Box::pin(async move {
             let mut refund = inner.create_owner_refund(command).await?;
-            if refund.status == "submitted" {
-                refund = inner
-                    .mark_owner_refund_provider_submission_processing(
-                        &tenant_id,
-                        organization_id.as_deref(),
-                        &refund.refund_id,
-                        &requested_by_type,
-                        Some(&requested_by),
-                        &request_no,
-                        &idempotency_key,
-                    )
-                    .await?;
-                if let Err(error) = submit_provider_refund_with_retry(
+            if refund_requires_provider_submission(&refund.status) {
+                if refund_requires_processing_claim(&refund.status) {
+                    refund = inner
+                        .mark_owner_refund_provider_submission_processing(
+                            &tenant_id,
+                            organization_id.as_deref(),
+                            &refund.refund_id,
+                            &requested_by_type,
+                            Some(&requested_by),
+                            &request_no,
+                            &idempotency_key,
+                        )
+                        .await?;
+                }
+                match submit_provider_refund_with_retry(
                     &credentials,
                     &pool,
                     &tenant_id,
@@ -395,18 +436,49 @@ impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
                 )
                 .await
                 {
-                    let _ = inner
-                        .mark_owner_refund_provider_submission_failed(
-                            &tenant_id,
-                            organization_id.as_deref(),
-                            &refund.refund_id,
-                            &requested_by_type,
-                            Some(&requested_by),
-                            &request_no,
-                            &idempotency_key,
-                        )
-                        .await;
-                    return Err(error);
+                    Ok(ProviderRefundSubmissionState::Processing) => {}
+                    Ok(ProviderRefundSubmissionState::Succeeded) => {
+                        refund = inner
+                            .mark_owner_refund_provider_submission_succeeded(
+                                &tenant_id,
+                                organization_id.as_deref(),
+                                &refund.refund_id,
+                                &requested_by_type,
+                                Some(&requested_by),
+                                &request_no,
+                                &idempotency_key,
+                            )
+                            .await?;
+                    }
+                    Ok(ProviderRefundSubmissionState::Failed) => {
+                        refund = inner
+                            .mark_owner_refund_provider_submission_failed(
+                                &tenant_id,
+                                organization_id.as_deref(),
+                                &refund.refund_id,
+                                &requested_by_type,
+                                Some(&requested_by),
+                                &request_no,
+                                &idempotency_key,
+                            )
+                            .await?;
+                    }
+                    Err(error) => {
+                        if !refund_submission_retryable(&error) {
+                            let _ = inner
+                                .mark_owner_refund_provider_submission_failed(
+                                    &tenant_id,
+                                    organization_id.as_deref(),
+                                    &refund.refund_id,
+                                    &requested_by_type,
+                                    Some(&requested_by),
+                                    &request_no,
+                                    &idempotency_key,
+                                )
+                                .await;
+                        }
+                        return Err(error);
+                    }
                 }
             }
             Ok(refund)
@@ -447,19 +519,21 @@ impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
         let idempotency_key = command.idempotency_key.clone();
         Box::pin(async move {
             let mut refund = inner.create_owner_refund(command).await?;
-            if refund.status == "submitted" {
-                refund = inner
-                    .mark_owner_refund_provider_submission_processing(
-                        &tenant_id,
-                        organization_id.as_deref(),
-                        &refund.refund_id,
-                        &requested_by_type,
-                        Some(&requested_by),
-                        &request_no,
-                        &idempotency_key,
-                    )
-                    .await?;
-                if let Err(error) = submit_provider_refund_postgres_with_retry(
+            if refund_requires_provider_submission(&refund.status) {
+                if refund_requires_processing_claim(&refund.status) {
+                    refund = inner
+                        .mark_owner_refund_provider_submission_processing(
+                            &tenant_id,
+                            organization_id.as_deref(),
+                            &refund.refund_id,
+                            &requested_by_type,
+                            Some(&requested_by),
+                            &request_no,
+                            &idempotency_key,
+                        )
+                        .await?;
+                }
+                match submit_provider_refund_postgres_with_retry(
                     &credentials,
                     &pool,
                     &tenant_id,
@@ -469,18 +543,49 @@ impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
                 )
                 .await
                 {
-                    let _ = inner
-                        .mark_owner_refund_provider_submission_failed(
-                            &tenant_id,
-                            organization_id.as_deref(),
-                            &refund.refund_id,
-                            &requested_by_type,
-                            Some(&requested_by),
-                            &request_no,
-                            &idempotency_key,
-                        )
-                        .await;
-                    return Err(error);
+                    Ok(ProviderRefundSubmissionState::Processing) => {}
+                    Ok(ProviderRefundSubmissionState::Succeeded) => {
+                        refund = inner
+                            .mark_owner_refund_provider_submission_succeeded(
+                                &tenant_id,
+                                organization_id.as_deref(),
+                                &refund.refund_id,
+                                &requested_by_type,
+                                Some(&requested_by),
+                                &request_no,
+                                &idempotency_key,
+                            )
+                            .await?;
+                    }
+                    Ok(ProviderRefundSubmissionState::Failed) => {
+                        refund = inner
+                            .mark_owner_refund_provider_submission_failed(
+                                &tenant_id,
+                                organization_id.as_deref(),
+                                &refund.refund_id,
+                                &requested_by_type,
+                                Some(&requested_by),
+                                &request_no,
+                                &idempotency_key,
+                            )
+                            .await?;
+                    }
+                    Err(error) => {
+                        if !refund_submission_retryable(&error) {
+                            let _ = inner
+                                .mark_owner_refund_provider_submission_failed(
+                                    &tenant_id,
+                                    organization_id.as_deref(),
+                                    &refund.refund_id,
+                                    &requested_by_type,
+                                    Some(&requested_by),
+                                    &request_no,
+                                    &idempotency_key,
+                                )
+                                .await;
+                        }
+                        return Err(error);
+                    }
                 }
             }
             Ok(refund)
@@ -644,6 +749,34 @@ fn map_refund(value: RefundView) -> RefundResponse {
         currency_code: value.currency_code,
         status: value.status,
         reason_code: value.reason_code,
+    }
+}
+
+#[cfg(test)]
+mod provider_submission_tests {
+    use super::{
+        refund_requires_processing_claim, refund_requires_provider_submission,
+        refund_submission_retryable,
+    };
+    use sdkwork_contract_service::CommerceServiceError;
+
+    #[test]
+    fn ambiguous_refund_submission_can_be_replayed_without_reclaiming() {
+        assert!(refund_requires_provider_submission("processing"));
+        assert!(!refund_requires_processing_claim("processing"));
+        assert!(refund_requires_provider_submission("failed"));
+        assert!(refund_requires_processing_claim("failed"));
+        assert!(!refund_requires_provider_submission("succeeded"));
+    }
+
+    #[test]
+    fn deterministic_validation_failure_is_not_ambiguous() {
+        assert!(!refund_submission_retryable(
+            &CommerceServiceError::validation("invalid provider refund input")
+        ));
+        assert!(refund_submission_retryable(&CommerceServiceError::storage(
+            "provider response was not observed"
+        )));
     }
 }
 

@@ -38,8 +38,8 @@ problem: Payment provider account setup is presented as several equally importan
 - The store locks the order and rejects unpaid orders, amounts above the remaining refundable balance, currency mismatches, and attempts that did not succeed.
 - Refund creation requires command idempotency metadata and records `requested_by_type=operator`, the authenticated operator id, request identity, and a refund event.
 - Provider submission always reuses the original payment attempt and provider account. Historical inactive or deprecated accounts remain eligible to discharge refund obligations; missing, suspended, deleted, or refund-incompatible account configuration fails closed.
-- A provider-accepted refund transitions from `submitted` to `processing`; provider failure transitions it to `failed`.
-- Only failed refunds can be retried, and retries reuse the existing refund number so provider idempotency is preserved.
+- A refund is claimed as `processing` before any PSP call. An explicit terminal provider success becomes `succeeded`, an explicit terminal provider failure becomes `failed`, and an accepted/pending/unknown or ambiguous transport result remains `processing` so refundable amount stays reserved.
+- Failed and processing refunds can be retried. Every retry reuses the existing refund number and operation idempotency key; a processing retry does not perform a second state claim, queries the original PSP account first, and submits again only when the PSP confirms that the merchant refund number does not exist.
 - Manager permissions independently gate refund read, create, and retry actions; backend route authorization remains authoritative.
 - Payment records offer a direct refund action, while a dedicated refund center exposes filters, status, amount, reason, requester, and retry state.
 - OpenAPI, route manifest, generated backend SDK, service method tree, and frontend controller expose matching refund operations without raw HTTP or generated-file edits.
@@ -49,7 +49,7 @@ problem: Payment provider account setup is presented as several equally importan
 - Security: dual-token backend authentication, organization-scoped data access, least-privilege permissions, command idempotency, request fingerprint validation, credential redaction, and operator audit attribution.
 - Privacy: expose only payment and operator identifiers required for refund operations; never expose provider secrets.
 - Performance: use server-side offset pagination with a default page size of 20 and maximum of 200.
-- Reliability: retry transient provider submission at the existing bounded retry policy; never create a second refund row when retrying an existing failed refund.
+- Reliability: retry transient provider submission or reconciliation at the existing bounded retry policy; preserve `processing` on ambiguous query failures, and never create a second refund row or PSP refund identity when retrying.
 
 ## Affected Surfaces
 

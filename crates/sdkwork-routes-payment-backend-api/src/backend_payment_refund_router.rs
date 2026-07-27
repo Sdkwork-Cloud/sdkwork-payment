@@ -8,11 +8,11 @@ use axum::{Json, Router};
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{
-    create_provider_refund, provider_registry_for_account, ProviderAccountBinding,
-    ProviderCredentialBundle,
+    create_provider_refund, provider_registry_for_account, query_provider_refund,
+    ProviderAccountBinding, ProviderCredentialBundle, ProviderRefundSubmissionState,
 };
 use sdkwork_payment_repository_sqlx::{
-    load_payment_attempt_provider_context_by_id_postgres,
+    ensure_provider_account_matches, load_payment_attempt_provider_context_by_id_postgres,
     load_payment_attempt_provider_context_by_id_sqlite,
     load_provider_account_for_existing_payment_postgres,
     load_provider_account_for_existing_payment_sqlite, PaymentProviderAccountRecord,
@@ -242,34 +242,73 @@ async fn create_refund(
         Ok(refund) => refund,
         Err(error) => return map_service_error(ctx, error),
     };
-    if refund.status == "submitted" {
-        if let Err(error) = state
-            .pool
-            .mark_processing(
-                &subject,
-                &refund.refund_id,
-                &write_headers,
-                "operator",
-                Some(&subject.user_id),
-            )
-            .await
-        {
-            return map_service_error(ctx, error);
-        }
-        if let Err(error) =
-            submit_provider_refund_with_retry(&state, &subject, &refund, Some(reason_code)).await
-        {
-            let _ = state
+    if refund_requires_provider_submission(&refund.status) {
+        let refund = if refund_requires_processing_claim(&refund.status) {
+            match state
                 .pool
-                .mark_failed(
+                .mark_processing(
                     &subject,
                     &refund.refund_id,
                     &write_headers,
                     "operator",
                     Some(&subject.user_id),
                 )
-                .await;
-            return map_service_error(ctx, error);
+                .await
+            {
+                Ok(refund) => refund,
+                Err(error) => return map_service_error(ctx, error),
+            }
+        } else {
+            refund.clone()
+        };
+        match submit_provider_refund_with_retry(&state, &subject, &refund, Some(reason_code)).await
+        {
+            Ok(ProviderRefundSubmissionState::Processing) => {}
+            Ok(ProviderRefundSubmissionState::Succeeded) => {
+                if let Err(error) = state
+                    .pool
+                    .mark_succeeded(
+                        &subject,
+                        &refund.refund_id,
+                        &write_headers,
+                        "operator",
+                        Some(&subject.user_id),
+                    )
+                    .await
+                {
+                    return map_service_error(ctx, error);
+                }
+            }
+            Ok(ProviderRefundSubmissionState::Failed) => {
+                if let Err(error) = state
+                    .pool
+                    .mark_failed(
+                        &subject,
+                        &refund.refund_id,
+                        &write_headers,
+                        "operator",
+                        Some(&subject.user_id),
+                    )
+                    .await
+                {
+                    return map_service_error(ctx, error);
+                }
+            }
+            Err(error) => {
+                if !refund_submission_retryable(&error) {
+                    let _ = state
+                        .pool
+                        .mark_failed(
+                            &subject,
+                            &refund.refund_id,
+                            &write_headers,
+                            "operator",
+                            Some(&subject.user_id),
+                        )
+                        .await;
+                }
+                return map_service_error(ctx, error);
+            }
         }
     }
     match state
@@ -312,41 +351,100 @@ async fn retry_refund(
     }) else {
         return not_found(ctx, "refund was not found");
     };
-    if body.expected_status.trim() != "failed" || refund.status != "failed" {
-        return validation(ctx, "only a failed refund can be retried");
+    let expected_status = body.expected_status.trim();
+    if !matches!(expected_status, "failed" | "processing") || refund.status != expected_status {
+        return validation(
+            ctx,
+            "only a failed or processing refund with matching expectedStatus can be retried",
+        );
     }
     if body.confirm_refund_no.trim() != refund.refund_no {
         return validation(ctx, "refund confirmation does not match");
     }
-    let claimed = match state
-        .pool
-        .mark_processing(
-            &subject,
-            &refund.id,
-            &write_headers,
-            "operator",
-            Some(&subject.user_id),
-        )
-        .await
-    {
-        Ok(refund) => refund,
-        Err(error) => return map_service_error(ctx, error),
-    };
-    if let Err(error) =
-        submit_provider_refund_with_retry(&state, &subject, &claimed, claimed.reason_code.clone())
-            .await
-    {
-        let _ = state
+    let submission = if refund.status == "failed" {
+        match state
             .pool
-            .mark_failed(
+            .mark_processing(
                 &subject,
                 &refund.id,
                 &write_headers,
                 "operator",
                 Some(&subject.user_id),
             )
-            .await;
-        return map_service_error(ctx, error);
+            .await
+        {
+            Ok(refund) => refund,
+            Err(error) => return map_service_error(ctx, error),
+        }
+    } else {
+        RefundView {
+            refund_id: refund.id.clone(),
+            refund_no: refund.refund_no.clone(),
+            order_id: refund.order_id.clone(),
+            payment_attempt_id: refund.payment_attempt_id.clone(),
+            amount: match CommerceMoney::new(&refund.amount) {
+                Ok(amount) => amount,
+                Err(error) => return validation(ctx, error),
+            },
+            currency_code: refund.currency_code.clone(),
+            status: refund.status.clone(),
+            reason_code: refund.reason_code.clone(),
+        }
+    };
+    match submit_provider_refund_with_retry(
+        &state,
+        &subject,
+        &submission,
+        submission.reason_code.clone(),
+    )
+    .await
+    {
+        Ok(ProviderRefundSubmissionState::Processing) => {}
+        Ok(ProviderRefundSubmissionState::Succeeded) => {
+            if let Err(error) = state
+                .pool
+                .mark_succeeded(
+                    &subject,
+                    &refund.id,
+                    &write_headers,
+                    "operator",
+                    Some(&subject.user_id),
+                )
+                .await
+            {
+                return map_service_error(ctx, error);
+            }
+        }
+        Ok(ProviderRefundSubmissionState::Failed) => {
+            if let Err(error) = state
+                .pool
+                .mark_failed(
+                    &subject,
+                    &refund.id,
+                    &write_headers,
+                    "operator",
+                    Some(&subject.user_id),
+                )
+                .await
+            {
+                return map_service_error(ctx, error);
+            }
+        }
+        Err(error) => {
+            if !refund_submission_retryable(&error) {
+                let _ = state
+                    .pool
+                    .mark_failed(
+                        &subject,
+                        &refund.id,
+                        &write_headers,
+                        "operator",
+                        Some(&subject.user_id),
+                    )
+                    .await;
+            }
+            return map_service_error(ctx, error);
+        }
     }
     success_command_accepted(ctx, Some(refund.id))
 }
@@ -651,6 +749,44 @@ impl BackendRefundPool {
             }
         }
     }
+
+    async fn mark_succeeded(
+        &self,
+        subject: &AppRuntimeSubject,
+        refund_id: &str,
+        headers: &AppWriteCommandHeaders,
+        actor_type: &str,
+        actor_id: Option<&str>,
+    ) -> Result<RefundView, CommerceServiceError> {
+        match self {
+            Self::Sqlite(pool) => {
+                SqliteCommerceRefundStore::new(pool.clone())
+                    .mark_owner_refund_provider_submission_succeeded(
+                        &subject.tenant_id,
+                        subject.organization_id.as_deref(),
+                        refund_id,
+                        actor_type,
+                        actor_id,
+                        &headers.request_no,
+                        &headers.idempotency_key,
+                    )
+                    .await
+            }
+            Self::Postgres(pool) => {
+                PostgresCommerceRefundStore::new(pool.clone())
+                    .mark_owner_refund_provider_submission_succeeded(
+                        &subject.tenant_id,
+                        subject.organization_id.as_deref(),
+                        refund_id,
+                        actor_type,
+                        actor_id,
+                        &headers.request_no,
+                        &headers.idempotency_key,
+                    )
+                    .await
+            }
+        }
+    }
 }
 
 async fn submit_provider_refund_with_retry(
@@ -658,14 +794,14 @@ async fn submit_provider_refund_with_retry(
     subject: &AppRuntimeSubject,
     refund: &impl RefundSubmission,
     reason_code: Option<String>,
-) -> Result<(), CommerceServiceError> {
+) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
     let mut last_error = None;
     for attempt in 0..REFUND_PROVIDER_SUBMIT_ATTEMPTS {
         if attempt > 0 {
             tokio::time::sleep(Duration::from_millis(150 * (1 << (attempt - 1)))).await;
         }
         match submit_provider_refund(state, subject, refund, reason_code.clone()).await {
-            Ok(()) => return Ok(()),
+            Ok(state) => return Ok(state),
             Err(error) if refund_submission_retryable(&error) => last_error = Some(error),
             Err(error) => return Err(error),
         }
@@ -678,7 +814,7 @@ async fn submit_provider_refund(
     subject: &AppRuntimeSubject,
     refund: &impl RefundSubmission,
     reason_code: Option<String>,
-) -> Result<(), CommerceServiceError> {
+) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
     match &state.pool {
         BackendRefundPool::Sqlite(pool) => {
             let Some(attempt) = load_payment_attempt_provider_context_by_id_sqlite(
@@ -712,6 +848,7 @@ async fn submit_provider_refund(
                 account,
                 attempt.provider_code,
                 attempt.out_trade_no,
+                attempt.provider_transaction_id,
                 attempt.amount,
                 refund,
                 reason_code,
@@ -750,6 +887,7 @@ async fn submit_provider_refund(
                 account,
                 attempt.provider_code,
                 attempt.out_trade_no,
+                attempt.provider_transaction_id,
                 attempt.amount,
                 refund,
                 reason_code,
@@ -764,19 +902,35 @@ async fn submit_with_account(
     account: PaymentProviderAccountRecord,
     provider_code: String,
     out_trade_no: String,
+    provider_transaction_id: Option<String>,
     total_amount: String,
     refund: &impl RefundSubmission,
     reason_code: Option<String>,
-) -> Result<(), CommerceServiceError> {
+) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
+    ensure_provider_account_matches(Some(&account), &provider_code)?;
     let registry =
         provider_registry_for_account(credentials, Some(provider_account_binding(&account)));
     let refund_amount =
         CommerceMoney::new(refund.amount()).map_err(CommerceServiceError::storage)?;
     let total_amount = CommerceMoney::new(&total_amount).map_err(CommerceServiceError::storage)?;
+    if refund.status() == "processing" {
+        if let Some(state) = query_provider_refund(
+            &registry,
+            &provider_code,
+            &out_trade_no,
+            provider_transaction_id.as_deref(),
+            refund.refund_no(),
+        )
+        .await?
+        {
+            return Ok(state);
+        }
+    }
     create_provider_refund(
         &registry,
         &provider_code,
         &out_trade_no,
+        provider_transaction_id.as_deref(),
         refund.refund_no(),
         &refund_amount,
         &total_amount,
@@ -789,6 +943,7 @@ trait RefundSubmission {
     fn amount(&self) -> &str;
     fn payment_attempt_id(&self) -> &str;
     fn refund_no(&self) -> &str;
+    fn status(&self) -> &str;
 }
 
 impl RefundSubmission for RefundView {
@@ -801,6 +956,9 @@ impl RefundSubmission for RefundView {
     fn refund_no(&self) -> &str {
         &self.refund_no
     }
+    fn status(&self) -> &str {
+        &self.status
+    }
 }
 
 impl RefundSubmission for BackendRefundView {
@@ -812,6 +970,9 @@ impl RefundSubmission for BackendRefundView {
     }
     fn refund_no(&self) -> &str {
         &self.refund_no
+    }
+    fn status(&self) -> &str {
+        &self.status
     }
 }
 
@@ -836,11 +997,10 @@ async fn ensure_sqlite_account_refund_capability(
     provider_account_id: &str,
 ) -> Result<(), CommerceServiceError> {
     let value = sqlx::query_scalar::<_, String>(
-        "SELECT capabilities FROM commerce_payment_provider_account WHERE id = ? AND tenant_id = ? AND ((organization_id = ?) OR (organization_id IS NULL AND ? IS NULL)) AND status IN ('active','inactive','deprecated') AND deleted_at IS NULL LIMIT 1",
+        "SELECT capabilities FROM commerce_payment_provider_account WHERE id = ? AND tenant_id = ? AND (organization_id = ? OR organization_id = '0' OR organization_id IS NULL) AND status IN ('active','inactive','deprecated') AND deleted_at IS NULL LIMIT 1",
     )
     .bind(provider_account_id)
     .bind(&subject.tenant_id)
-    .bind(subject.organization_id.as_deref())
     .bind(subject.organization_id.as_deref())
     .fetch_optional(pool)
     .await
@@ -855,11 +1015,10 @@ async fn ensure_postgres_account_refund_capability(
     provider_account_id: &str,
 ) -> Result<(), CommerceServiceError> {
     let value = sqlx::query_scalar::<_, Value>(
-        "SELECT capabilities FROM commerce_payment_provider_account WHERE id = $1 AND tenant_id = $2 AND ((organization_id = $3) OR (organization_id IS NULL AND $4 IS NULL)) AND status IN ('active','inactive','deprecated') AND deleted_at IS NULL LIMIT 1",
+        "SELECT capabilities FROM commerce_payment_provider_account WHERE id = $1 AND tenant_id = $2 AND (organization_id = $3 OR organization_id = '0' OR organization_id IS NULL) AND status IN ('active','inactive','deprecated') AND deleted_at IS NULL LIMIT 1",
     )
     .bind(provider_account_id)
     .bind(&subject.tenant_id)
-    .bind(subject.organization_id.as_deref())
     .bind(subject.organization_id.as_deref())
     .fetch_optional(pool)
     .await
@@ -897,6 +1056,14 @@ fn refund_submission_retryable(error: &CommerceServiceError) -> bool {
         error.code(),
         "not-found" | "validation" | "validation-failed" | "forbidden" | "conflict"
     )
+}
+
+fn refund_requires_provider_submission(status: &str) -> bool {
+    matches!(status, "submitted" | "processing" | "failed")
+}
+
+fn refund_requires_processing_claim(status: &str) -> bool {
+    matches!(status, "submitted" | "failed")
 }
 
 #[allow(clippy::result_large_err)]
@@ -1024,5 +1191,33 @@ mod tests {
         assert!(ensure_refund_capability(Some(&serde_json::json!({"refund": true}))).is_ok());
         assert!(ensure_refund_capability(Some(&serde_json::json!({"pay": true}))).is_err());
         assert!(ensure_refund_capability(None).is_err());
+    }
+
+    #[tokio::test]
+    async fn default_organization_refund_capability_is_inherited() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("sqlite pool");
+        sqlx::query(
+            "CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, capabilities TEXT NOT NULL, status TEXT NOT NULL, deleted_at TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .expect("provider account table");
+        sqlx::query(
+            "INSERT INTO commerce_payment_provider_account VALUES ('account-default', 'tenant-1', '0', '{\"refund\":true}', 'inactive', NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("default provider account");
+        let subject = AppRuntimeSubject {
+            tenant_id: "tenant-1".to_owned(),
+            organization_id: Some("organization-1".to_owned()),
+            user_id: "operator-1".to_owned(),
+        };
+
+        ensure_sqlite_account_refund_capability(&pool, &subject, "account-default")
+            .await
+            .expect("default organization refund capability");
     }
 }

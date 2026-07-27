@@ -241,6 +241,7 @@ impl PostgresCommerceRefundStore {
               AND ((r.organization_id = CAST($2 AS TEXT)) OR (r.organization_id IS NULL AND $3 IS NULL))
               AND o.owner_user_id = CAST($4 AS TEXT)
               AND r.id = CAST($5 AS TEXT)
+              AND r.deleted_at IS NULL
             LIMIT 1
            "#,
         )
@@ -266,11 +267,59 @@ impl PostgresCommerceRefundStore {
         request_no: &str,
         idempotency_key: &str,
     ) -> Result<RefundView, CommerceServiceError> {
-        let now = current_timestamp_string();
-        let mut tx = self.pool.begin().await.map_err(|error| {
-            store_error("failed to begin refund provider failure transaction", error)
-        })?;
+        self.mark_owner_refund_provider_submission_terminal(
+            tenant_id,
+            organization_id,
+            refund_id,
+            actor_type,
+            actor_id,
+            request_no,
+            idempotency_key,
+            "failed",
+        )
+        .await
+    }
 
+    pub async fn mark_owner_refund_provider_submission_succeeded(
+        &self,
+        tenant_id: &str,
+        organization_id: Option<&str>,
+        refund_id: &str,
+        actor_type: &str,
+        actor_id: Option<&str>,
+        request_no: &str,
+        idempotency_key: &str,
+    ) -> Result<RefundView, CommerceServiceError> {
+        self.mark_owner_refund_provider_submission_terminal(
+            tenant_id,
+            organization_id,
+            refund_id,
+            actor_type,
+            actor_id,
+            request_no,
+            idempotency_key,
+            "succeeded",
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn mark_owner_refund_provider_submission_terminal(
+        &self,
+        tenant_id: &str,
+        organization_id: Option<&str>,
+        refund_id: &str,
+        actor_type: &str,
+        actor_id: Option<&str>,
+        request_no: &str,
+        idempotency_key: &str,
+        terminal_status: &'static str,
+    ) -> Result<RefundView, CommerceServiceError> {
+        let now = current_timestamp_string();
+        let mut tx =
+            self.pool.begin().await.map_err(|error| {
+                store_error("failed to begin refund terminal transaction", error)
+            })?;
         let row = sqlx::query(
             r#"
             SELECT id, refund_no, order_id, payment_attempt_id,
@@ -282,7 +331,7 @@ impl PostgresCommerceRefundStore {
               AND deleted_at IS NULL
             LIMIT 1
             FOR UPDATE
-           "#,
+            "#,
         )
         .bind(tenant_id)
         .bind(organization_id)
@@ -290,25 +339,24 @@ impl PostgresCommerceRefundStore {
         .bind(refund_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|error| store_error("failed to load refund for provider failure", error))?;
-
+        .map_err(|error| store_error("failed to load refund for terminal transition", error))?;
         let Some(row) = row else {
             return Err(CommerceServiceError::not_found("refund was not found"));
         };
-
         let current_status = string_cell(&row, "status");
-        crate::shared::ensure_refund_status_transition(Some(&current_status), "failed")?;
-
-        sqlx::query(
+        crate::shared::ensure_refund_status_transition(Some(&current_status), terminal_status)?;
+        let result = sqlx::query(
             r#"
             UPDATE commerce_refund
-            SET status = 'failed', updated_at = $1::timestamptz, version = version + 1
-            WHERE tenant_id = CAST($2 AS TEXT)
-              AND ((organization_id = CAST($3 AS TEXT)) OR (organization_id IS NULL AND $4 IS NULL))
-              AND id = CAST($5 AS TEXT)
+            SET status = $1, updated_at = $2::timestamptz, version = version + 1
+            WHERE tenant_id = CAST($3 AS TEXT)
+              AND ((organization_id = CAST($4 AS TEXT)) OR (organization_id IS NULL AND $5 IS NULL))
+              AND id = CAST($6 AS TEXT)
               AND status IN ('submitted', 'processing')
-           "#,
+              AND deleted_at IS NULL
+            "#,
         )
+        .bind(terminal_status)
         .bind(&now)
         .bind(tenant_id)
         .bind(organization_id)
@@ -316,16 +364,20 @@ impl PostgresCommerceRefundStore {
         .bind(refund_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| store_error("failed to mark refund provider submission failed", error))?;
-
+        .map_err(|error| store_error("failed to mark refund terminal status", error))?;
+        if result.rows_affected() != 1 {
+            return Err(CommerceServiceError::conflict(
+                "refund terminal transition lost a concurrent status change",
+            ));
+        }
         insert_refund_event(
             &mut tx,
             tenant_id,
             organization_id,
             refund_id,
-            "failed",
+            terminal_status,
             Some(&current_status),
-            "failed",
+            terminal_status,
             actor_type,
             actor_id,
             request_no,
@@ -333,16 +385,11 @@ impl PostgresCommerceRefundStore {
             &now,
         )
         .await?;
-
-        tx.commit().await.map_err(|error| {
-            store_error(
-                "failed to commit refund provider failure transaction",
-                error,
-            )
-        })?;
-
+        tx.commit()
+            .await
+            .map_err(|error| store_error("failed to commit refund terminal transaction", error))?;
         map_refund_row(row).map(|mut view| {
-            view.status = "failed".to_owned();
+            view.status = terminal_status.to_owned();
             view
         })
     }

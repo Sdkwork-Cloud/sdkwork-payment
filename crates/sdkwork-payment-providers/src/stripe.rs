@@ -242,15 +242,38 @@ impl PaymentProviderAdapter for StripePaymentProviderAdapter {
         request: PaymentQueryRefundRequest,
     ) -> PaymentAdapterFuture<'a, PaymentProviderOperationOutcome> {
         Box::pin(async move {
-            let refund_id = require_stripe_resource_id(
-                request.refund_id.as_deref(),
-                PaymentAdapterOperation::QueryRefund,
-                "refund_id",
-            )?;
-            let response = self
-                .http
-                .get(STRIPE_PROVIDER_CODE, &format!("/v1/refunds/{refund_id}"))
-                .await?;
+            let response = if let Some(refund_id) = request.refund_id.as_deref() {
+                let refund_id = require_stripe_resource_id(
+                    Some(refund_id),
+                    PaymentAdapterOperation::QueryRefund,
+                    "refund_id",
+                )?;
+                self.http
+                    .get(STRIPE_PROVIDER_CODE, &format!("/v1/refunds/{refund_id}"))
+                    .await?
+            } else {
+                let payment_intent_id = require_stripe_resource_id(
+                    metadata_string(&request.metadata, "payment_intent_id"),
+                    PaymentAdapterOperation::QueryRefund,
+                    "metadata.payment_intent_id",
+                )?;
+                let refund_no = require_non_empty(
+                    request.refund_no.as_deref(),
+                    PaymentAdapterOperation::QueryRefund,
+                    "refund_no",
+                )?;
+                let response = self
+                    .http
+                    .get(
+                        STRIPE_PROVIDER_CODE,
+                        &format!(
+                            "/v1/refunds?payment_intent={}&limit=100",
+                            urlencoding::encode(&payment_intent_id)
+                        ),
+                    )
+                    .await?;
+                stripe_refund_by_merchant_no(response, &refund_no)?
+            };
             stripe_operation_outcome(PaymentAdapterOperation::QueryRefund, response)
         })
     }
@@ -343,6 +366,34 @@ fn stripe_operation_outcome(
             .map(str::to_owned),
         payload: response,
     })
+}
+
+fn stripe_refund_by_merchant_no(response: Value, refund_no: &str) -> ProviderResult<Value> {
+    if let Some(refund) = response
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|items| {
+            items.iter().find(|item| {
+                item.get("metadata")
+                    .and_then(|metadata| metadata.get("refund_no"))
+                    .and_then(Value::as_str)
+                    == Some(refund_no)
+            })
+        })
+        .cloned()
+    {
+        return Ok(refund);
+    }
+    if response.get("has_more").and_then(Value::as_bool) == Some(true) {
+        return Err(ProviderError::invalid_response(
+            PaymentAdapterOperation::QueryRefund,
+            "Stripe refund query requires another page before absence can be established",
+        ));
+    }
+    Err(ProviderError::invalid_response(
+        PaymentAdapterOperation::QueryRefund,
+        "Stripe refund was not found for the supplied refund_no",
+    ))
 }
 
 fn require_currency(
@@ -574,6 +625,29 @@ fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stripe_refund_query_matches_the_merchant_refund_number() {
+        let response = serde_json::json!({
+            "data": [
+                {"id": "re_other", "metadata": {"refund_no": "refund-other"}},
+                {"id": "re_expected", "status": "succeeded", "metadata": {"refund_no": "refund-1"}}
+            ]
+        });
+        let matched =
+            stripe_refund_by_merchant_no(response, "refund-1").expect("matching Stripe refund");
+        assert_eq!(matched["id"], "re_expected");
+        assert!(stripe_refund_by_merchant_no(serde_json::json!({"data": []}), "refund-1").is_err());
+        let truncated = stripe_refund_by_merchant_no(
+            serde_json::json!({"data": [], "has_more": true}),
+            "refund-1",
+        )
+        .expect_err("a truncated list cannot prove refund absence");
+        assert!(matches!(
+            truncated,
+            ProviderError::InvalidResponse { message, .. } if message.contains("another page")
+        ));
+    }
 
     #[test]
     fn verify_stripe_webhook_signature_accepts_valid_hmac() {

@@ -18,6 +18,6 @@ sdkwork-utils-rust.workspace = true
 sqlx = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

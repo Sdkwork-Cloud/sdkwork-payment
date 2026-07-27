@@ -8,7 +8,9 @@ use sdkwork_payment_service::{
 };
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
-use crate::order_reference::{load_order_payment_reference_sqlite, order_status_is_payable};
+use crate::order_reference::{
+    load_order_payment_reference_sqlite, order_payment_reference_is_payable,
+};
 use crate::payment_channel::select_payment_channel_sqlite;
 use crate::shared::{
     ensure_payment_attempt_idempotency_replay_matches,
@@ -65,7 +67,7 @@ impl SqliteCommercePaymentIntentStore {
         else {
             return Err(CommerceServiceError::not_found("order was not found"));
         };
-        if !order_status_is_payable(&order_ref.status) {
+        if !order_payment_reference_is_payable(&order_ref) {
             return Err(CommerceServiceError::conflict(
                 "order is not pending payment",
             ));
@@ -75,7 +77,7 @@ impl SqliteCommercePaymentIntentStore {
         let payment_intent_id = payment_intent_id(&command);
         let status = CommercePaymentStatus::Pending.as_str();
 
-        // C5 修复：使用 ON CONFLICT (id) DO NOTHING 原子化幂等插入，消除 TOCTOU 竞态。
+        // The deterministic ID turns concurrent retries into one insert and one replay lookup.
         let inserted = sqlx::query(
             r#"
             INSERT INTO commerce_payment_intent
@@ -289,7 +291,7 @@ impl SqliteCommercePaymentIntentStore {
         else {
             return Err(CommerceServiceError::not_found("order was not found"));
         };
-        if !order_status_is_payable(&order_ref.status) {
+        if !order_payment_reference_is_payable(&order_ref) {
             return Err(CommerceServiceError::conflict("order is not payable"));
         }
 
@@ -306,21 +308,23 @@ impl SqliteCommercePaymentIntentStore {
 
         let now = current_timestamp_string();
         let attempt_id = payment_attempt_id(&command);
-        let out_trade_no = format!(
-            "OT-{}-{}",
-            order_ref.order_sn,
-            command.idempotency_key.replace('-', "")
+        let out_trade_no = crate::shared::provider_out_trade_no(
+            &command.tenant_id,
+            &intent.order_id,
+            &command.idempotency_key,
         );
         let pending = CommercePaymentStatus::Pending.as_str();
+        let callback_payload =
+            crate::shared::payment_attempt_callback_payload(channel.provider_account_id.as_deref());
 
         let insert = sqlx::query(
             r#"
             INSERT INTO commerce_payment_attempt
                 (id, tenant_id, organization_id, owner_user_id, payment_intent_id, order_id,
                  payment_method, provider_code, channel_id, out_trade_no, amount, currency_code, status,
-                 callback_payload, created_at, paid_at, updated_at)
+                 callback_payload, request_no, idempotency_key, expires_at, created_at, paid_at, updated_at)
             VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, NULL, ?)
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
@@ -337,6 +341,10 @@ impl SqliteCommercePaymentIntentStore {
         .bind(intent.amount.as_str())
         .bind(&intent.currency_code)
         .bind(pending)
+        .bind(&callback_payload)
+        .bind(&command.request_no)
+        .bind(&command.idempotency_key)
+        .bind(order_ref.expires_at.as_deref())
         .bind(&now)
         .bind(&now)
         .execute(&mut *tx)
@@ -544,16 +552,26 @@ async fn load_reusable_payment_attempt(
 ) -> Result<Option<CreateOwnerPaymentAttemptOutcome>, CommerceServiceError> {
     let row = sqlx::query(
         r#"
-        SELECT id, payment_intent_id, order_id, out_trade_no, CAST(amount AS TEXT) AS amount,
-               payment_method, provider_code, channel_id, status
-        FROM commerce_payment_attempt
-        WHERE tenant_id = CAST(? AS TEXT)
-          AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
-          AND owner_user_id = CAST(? AS TEXT)
-          AND payment_intent_id = CAST(? AS TEXT)
-          AND LOWER(COALESCE(status, '')) IN ('created', 'pending', 'processing')
-          AND deleted_at IS NULL
-        ORDER BY created_at DESC, id DESC
+        SELECT pa.id, pa.payment_intent_id, pa.order_id, pa.out_trade_no, CAST(pa.amount AS TEXT) AS amount,
+               pa.payment_method, pa.provider_code, pa.channel_id, pa.status
+        FROM commerce_payment_attempt pa
+        INNER JOIN commerce_order o
+            ON o.tenant_id = pa.tenant_id
+           AND o.id = pa.order_id
+           AND o.owner_user_id = pa.owner_user_id
+        WHERE pa.tenant_id = CAST(? AS TEXT)
+          AND ((pa.organization_id = CAST(? AS TEXT)) OR (pa.organization_id IS NULL AND ? IS NULL))
+          AND pa.owner_user_id = CAST(? AS TEXT)
+          AND pa.payment_intent_id = CAST(? AS TEXT)
+          AND LOWER(COALESCE(pa.status, '')) IN ('created', 'pending', 'processing')
+          AND pa.deleted_at IS NULL
+          AND pa.expires_at IS NOT NULL
+          AND pa.expires_at <> ''
+          AND datetime(pa.expires_at) > datetime('now')
+          AND o.expired_at IS NOT NULL
+          AND o.expired_at <> ''
+          AND datetime(o.expired_at) > datetime('now')
+        ORDER BY pa.created_at DESC, pa.id DESC
         LIMIT 1
         "#,
     )

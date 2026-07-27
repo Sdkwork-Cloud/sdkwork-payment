@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.component.spec",
+  "component": {
+    "name": "sdkwork-payment-providers",
+    "displayName": "SDKWork Payment Providers",
+    "version": "0.1.0",
+    "type": "rust-crate",
+    "root": "sdkwork-payment/crates/sdkwork-payment-providers",
+    "domain": "commerce",
+    "capability": "payment-provider-adapters",
+    "surface": "backend-service",
+    "languages": ["rust"],
+    "generated": false,
+    "manifests": ["Cargo.toml"]
+  },
+  "canonicalSpecs": [
+    {"file": "COMPONENT_SPEC.md", "path": "../../../sdkwork-specs/COMPONENT_SPEC.md", "purpose": "Component-local contract and discovery rules."},
+    {"file": "CODE_STYLE_SPEC.md", "path": "../../../sdkwork-specs/CODE_STYLE_SPEC.md", "purpose": "Authored source structure and generated code boundaries."},
+    {"file": "NAMING_SPEC.md", "path": "../../../sdkwork-specs/NAMING_SPEC.md", "purpose": "Canonical SDKWork naming rules."},
+    {"file": "MODULE_SPEC.md", "path": "../../../sdkwork-specs/MODULE_SPEC.md", "purpose": "Reusable module boundaries and dependency direction."},
+    {"file": "CONFIG_SPEC.md", "path": "../../../sdkwork-specs/CONFIG_SPEC.md", "purpose": "Provider credential and runtime configuration rules."},
+    {"file": "DEPLOYMENT_SPEC.md", "path": "../../../sdkwork-specs/DEPLOYMENT_SPEC.md", "purpose": "Deployment-profile and external provider integration rules."},
+    {"file": "SECURITY_SPEC.md", "path": "../../../sdkwork-specs/SECURITY_SPEC.md", "purpose": "Payment credential, webhook, and transport security rules."},
+    {"file": "TEST_SPEC.md", "path": "../../../sdkwork-specs/TEST_SPEC.md", "purpose": "Provider contract and boundary verification requirements."},
+    {"file": "RUST_CODE_SPEC.md", "path": "../../../sdkwork-specs/RUST_CODE_SPEC.md", "purpose": "Rust crate and module rules."}
+  ],
+  "contracts": {
+    "layerRole": "backend-provider",
+    "publicExports": ["."],
+    "providedPorts": [{"name": "paymentProviderAdapters", "export": "."}],
+    "requiredPorts": [],
+    "runtimeEntrypoints": [],
+    "routeManifest": null,
+    "sdkClients": [],
+    "sdkDependencies": [],
+    "dependencyApiExports": [],
+    "dependencyApiSurfaces": [],
+    "events": [],
+    "configKeys": [
+      "ORDER_PAYMENT_WEBHOOK_BASE_URL",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "ALIPAY_APP_ID",
+      "ALIPAY_PRIVATE_KEY_PEM",
+      "ALIPAY_PUBLIC_KEY_PEM",
+      "ALIPAY_NOTIFY_URL",
+      "ALIPAY_RETURN_URL",
+      "ALIPAY_SANDBOX",
+      "WECHAT_PAY_APP_ID",
+      "WECHAT_PAY_MCH_ID",
+      "WECHAT_PAY_MERCHANT_SERIAL_NO",
+      "WECHAT_PAY_PRIVATE_KEY_PEM",
+      "WECHAT_PAY_API_V3_KEY",
+      "WECHAT_PAY_NOTIFY_URL",
+      "WECHAT_PAY_PLATFORM_PUBLIC_KEY_PEM"
+    ]
+  },
+  "verification": {
+    "commands": ["cargo test -p sdkwork-payment-providers"]
+  }
+}

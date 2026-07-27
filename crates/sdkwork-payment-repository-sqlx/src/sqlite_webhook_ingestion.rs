@@ -553,9 +553,9 @@ mod sqlite_webhook_ingestion_tests {
             r#"
             INSERT INTO commerce_order
                 (id, tenant_id, owner_user_id, order_no, status, subject, currency_code,
-                 payment_status, created_at, updated_at)
+                 payment_status, expired_at, created_at, updated_at)
             VALUES ('order-rch-1', '100001', 'user-1', 'RCH-1', 'pending_payment', 'points_recharge', 'CNY',
-                    'pending', ?, ?)
+                    'pending', '2099-01-01T00:00:00Z', ?, ?)
             "#,
         )
         .bind(now)
@@ -1028,7 +1028,7 @@ mod sqlite_webhook_ingestion_tests {
         );
 
         let now = "2026-07-12T03:10:00Z";
-        sqlx::query(
+        let duplicate_trade = sqlx::query(
             r#"
             INSERT INTO commerce_payment_attempt
                 (id, tenant_id, organization_id, owner_user_id, payment_intent_id, order_id,
@@ -1043,26 +1043,17 @@ mod sqlite_webhook_ingestion_tests {
         .bind(now)
         .execute(&pool)
         .await
-        .expect("seed competing attempt");
+        .expect_err("provider trade number must be unique within a tenant");
+        assert!(duplicate_trade
+            .to_string()
+            .contains("UNIQUE constraint failed"));
         let scope = WebhookStoredReplayScope {
             tenant_id: "tenant-scoped".to_owned(),
             organization_id: Some("org-scoped".to_owned()),
         };
-        let error = replay_stored_webhook_event_sqlite(&pool, scope.clone(), event_id.clone())
-            .await
-            .expect_err("multiple active attempts must fail replay");
-        assert_eq!(error.code(), "conflict");
-
-        sqlx::query(
-            "UPDATE commerce_payment_attempt SET deleted_at = ? WHERE id = 'attempt-scoped-2'",
-        )
-        .bind(now)
-        .execute(&pool)
-        .await
-        .expect("soft delete competing attempt");
         replay_stored_webhook_event_sqlite(&pool, scope.clone(), event_id.clone())
             .await
-            .expect("exact attempt replay after competing attempt removal");
+            .expect("exact attempt replay remains unambiguous");
 
         sqlx::query(
             "UPDATE commerce_payment_attempt SET deleted_at = ? WHERE id = 'attempt-scoped-1'",

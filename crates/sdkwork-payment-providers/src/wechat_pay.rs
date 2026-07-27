@@ -338,6 +338,14 @@ impl PaymentProviderAdapter for WeChatPayProviderAdapter {
                     "currency": "CNY",
                 },
             });
+            if let Some(expires_at) = request
+                .expires_at
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                payload["time_expire"] = json!(expires_at);
+            }
             // Method-specific request extensions
             match method_key {
                 "wechat_jsapi" => {
@@ -606,7 +614,9 @@ fn wechat_pay_operation_outcome(
     let native_id = response
         .get("id")
         .and_then(Value::as_str)
+        .or_else(|| response.get("refund_id").and_then(Value::as_str))
         .or_else(|| response.get("out_trade_no").and_then(Value::as_str))
+        .or_else(|| response.get("out_refund_no").and_then(Value::as_str))
         .map(str::to_owned)
         .ok_or_else(|| {
             ProviderError::invalid_response(operation, "WeChat Pay response is missing id")
@@ -706,7 +716,26 @@ fn wechat_pay_path_for_key(method_key: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::wechat_webhook_timestamp_is_fresh;
+    use super::{wechat_pay_operation_outcome, wechat_webhook_timestamp_is_fresh};
+    use crate::adapter::PaymentAdapterOperation;
+
+    #[test]
+    fn refund_outcome_accepts_wechat_refund_identifiers() {
+        let outcome = wechat_pay_operation_outcome(
+            PaymentAdapterOperation::CreateRefund,
+            serde_json::json!({
+                "refund_id": "5030000701202601010000000001",
+                "out_refund_no": "refund-1",
+                "status": "PROCESSING"
+            }),
+        )
+        .expect("valid WeChat refund response");
+        assert_eq!(
+            outcome.native_id.as_deref(),
+            Some("5030000701202601010000000001")
+        );
+        assert_eq!(outcome.raw_status.as_deref(), Some("PROCESSING"));
+    }
 
     #[test]
     fn webhook_timestamp_requires_five_minute_freshness() {

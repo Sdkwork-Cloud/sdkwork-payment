@@ -24,6 +24,16 @@ pub struct PaymentProviderAccountRecord {
     pub metadata: Value,
 }
 
+fn organization_scope_rank(requested: Option<&str>, actual: Option<&str>) -> u8 {
+    if requested.is_some() && actual == requested {
+        0
+    } else if actual == Some("0") {
+        1
+    } else {
+        2
+    }
+}
+
 impl std::fmt::Debug for PaymentProviderAccountRecord {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -41,6 +51,18 @@ impl std::fmt::Debug for PaymentProviderAccountRecord {
     }
 }
 
+pub fn ensure_provider_account_matches(
+    account: Option<&PaymentProviderAccountRecord>,
+    provider_code: &str,
+) -> Result<(), CommerceServiceError> {
+    if account.is_some_and(|account| !account.provider_code.eq_ignore_ascii_case(provider_code)) {
+        return Err(CommerceServiceError::conflict(
+            "payment provider account does not match the persisted provider snapshot",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn load_active_provider_account_sqlite(
     pool: &Pool<Sqlite>,
     tenant_id: &str,
@@ -53,18 +75,24 @@ pub async fn load_active_provider_account_sqlite(
                webhook_secret_ref, certificate_ref, metadata
         FROM commerce_payment_provider_account
         WHERE tenant_id = CAST(? AS TEXT)
-          AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
+          AND (organization_id = CAST(? AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
           AND LOWER(provider_code) = LOWER(CAST(? AS TEXT))
           AND status = 'active'
           AND deleted_at IS NULL
-        ORDER BY updated_at DESC, id DESC
+        ORDER BY CASE
+                     WHEN organization_id = CAST(? AS TEXT) THEN 0
+                     WHEN organization_id = '0' THEN 1
+                     ELSE 2
+                 END,
+                 updated_at DESC,
+                 id DESC
         LIMIT 2
         "#,
     )
     .bind(tenant_id)
     .bind(organization_id)
-    .bind(organization_id)
     .bind(provider_code)
+    .bind(organization_id)
     .fetch_all(pool)
     .await
     .map_err(|error| store_error("failed to load payment provider account", error))?;
@@ -74,9 +102,19 @@ pub async fn load_active_provider_account_sqlite(
         [row] => Ok(Some(
             hydrate_sqlite(pool, map_provider_account_row_sqlite(row)).await?,
         )),
-        _ => Err(CommerceServiceError::conflict(
-            "multiple active payment provider accounts require deterministic channel routing",
-        )),
+        [first, second, ..] => {
+            let first = map_provider_account_row_sqlite(first);
+            let second = map_provider_account_row_sqlite(second);
+            if organization_scope_rank(organization_id, first.organization_id.as_deref())
+                < organization_scope_rank(organization_id, second.organization_id.as_deref())
+            {
+                Ok(Some(hydrate_sqlite(pool, first).await?))
+            } else {
+                Err(CommerceServiceError::conflict(
+                    "multiple active payment provider accounts require deterministic channel routing",
+                ))
+            }
+        }
     }
 }
 
@@ -122,7 +160,7 @@ pub async fn load_active_provider_account_by_id_sqlite(
         FROM commerce_payment_provider_account
         WHERE id = CAST(? AS TEXT)
           AND tenant_id = CAST(? AS TEXT)
-          AND (organization_id = CAST(? AS TEXT) OR organization_id IS NULL)
+          AND (organization_id = CAST(? AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
           AND status = 'active'
           AND deleted_at IS NULL
         LIMIT 1
@@ -154,11 +192,17 @@ pub async fn load_active_provider_account_postgres(
                webhook_secret_ref, certificate_ref, metadata
         FROM commerce_payment_provider_account
         WHERE tenant_id = CAST($1 AS TEXT)
-          AND ((organization_id = CAST($2 AS TEXT)) OR (organization_id IS NULL AND $2 IS NULL))
+          AND (organization_id = CAST($2 AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
           AND LOWER(provider_code) = LOWER(CAST($3 AS TEXT))
           AND status = 'active'
           AND deleted_at IS NULL
-        ORDER BY updated_at DESC, id DESC
+        ORDER BY CASE
+                     WHEN organization_id = CAST($2 AS TEXT) THEN 0
+                     WHEN organization_id = '0' THEN 1
+                     ELSE 2
+                 END,
+                 updated_at DESC,
+                 id DESC
         LIMIT 2
         "#,
     )
@@ -174,9 +218,19 @@ pub async fn load_active_provider_account_postgres(
         [row] => Ok(Some(
             hydrate_postgres(pool, map_provider_account_row_postgres(row)).await?,
         )),
-        _ => Err(CommerceServiceError::conflict(
-            "multiple active payment provider accounts require deterministic channel routing",
-        )),
+        [first, second, ..] => {
+            let first = map_provider_account_row_postgres(first);
+            let second = map_provider_account_row_postgres(second);
+            if organization_scope_rank(organization_id, first.organization_id.as_deref())
+                < organization_scope_rank(organization_id, second.organization_id.as_deref())
+            {
+                Ok(Some(hydrate_postgres(pool, first).await?))
+            } else {
+                Err(CommerceServiceError::conflict(
+                    "multiple active payment provider accounts require deterministic channel routing",
+                ))
+            }
+        }
     }
 }
 
@@ -193,7 +247,7 @@ pub async fn load_active_provider_account_by_id_postgres(
         FROM commerce_payment_provider_account
         WHERE id = CAST($1 AS TEXT)
           AND tenant_id = CAST($2 AS TEXT)
-          AND (organization_id = CAST($3 AS TEXT) OR organization_id IS NULL)
+          AND (organization_id = CAST($3 AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
           AND status = 'active'
           AND deleted_at IS NULL
         LIMIT 1
@@ -226,7 +280,7 @@ pub async fn load_provider_account_for_existing_payment_sqlite(
         FROM commerce_payment_provider_account
         WHERE id = CAST(? AS TEXT)
           AND tenant_id = CAST(? AS TEXT)
-          AND (organization_id = CAST(? AS TEXT) OR organization_id IS NULL)
+          AND (organization_id = CAST(? AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
           AND status IN ('active', 'inactive', 'deprecated')
           AND deleted_at IS NULL
         LIMIT 1
@@ -259,7 +313,7 @@ pub async fn load_provider_account_for_existing_payment_postgres(
         FROM commerce_payment_provider_account
         WHERE id = CAST($1 AS TEXT)
           AND tenant_id = CAST($2 AS TEXT)
-          AND (organization_id = CAST($3 AS TEXT) OR organization_id IS NULL)
+          AND (organization_id = CAST($3 AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
           AND status IN ('active', 'inactive', 'deprecated')
           AND deleted_at IS NULL
         LIMIT 1
@@ -292,7 +346,7 @@ pub async fn load_active_provider_account_for_channel_sqlite(
         FROM commerce_payment_channel
         WHERE id = CAST(? AS TEXT)
           AND tenant_id = CAST(? AS TEXT)
-          AND (organization_id = CAST(? AS TEXT) OR organization_id IS NULL)
+          AND (organization_id = CAST(? AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
           AND LOWER(provider_code) = LOWER(CAST(? AS TEXT))
           AND status = 'active'
           AND deleted_at IS NULL
@@ -337,7 +391,7 @@ pub async fn load_active_provider_account_for_channel_postgres(
         FROM commerce_payment_channel
         WHERE id = CAST($1 AS TEXT)
           AND tenant_id = CAST($2 AS TEXT)
-          AND (organization_id = CAST($3 AS TEXT) OR organization_id IS NULL)
+          AND (organization_id = CAST($3 AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
           AND LOWER(provider_code) = LOWER(CAST($4 AS TEXT))
           AND status = 'active'
           AND deleted_at IS NULL
@@ -511,6 +565,7 @@ async fn hydrate_postgres(
 #[cfg(test)]
 mod tests {
     use super::{
+        ensure_provider_account_matches, load_active_provider_account_by_id_sqlite,
         load_active_provider_account_by_merchant_id_sqlite, load_active_provider_account_sqlite,
         load_provider_account_for_existing_payment_sqlite,
     };
@@ -576,6 +631,48 @@ mod tests {
         .expect("historical account lookup")
         .expect("inactive account remains usable for historical operations");
         assert_eq!(historical.id, "account-a");
+    }
+
+    #[tokio::test]
+    async fn default_organization_account_is_visible_but_specific_account_wins() {
+        let pool = provider_account_test_pool().await;
+        insert_provider_account(
+            &pool,
+            "account-default",
+            "tenant-a",
+            Some("0"),
+            "merchant-default",
+        )
+        .await;
+
+        let inherited = load_active_provider_account_by_id_sqlite(
+            &pool,
+            "tenant-a",
+            Some("org-a"),
+            "account-default",
+        )
+        .await
+        .expect("default account lookup")
+        .expect("default account");
+        assert_eq!(inherited.organization_id.as_deref(), Some("0"));
+
+        insert_provider_account(
+            &pool,
+            "account-specific",
+            "tenant-a",
+            Some("org-a"),
+            "merchant-specific",
+        )
+        .await;
+        let selected =
+            load_active_provider_account_sqlite(&pool, "tenant-a", Some("org-a"), "stripe")
+                .await
+                .expect("scoped account selection")
+                .expect("specific account");
+        assert_eq!(selected.id, "account-specific");
+        ensure_provider_account_matches(Some(&selected), "stripe")
+            .expect("matching provider account");
+        assert!(ensure_provider_account_matches(Some(&selected), "wechat_pay").is_err());
     }
 
     async fn provider_account_test_pool() -> sqlx::SqlitePool {

@@ -3,7 +3,7 @@
 Status: active
 Owner: SDKWork maintainers
 Application: payment
-Updated: 2026-07-13
+Updated: 2026-07-26
 Specs: REQUIREMENTS_SPEC.md, DOCUMENTATION_SPEC.md
 
 ## Document Map
@@ -111,7 +111,8 @@ Reconciliation runs compare internal payment records against PSP settlement repo
 - Phase 2 (complete): payment_intent/refund SQL owned by payment repository.
 - Phase 3 (complete): SDK contract route `/payments/attempts/{paymentAttemptId}` owned by payment app router.
 - Phase 4 (complete): owner-order pay/cancel payment side-effects owned by owner-order payment stores.
-- Phase 5 (complete): production hardening — command envelopes on all write routes, SQL pagination (including app payment methods), PSP enrichment with `callback_payload` persistence, checkout re-enrichment, DB-first close with best-effort PSP cancel, refund PSP submit with transient retry, webhook audit for unmatched events, envelope/trace alignment per `API_SPEC.md` / `PAGINATION_SPEC.md`.
+- Phase 5 (complete): production hardening: command envelopes on all write routes, SQL pagination (including app payment methods), PSP enrichment with atomic `callback_payload` persistence, checkout re-enrichment, provider close before terminal local commit, refund PSP submit with transient retry, explicit provider terminal-state propagation, ambiguity-safe `processing` recovery, webhook audit for unmatched events, and envelope/trace alignment per `API_SPEC.md` / `PAGINATION_SPEC.md`.
+- Phase 6 (complete): order-expiration enforcement, attempt uniqueness, order-scoped checkout serialization, and deterministic organization inheritance. Payment rejects Order references with missing, empty, invalid, or expired payment boundaries, persists `min(order expiry, provider checkout TTL)` on each attempt, sends the provider expiry for WeChat and Alipay checkout, and fails closed when Alipay's minute-granularity timeout cannot fit inside the remaining Order lifetime. It does not reuse stale or boundary-less pending attempts, closes conflicts and current-Order expired attempts through their historical PSP account, serializes close/create/persist per Order across concurrent requests, and enforces tenant/provider/out-trade-number uniqueness before webhook identity resolution. Payment methods, channels, and accounts resolve authenticated organization first, tenant default organization `0` second, and legacy unscoped rows last; method discovery and checkout share the same isolation and fail-closed eligibility rules. Same-method replay reuses the original Attempt only when `paymentScene` and `paymentMetadata` match, so a new click-level idempotency key alone cannot create another upstream trade while a scene or payer change cannot return incompatible cashier parameters. Provider identifiers and operation keys are deterministic, bounded, and PSP-compatible; concurrent settlement wins over close; Stripe refunds use the persisted native PaymentIntent identity; every historical operation verifies the account/provider snapshot; explicit terminal refund responses propagate transactionally, while ambiguous outcomes retain their original refund identity and reserved amount.
 
 ## 11. Linked Requirements
 
@@ -124,4 +125,4 @@ Reconciliation runs compare internal payment records against PSP settlement repo
 ## 12. Open Questions
 
 - Provider credential storage encryption policy and `PaymentProviderPort` implementation before external channel go-live.
-- Dedicated async refund-retry worker deployment topology (queue consumer) remains a later reliability enhancement; bounded operator retry is owned by REQ-2026-0001.
+- A dedicated async refund-retry worker deployment topology (queue consumer) remains an operational automation enhancement. Correctness does not depend on it: app/backend same-identity retry and webhook/reconciliation keep ambiguous refunds reserved and recoverable.

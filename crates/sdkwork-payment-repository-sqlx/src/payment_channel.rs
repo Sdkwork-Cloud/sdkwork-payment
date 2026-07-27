@@ -27,9 +27,17 @@ pub(crate) async fn select_payment_channel_sqlite(
             WHERE method_key = CAST(? AS TEXT)
               AND status = 'active'
               AND tenant_id = CAST(? AS TEXT)
-              AND (organization_id = CAST(? AS TEXT) OR organization_id IS NULL)
+              AND (
+                    organization_id = CAST(? AS TEXT)
+                    OR organization_id = '0'
+                    OR organization_id IS NULL
+                  )
               AND deleted_at IS NULL
-            ORDER BY CASE WHEN organization_id = CAST(? AS TEXT) THEN 0 ELSE 1 END,
+            ORDER BY CASE
+                         WHEN organization_id = CAST(? AS TEXT) THEN 0
+                         WHEN organization_id = '0' THEN 1
+                         ELSE 2
+                     END,
                      sort_order ASC,
                      id ASC
             LIMIT 1
@@ -44,7 +52,11 @@ pub(crate) async fn select_payment_channel_sqlite(
                        SELECT MIN(rr.priority)
                        FROM commerce_payment_route_rule rr
                        WHERE rr.tenant_id = c.tenant_id
-                         AND (rr.organization_id = CAST(? AS TEXT) OR rr.organization_id IS NULL)
+                         AND (
+                               rr.organization_id = CAST(? AS TEXT)
+                               OR rr.organization_id = '0'
+                               OR rr.organization_id IS NULL
+                             )
                          AND rr.channel_id = c.id
                          AND rr.status = 'active'
                          AND rr.deleted_at IS NULL
@@ -72,12 +84,20 @@ pub(crate) async fn select_payment_channel_sqlite(
               AND c.deleted_at IS NULL
               AND LOWER(c.provider_code) = LOWER(m.provider_code)
               AND UPPER(c.currency_code) = UPPER(CAST(? AS TEXT))
-              AND (c.organization_id = CAST(? AS TEXT) OR c.organization_id IS NULL)
+              AND (
+                    c.organization_id = CAST(? AS TEXT)
+                    OR c.organization_id = '0'
+                    OR c.organization_id IS NULL
+                  )
               AND (c.provider_account_id IS NULL OR (
                     a.status = 'active'
                 AND a.tenant_id = c.tenant_id
                 AND LOWER(a.provider_code) = LOWER(c.provider_code)
-                AND (a.organization_id = CAST(? AS TEXT) OR a.organization_id IS NULL)
+                AND (
+                      a.organization_id = CAST(? AS TEXT)
+                      OR a.organization_id = '0'
+                      OR a.organization_id IS NULL
+                    )
               ))
         ),
         fallback AS (
@@ -157,9 +177,17 @@ pub(crate) async fn select_payment_channel_postgres(
             WHERE method_key = CAST($1 AS TEXT)
               AND status = 'active'
               AND tenant_id = CAST($2 AS TEXT)
-              AND (organization_id = CAST($3 AS TEXT) OR organization_id IS NULL)
+              AND (
+                    organization_id = CAST($3 AS TEXT)
+                    OR organization_id = '0'
+                    OR organization_id IS NULL
+                  )
               AND deleted_at IS NULL
-            ORDER BY CASE WHEN organization_id = CAST($3 AS TEXT) THEN 0 ELSE 1 END,
+            ORDER BY CASE
+                         WHEN organization_id = CAST($3 AS TEXT) THEN 0
+                         WHEN organization_id = '0' THEN 1
+                         ELSE 2
+                     END,
                      sort_order ASC,
                      id ASC
             LIMIT 1
@@ -174,7 +202,11 @@ pub(crate) async fn select_payment_channel_postgres(
                        SELECT MIN(rr.priority)
                        FROM commerce_payment_route_rule rr
                        WHERE rr.tenant_id = c.tenant_id
-                         AND (rr.organization_id = CAST($3 AS TEXT) OR rr.organization_id IS NULL)
+                         AND (
+                               rr.organization_id = CAST($3 AS TEXT)
+                               OR rr.organization_id = '0'
+                               OR rr.organization_id IS NULL
+                             )
                          AND rr.channel_id = c.id
                          AND rr.status = 'active'
                          AND rr.deleted_at IS NULL
@@ -202,12 +234,20 @@ pub(crate) async fn select_payment_channel_postgres(
               AND c.deleted_at IS NULL
               AND LOWER(c.provider_code) = LOWER(m.provider_code)
               AND UPPER(c.currency_code) = UPPER(CAST($4 AS TEXT))
-              AND (c.organization_id = CAST($3 AS TEXT) OR c.organization_id IS NULL)
+              AND (
+                    c.organization_id = CAST($3 AS TEXT)
+                    OR c.organization_id = '0'
+                    OR c.organization_id IS NULL
+                  )
               AND (c.provider_account_id IS NULL OR (
                     a.status = 'active'
                 AND a.tenant_id = c.tenant_id
                 AND LOWER(a.provider_code) = LOWER(c.provider_code)
-                AND (a.organization_id = CAST($3 AS TEXT) OR a.organization_id IS NULL)
+                AND (
+                      a.organization_id = CAST($3 AS TEXT)
+                      OR a.organization_id = '0'
+                      OR a.organization_id IS NULL
+                    )
               ))
         ),
         fallback AS (
@@ -354,5 +394,36 @@ mod tests {
         assert_eq!(selected.channel_id, None);
         assert_eq!(selected.provider_account_id, None);
         assert_eq!(selected.provider_code, "sandbox");
+
+        sqlx::query("INSERT INTO commerce_payment_method VALUES ('method-default','tenant-1','0','default_pay','stripe','active',2,NULL)")
+            .execute(&pool)
+            .await
+            .expect("insert default method");
+        sqlx::query("INSERT INTO commerce_payment_provider_account VALUES ('account-default','tenant-1','0','stripe','active',NULL)")
+            .execute(&pool)
+            .await
+            .expect("insert default account");
+        sqlx::query("INSERT INTO commerce_payment_channel VALUES ('channel-default','tenant-1','0','account-default','method-default','stripe','web','CNY','active',20,20,NULL)")
+            .execute(&pool)
+            .await
+            .expect("insert default channel");
+        let mut tx = pool.begin().await.expect("begin default-scope transaction");
+        let selected = select_payment_channel_sqlite(
+            &mut tx,
+            "tenant-1",
+            Some("org-2"),
+            "default_pay",
+            "CNY",
+            "500",
+            Some("web"),
+        )
+        .await
+        .expect("select default-organization channel");
+        tx.rollback().await.expect("rollback");
+        assert_eq!(selected.channel_id.as_deref(), Some("channel-default"));
+        assert_eq!(
+            selected.provider_account_id.as_deref(),
+            Some("account-default")
+        );
     }
 }

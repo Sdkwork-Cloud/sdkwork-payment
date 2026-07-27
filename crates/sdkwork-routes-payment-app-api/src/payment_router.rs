@@ -455,9 +455,7 @@ impl OwnerOrderPaymentSource for ProviderEnrichedSqlitePayments {
             let tenant_id = command.tenant_id.clone();
             let organization_id = command.organization_id.clone();
             let order_id = command.order_id.clone();
-            let idempotency_key = command.idempotency_key.clone();
             let payment_scene = command.payment_scene.clone();
-            let payment_metadata = command.payment_metadata.clone();
             let outcome = self.inner.pay_owner_order(command).await?;
             enrich_owner_order_payment_sqlite(
                 &pool,
@@ -467,9 +465,7 @@ impl OwnerOrderPaymentSource for ProviderEnrichedSqlitePayments {
                     tenant_id: &tenant_id,
                     organization_id: organization_id.as_deref(),
                     order_id: &order_id,
-                    idempotency_key: &idempotency_key,
                     payment_scene: payment_scene.as_deref(),
-                    payment_metadata: Some(&payment_metadata),
                 },
                 outcome,
             )
@@ -490,9 +486,7 @@ impl OwnerOrderPaymentSource for ProviderEnrichedPostgresPayments {
             let tenant_id = command.tenant_id.clone();
             let organization_id = command.organization_id.clone();
             let order_id = command.order_id.clone();
-            let idempotency_key = command.idempotency_key.clone();
             let payment_scene = command.payment_scene.clone();
-            let payment_metadata = command.payment_metadata.clone();
             let outcome = self.inner.pay_owner_order(command).await?;
             enrich_owner_order_payment_postgres(
                 &pool,
@@ -502,9 +496,7 @@ impl OwnerOrderPaymentSource for ProviderEnrichedPostgresPayments {
                     tenant_id: &tenant_id,
                     organization_id: organization_id.as_deref(),
                     order_id: &order_id,
-                    idempotency_key: &idempotency_key,
                     payment_scene: payment_scene.as_deref(),
-                    payment_metadata: Some(&payment_metadata),
                 },
                 outcome,
             )

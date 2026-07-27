@@ -224,6 +224,7 @@ impl PaymentProviderAdapter for AlipayPaymentProviderAdapter {
                 normalized_optional(self.config.notify_url.clone()).as_deref(),
                 method_key,
                 &request.metadata,
+                request.expires_at.as_deref(),
             )?;
             let (api_method, return_field) = alipay_method_for_key(method_key);
             let mut response = self.client.execute(api_method, biz_content).await?;
@@ -424,14 +425,20 @@ fn alipay_operation_outcome(
         .ok_or_else(|| {
             ProviderError::invalid_response(operation, "Alipay response is missing trade id")
         })?;
+    let raw_status = response
+        .get("refund_status")
+        .or_else(|| response.get("trade_status"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            (operation != PaymentAdapterOperation::QueryRefund)
+                .then(|| response.get("msg").and_then(Value::as_str))
+                .flatten()
+        })
+        .map(str::to_owned);
     Ok(PaymentProviderOperationOutcome {
         provider_code: ALIPAY_PROVIDER_CODE.to_owned(),
         native_id: Some(native_id),
-        raw_status: response
-            .get("trade_status")
-            .and_then(Value::as_str)
-            .or_else(|| response.get("msg").and_then(Value::as_str))
-            .map(str::to_owned),
+        raw_status,
         payload: response,
     })
 }
@@ -444,14 +451,21 @@ fn alipay_response_payload(method: &str, payload: Value) -> ProviderResult<Value
         .and_then(Value::as_str)
         .unwrap_or("10000");
     if code != "10000" {
+        let sub_code = response
+            .get("sub_code")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty());
         let message = response
             .get("sub_msg")
             .or_else(|| response.get("msg"))
             .and_then(Value::as_str)
             .unwrap_or("Alipay request failed");
+        let response_code = sub_code
+            .map(|sub_code| format!("{code}/{sub_code}"))
+            .unwrap_or_else(|| code.to_owned());
         return Err(ProviderError::transport(
             ALIPAY_PROVIDER_CODE,
-            format!("Alipay {method} failed ({code}): {message}"),
+            format!("Alipay {method} failed ({response_code}): {message}"),
         ));
     }
     Ok(response)
@@ -566,6 +580,7 @@ fn build_alipay_biz_content(
     notify_url: Option<&str>,
     method_key: &str,
     metadata: &Value,
+    expires_at: Option<&str>,
 ) -> ProviderResult<Value> {
     let mut biz_content = json!({
         "out_trade_no": out_trade_no,
@@ -577,6 +592,9 @@ fn build_alipay_biz_content(
     }
     if let Some(notify_url) = notify_url {
         biz_content["notify_url"] = json!(notify_url);
+    }
+    if let Some(timeout_express) = alipay_timeout_express(expires_at)? {
+        biz_content["timeout_express"] = json!(timeout_express);
     }
     match method_key {
         "alipay_qr" => {
@@ -619,6 +637,34 @@ fn build_alipay_biz_content(
     Ok(biz_content)
 }
 
+fn alipay_timeout_express(expires_at: Option<&str>) -> ProviderResult<Option<String>> {
+    let Some(expires_at) = expires_at.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let expires_at = chrono::DateTime::parse_from_rfc3339(expires_at).map_err(|_| {
+        ProviderError::invalid_request(
+            PaymentAdapterOperation::CreatePaymentIntent,
+            "expires_at must be an RFC3339 timestamp",
+        )
+    })?;
+    let remaining_seconds =
+        (expires_at.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
+    if remaining_seconds <= 0 {
+        return Err(ProviderError::invalid_request(
+            PaymentAdapterOperation::CreatePaymentIntent,
+            "expires_at must be in the future",
+        ));
+    }
+    if remaining_seconds < 60 {
+        return Err(ProviderError::invalid_request(
+            PaymentAdapterOperation::CreatePaymentIntent,
+            "expires_at must be at least one minute in the future",
+        ));
+    }
+    let minutes = remaining_seconds / 60;
+    Ok(Some(format!("{minutes}m")))
+}
+
 /// Maps a method_key to the Alipay OpenAPI method name and the response field
 /// holding the redirect URL (if any).
 fn alipay_method_for_key(method_key: &str) -> (&'static str, Option<&'static str>) {
@@ -641,4 +687,88 @@ fn percent_decode(value: &str, operation: PaymentAdapterOperation) -> ProviderRe
                 format!("Alipay percent escape is invalid: {error}"),
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, SecondsFormat, Utc};
+
+    use super::{alipay_operation_outcome, alipay_timeout_express, build_alipay_biz_content};
+    use crate::adapter::PaymentAdapterOperation;
+    use crate::error::ProviderError;
+
+    #[test]
+    fn refund_query_outcome_prefers_the_business_refund_status() {
+        let outcome = alipay_operation_outcome(
+            PaymentAdapterOperation::QueryRefund,
+            serde_json::json!({
+                "trade_no": "2026072700000001",
+                "refund_status": "REFUND_SUCCESS",
+                "msg": "Success"
+            }),
+        )
+        .expect("valid Alipay refund query response");
+        assert_eq!(outcome.raw_status.as_deref(), Some("REFUND_SUCCESS"));
+
+        let unknown = alipay_operation_outcome(
+            PaymentAdapterOperation::QueryRefund,
+            serde_json::json!({"trade_no": "2026072700000002", "msg": "Success"}),
+        )
+        .expect("valid but non-terminal Alipay refund query response");
+        assert_eq!(unknown.raw_status, None);
+    }
+
+    #[test]
+    fn timeout_express_rejects_invalid_expired_and_sub_minute_boundaries() {
+        let invalid = alipay_timeout_express(Some("not-a-timestamp"))
+            .expect_err("non-RFC3339 expiration must be rejected");
+        assert_invalid_request_message(invalid, "expires_at must be an RFC3339 timestamp");
+
+        let expired = alipay_timeout_express(Some("2000-01-01T00:00:00Z"))
+            .expect_err("expired checkout must be rejected");
+        assert_invalid_request_message(expired, "expires_at must be in the future");
+
+        let sub_minute =
+            (Utc::now() + Duration::seconds(30)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let sub_minute = alipay_timeout_express(Some(&sub_minute))
+            .expect_err("Alipay timeout must not exceed the order boundary");
+        assert_invalid_request_message(
+            sub_minute,
+            "expires_at must be at least one minute in the future",
+        );
+    }
+
+    #[test]
+    fn future_expiration_is_forwarded_without_exceeding_fifteen_minutes() {
+        let expires_at =
+            (Utc::now() + Duration::minutes(15)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let biz_content = build_alipay_biz_content(
+            "trade-1",
+            100,
+            "Token Plan",
+            Some("tenant-1"),
+            None,
+            "alipay_qr",
+            &serde_json::json!({}),
+            Some(&expires_at),
+        )
+        .expect("future expiration should produce Alipay biz_content");
+        let timeout = biz_content["timeout_express"]
+            .as_str()
+            .expect("timeout_express should be present");
+        let minutes = timeout
+            .strip_suffix('m')
+            .expect("timeout_express should use minute units")
+            .parse::<i64>()
+            .expect("timeout_express should contain a minute count");
+
+        assert!((1..=15).contains(&minutes));
+    }
+
+    fn assert_invalid_request_message(error: ProviderError, expected: &str) {
+        match error {
+            ProviderError::InvalidRequest { message, .. } => assert_eq!(message, expected),
+            other => panic!("expected invalid request error, got {other:?}"),
+        }
+    }
 }

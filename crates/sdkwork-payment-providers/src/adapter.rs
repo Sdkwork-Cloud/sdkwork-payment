@@ -75,6 +75,7 @@ pub struct PaymentCreateIntentRequest {
     pub merchant_order_no: Option<String>,
     pub amount_minor: Option<i64>,
     pub currency: Option<String>,
+    pub expires_at: Option<String>,
     pub payment_scene: Option<String>,
     pub metadata: Value,
 }

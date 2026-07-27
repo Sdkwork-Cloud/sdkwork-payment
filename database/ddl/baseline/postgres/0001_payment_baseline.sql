@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_attempt (
     request_no             TEXT,
     idempotency_key        TEXT NOT NULL,
     version                BIGINT NOT NULL DEFAULT 0,
+    expires_at             TIMESTAMPTZ NULL,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at             TIMESTAMPTZ NULL
@@ -147,6 +148,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_attempt (
 -- Self-heal: back-fill columns when the table was pre-created by another module.
 ALTER TABLE commerce_payment_attempt ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE commerce_payment_attempt ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
+ALTER TABLE commerce_payment_attempt ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_attempt_idempotency
     ON commerce_payment_attempt (tenant_id, owner_user_id, payment_intent_id, id)
@@ -162,6 +164,10 @@ CREATE INDEX IF NOT EXISTS idx_commerce_payment_attempt_owner_order
 
 CREATE INDEX IF NOT EXISTS idx_commerce_payment_attempt_out_trade_no
     ON commerce_payment_attempt (tenant_id, out_trade_no)
+    WHERE out_trade_no IS NOT NULL AND deleted_at IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_attempt_provider_trade
+    ON commerce_payment_attempt (tenant_id, provider_code, out_trade_no)
     WHERE out_trade_no IS NOT NULL AND deleted_at IS NULL;
 
 -- =============================================================================

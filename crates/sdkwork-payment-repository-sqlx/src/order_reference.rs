@@ -3,6 +3,7 @@
 //! Payment must not depend on `sdkwork-order` crates. These queries are foreign-key
 //! lookups only; order lifecycle mutations remain in the order capability.
 
+use chrono::{DateTime, NaiveDateTime, Utc};
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use sdkwork_payment_service::OrderPaymentReferenceQuery;
 use sdkwork_payment_service::OrderPaymentReferenceSnapshot;
@@ -23,6 +24,7 @@ pub(crate) async fn load_order_payment_reference_sqlite(
             o.order_no AS order_sn,
             o.subject AS order_subject,
             o.status,
+            o.expired_at,
             o.paid_at AS pay_time,
             COALESCE(
                 (
@@ -65,6 +67,7 @@ pub(crate) async fn load_order_payment_reference_postgres(
             o.order_no AS order_sn,
             o.subject AS order_subject,
             o.status,
+            o.expired_at,
             o.paid_at AS pay_time,
             COALESCE(
                 (
@@ -98,6 +101,7 @@ pub(crate) async fn load_order_payment_reference_postgres(
 fn map_sqlite_order_payment_reference_row(row: SqliteRow) -> OrderPaymentReferenceSnapshot {
     map_order_payment_reference_row(
         &row,
+        optional_sqlite_string_cell(&row, "expired_at"),
         optional_sqlite_string_cell(&row, "order_subject"),
         optional_sqlite_string_cell(&row, "pay_time"),
     )
@@ -106,6 +110,7 @@ fn map_sqlite_order_payment_reference_row(row: SqliteRow) -> OrderPaymentReferen
 fn map_postgres_order_payment_reference_row(row: PgRow) -> OrderPaymentReferenceSnapshot {
     map_order_payment_reference_row(
         &row,
+        optional_postgres_string_cell(&row, "expired_at"),
         optional_postgres_string_cell(&row, "order_subject"),
         optional_postgres_string_cell(&row, "pay_time"),
     )
@@ -113,10 +118,12 @@ fn map_postgres_order_payment_reference_row(row: PgRow) -> OrderPaymentReference
 
 fn map_order_payment_reference_row<R: StringCellRow>(
     row: &R,
+    expires_at: Option<String>,
     order_subject: Option<String>,
     pay_time: Option<String>,
 ) -> OrderPaymentReferenceSnapshot {
     OrderPaymentReferenceSnapshot {
+        expires_at,
         order_id: string_cell(row, "order_id"),
         order_sn: string_cell(row, "order_sn"),
         order_subject,
@@ -142,6 +149,33 @@ pub(crate) fn order_status_is_payable(status: &str) -> bool {
     )
 }
 
+pub(crate) fn order_payment_reference_is_payable(
+    reference: &OrderPaymentReferenceSnapshot,
+) -> bool {
+    order_status_is_payable(&reference.status)
+        && order_expiration_is_payable(reference.expires_at.as_deref())
+}
+
+pub(crate) fn order_expiration_is_payable(expires_at: Option<&str>) -> bool {
+    let Some(expires_at) = expires_at.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    parse_utc_timestamp(expires_at)
+        .map(|value| value > Utc::now())
+        .unwrap_or(false)
+}
+
+fn parse_utc_timestamp(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|value| value.with_timezone(&Utc))
+        .ok()
+        .or_else(|| {
+            NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+                .ok()
+                .map(|value| value.and_utc())
+        })
+}
+
 pub(crate) fn order_status_is_refundable(status: &str, pay_time: Option<&str>) -> bool {
     let normalized = status.trim().to_ascii_lowercase();
     let paid = matches!(
@@ -151,4 +185,18 @@ pub(crate) fn order_status_is_refundable(status: &str, pay_time: Option<&str>) -
     paid && pay_time
         .map(|value| !value.trim().is_empty())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::order_expiration_is_payable;
+
+    #[test]
+    fn order_expiration_fails_closed_for_missing_expired_or_invalid_values() {
+        assert!(!order_expiration_is_payable(None));
+        assert!(!order_expiration_is_payable(Some("")));
+        assert!(order_expiration_is_payable(Some("2099-01-01T00:00:00Z")));
+        assert!(!order_expiration_is_payable(Some("2020-01-01T00:00:00Z")));
+        assert!(!order_expiration_is_payable(Some("not-a-timestamp")));
+    }
 }

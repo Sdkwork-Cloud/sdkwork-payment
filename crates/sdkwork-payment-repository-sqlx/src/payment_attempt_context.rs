@@ -33,6 +33,16 @@ fn provider_transaction_id_from_callback_payload(payload: &str) -> Option<String
     }
 }
 
+fn provider_account_id_from_callback_payload(payload: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let text = value.get("providerAccountId")?.as_str()?.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_owned())
+    }
+}
+
 fn payment_metadata_from_callback_payload(payload: &str) -> serde_json::Value {
     let value = serde_json::from_str(payload)
         .ok()
@@ -45,14 +55,11 @@ fn payment_metadata_from_callback_payload(payload: &str) -> serde_json::Value {
         .unwrap_or(value)
 }
 
-fn merge_callback_payload_patch(
-    existing: &str,
-    payment_params: &BTreeMap<String, String>,
-) -> String {
-    let mut value = serde_json::from_str(existing).unwrap_or_else(|_| json!({}));
-    let Some(obj) = value.as_object_mut() else {
-        return existing.to_owned();
-    };
+fn provider_enrichment_patch(payment_params: &BTreeMap<String, String>) -> String {
+    let mut value = json!({});
+    let obj = value
+        .as_object_mut()
+        .expect("provider enrichment patch is an object");
     if let Some(native_id) = payment_params.get("providerTransactionId") {
         obj.insert("providerTransactionId".to_owned(), json!(native_id));
     }
@@ -73,41 +80,29 @@ pub async fn persist_attempt_enrichment_sqlite(
     {
         return Ok(());
     }
-    let row = sqlx::query(
-        r#"
-        SELECT callback_payload
-        FROM commerce_payment_attempt
-        WHERE id = CAST(? AS TEXT)
-          AND tenant_id = CAST(? AS TEXT)
-        "#,
-    )
-    .bind(attempt_id)
-    .bind(tenant_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| store_error("failed to load payment attempt callback payload", error))?;
-    let Some(row) = row else {
-        return Ok(());
-    };
-    let existing = string_cell(&row, "callback_payload");
-    let merged = merge_callback_payload_patch(&existing, payment_params);
+    let patch = provider_enrichment_patch(payment_params);
     let now = current_timestamp_string();
-    sqlx::query(
+    let update = sqlx::query(
         r#"
         UPDATE commerce_payment_attempt
-        SET callback_payload = ?, updated_at = ?
+        SET callback_payload = json_patch(
+                CASE WHEN json_valid(callback_payload) THEN callback_payload ELSE '{}' END,
+                ?
+            ),
+            updated_at = ?
         WHERE id = CAST(? AS TEXT)
           AND tenant_id = CAST(? AS TEXT)
           AND deleted_at IS NULL
         "#,
     )
-    .bind(&merged)
+    .bind(&patch)
     .bind(&now)
     .bind(attempt_id)
     .bind(tenant_id)
     .execute(pool)
     .await
     .map_err(|error| store_error("failed to persist payment attempt enrichment", error))?;
+    ensure_attempt_enrichment_persisted(update.rows_affected())?;
     Ok(())
 }
 
@@ -122,42 +117,37 @@ pub async fn persist_attempt_enrichment_postgres(
     {
         return Ok(());
     }
-    let row = sqlx::query(
-        r#"
-        SELECT callback_payload
-        FROM commerce_payment_attempt
-        WHERE id = CAST($1 AS TEXT)
-          AND tenant_id = CAST($2 AS TEXT)
-        "#,
-    )
-    .bind(attempt_id)
-    .bind(tenant_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| store_error("failed to load payment attempt callback payload", error))?;
-    let Some(row) = row else {
-        return Ok(());
-    };
-    let existing = string_cell(&row, "callback_payload");
-    let merged = merge_callback_payload_patch(&existing, payment_params);
+    let patch = provider_enrichment_patch(payment_params);
     let now = current_timestamp_string();
-    sqlx::query(
+    let update = sqlx::query(
         r#"
         UPDATE commerce_payment_attempt
-        SET callback_payload = $1, updated_at = $2::timestamptz
+        SET callback_payload = COALESCE(callback_payload, '{}'::jsonb) || $1::jsonb,
+            updated_at = $2::timestamptz
         WHERE id = CAST($3 AS TEXT)
           AND tenant_id = CAST($4 AS TEXT)
           AND deleted_at IS NULL
         "#,
     )
-    .bind(&merged)
+    .bind(&patch)
     .bind(&now)
     .bind(attempt_id)
     .bind(tenant_id)
     .execute(pool)
     .await
     .map_err(|error| store_error("failed to persist payment attempt enrichment", error))?;
+    ensure_attempt_enrichment_persisted(update.rows_affected())?;
     Ok(())
+}
+
+fn ensure_attempt_enrichment_persisted(rows_affected: u64) -> Result<(), CommerceServiceError> {
+    if rows_affected == 1 {
+        Ok(())
+    } else {
+        Err(CommerceServiceError::conflict(
+            "payment attempt is no longer available for provider enrichment",
+        ))
+    }
 }
 
 pub async fn load_payment_attempt_provider_context_sqlite(
@@ -175,6 +165,7 @@ pub async fn load_payment_attempt_provider_context_sqlite(
         WHERE pa.tenant_id = CAST(? AS TEXT)
           AND pa.owner_user_id = CAST(? AS TEXT)
           AND pa.id = CAST(? AS TEXT)
+          AND pa.deleted_at IS NULL
         "#,
     )
     .bind(tenant_id)
@@ -189,7 +180,8 @@ pub async fn load_payment_attempt_provider_context_sqlite(
         PaymentAttemptProviderContext {
             attempt_id: string_cell(&row, "id"),
             channel_id: row.try_get("channel_id").ok().flatten(),
-            provider_account_id: row.try_get("provider_account_id").ok().flatten(),
+            provider_account_id: provider_account_id_from_callback_payload(&callback_payload)
+                .or_else(|| row.try_get("provider_account_id").ok().flatten()),
             provider_code: string_cell(&row, "provider_code"),
             out_trade_no: string_cell(&row, "out_trade_no"),
             amount: string_cell(&row, "amount"),
@@ -214,6 +206,7 @@ pub async fn load_payment_attempt_provider_context_by_id_sqlite(
         FROM commerce_payment_attempt pa
         LEFT JOIN commerce_payment_channel c ON c.id = pa.channel_id
         WHERE pa.id = CAST(? AS TEXT)
+          AND pa.deleted_at IS NULL
         "#,
     )
     .bind(payment_attempt_id)
@@ -231,7 +224,8 @@ pub async fn load_payment_attempt_provider_context_by_id_sqlite(
         PaymentAttemptProviderContext {
             attempt_id: string_cell(&row, "id"),
             channel_id: row.try_get("channel_id").ok().flatten(),
-            provider_account_id: row.try_get("provider_account_id").ok().flatten(),
+            provider_account_id: provider_account_id_from_callback_payload(&callback_payload)
+                .or_else(|| row.try_get("provider_account_id").ok().flatten()),
             provider_code: string_cell(&row, "provider_code"),
             out_trade_no: string_cell(&row, "out_trade_no"),
             amount: string_cell(&row, "amount"),
@@ -260,6 +254,7 @@ pub async fn load_payment_attempt_provider_context_postgres(
         WHERE pa.tenant_id = CAST($1 AS TEXT)
           AND pa.owner_user_id = CAST($2 AS TEXT)
           AND pa.id = CAST($3 AS TEXT)
+          AND pa.deleted_at IS NULL
         "#,
     )
     .bind(tenant_id)
@@ -274,7 +269,8 @@ pub async fn load_payment_attempt_provider_context_postgres(
         PaymentAttemptProviderContext {
             attempt_id: string_cell(&row, "id"),
             channel_id: row.try_get("channel_id").ok().flatten(),
-            provider_account_id: row.try_get("provider_account_id").ok().flatten(),
+            provider_account_id: provider_account_id_from_callback_payload(&callback_payload)
+                .or_else(|| row.try_get("provider_account_id").ok().flatten()),
             provider_code: string_cell(&row, "provider_code"),
             out_trade_no: string_cell(&row, "out_trade_no"),
             amount: string_cell(&row, "amount"),
@@ -299,6 +295,7 @@ pub async fn load_payment_attempt_provider_context_by_id_postgres(
         FROM commerce_payment_attempt pa
         LEFT JOIN commerce_payment_channel c ON c.id = pa.channel_id
         WHERE pa.id = CAST($1 AS TEXT)
+          AND pa.deleted_at IS NULL
         "#,
     )
     .bind(payment_attempt_id)
@@ -316,7 +313,8 @@ pub async fn load_payment_attempt_provider_context_by_id_postgres(
         PaymentAttemptProviderContext {
             attempt_id: string_cell(&row, "id"),
             channel_id: row.try_get("channel_id").ok().flatten(),
-            provider_account_id: row.try_get("provider_account_id").ok().flatten(),
+            provider_account_id: provider_account_id_from_callback_payload(&callback_payload)
+                .or_else(|| row.try_get("provider_account_id").ok().flatten()),
             provider_code: string_cell(&row, "provider_code"),
             out_trade_no: string_cell(&row, "out_trade_no"),
             amount: string_cell(&row, "amount"),

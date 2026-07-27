@@ -16,6 +16,7 @@ pub struct OrderPaymentReferenceQuery {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OrderPaymentReferenceSnapshot {
+    pub expires_at: Option<String>,
     pub order_id: String,
     pub order_sn: String,
     pub order_subject: Option<String>,

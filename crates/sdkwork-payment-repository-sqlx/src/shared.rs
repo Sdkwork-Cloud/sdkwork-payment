@@ -134,6 +134,7 @@ pub(crate) fn ensure_payment_attempt_idempotency_replay_matches(
 pub(crate) fn ensure_owner_payment_idempotency_replay_matches(
     command: &PayOwnerOrderCommand,
     existing: &PayOwnerOrderOutcome,
+    callback_payload: &str,
 ) -> Result<(), CommerceServiceError> {
     if existing.order_id != command.order_id
         || !existing
@@ -142,7 +143,95 @@ pub(crate) fn ensure_owner_payment_idempotency_replay_matches(
     {
         return Err(idempotency_parameter_conflict("order payment"));
     }
+    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(callback_payload) {
+        if let Some(object) = payload.as_object() {
+            if object
+                .get("paymentMetadata")
+                .is_some_and(|metadata| metadata != &command.payment_metadata)
+            {
+                return Err(idempotency_parameter_conflict("order payment"));
+            }
+            if let Some(persisted_scene) = object.get("paymentScene") {
+                let requested_scene = command
+                    .payment_scene
+                    .as_deref()
+                    .map(|value| serde_json::Value::String(value.to_owned()))
+                    .unwrap_or(serde_json::Value::Null);
+                if persisted_scene != &requested_scene {
+                    return Err(idempotency_parameter_conflict("order payment"));
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+pub(crate) fn owner_payment_reuse_matches(
+    command: &PayOwnerOrderCommand,
+    callback_payload: &str,
+) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(callback_payload) else {
+        return false;
+    };
+    let Some(object) = payload.as_object() else {
+        return false;
+    };
+    let requested_scene = command
+        .payment_scene
+        .as_deref()
+        .map(|value| serde_json::Value::String(value.to_owned()))
+        .unwrap_or(serde_json::Value::Null);
+    object.get("paymentScene") == Some(&requested_scene)
+        && object.get("paymentMetadata") == Some(&command.payment_metadata)
+}
+
+fn snapshot_provider_account(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    provider_account_id: Option<&str>,
+) {
+    if let Some(provider_account_id) = provider_account_id {
+        object.insert(
+            "providerAccountId".to_owned(),
+            serde_json::Value::String(provider_account_id.to_owned()),
+        );
+    }
+}
+
+pub(crate) fn payment_attempt_callback_payload(provider_account_id: Option<&str>) -> String {
+    let mut object = serde_json::Map::new();
+    snapshot_provider_account(&mut object, provider_account_id);
+    serde_json::Value::Object(object).to_string()
+}
+
+pub(crate) fn owner_payment_callback_payload(
+    command: &PayOwnerOrderCommand,
+    provider_account_id: Option<&str>,
+) -> String {
+    let raw = command
+        .payment_attempt_callback_payload
+        .as_deref()
+        .unwrap_or("{}");
+    let Ok(mut payload) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return raw.to_owned();
+    };
+    let Some(object) = payload.as_object_mut() else {
+        return raw.to_owned();
+    };
+
+    object.insert(
+        "paymentMetadata".to_owned(),
+        command.payment_metadata.clone(),
+    );
+    object.insert(
+        "paymentScene".to_owned(),
+        command
+            .payment_scene
+            .as_deref()
+            .map(|value| serde_json::Value::String(value.to_owned()))
+            .unwrap_or(serde_json::Value::Null),
+    );
+    snapshot_provider_account(object, provider_account_id);
+    payload.to_string()
 }
 
 pub(crate) fn ensure_refund_idempotency_replay_matches(
@@ -227,6 +316,24 @@ pub(crate) fn stable_storage_id(parts: &[&str]) -> String {
         })
         .collect::<Vec<_>>()
         .join("-")
+}
+
+pub(crate) fn provider_out_trade_no(
+    tenant_id: &str,
+    order_id: &str,
+    idempotency_key: &str,
+) -> String {
+    let fingerprint = format!(
+        "payment-provider-trade:v1|{}:{}|{}:{}|{}:{}",
+        tenant_id.len(),
+        tenant_id,
+        order_id.len(),
+        order_id,
+        idempotency_key.len(),
+        idempotency_key,
+    );
+    let digest = sdkwork_utils_rust::crypto::sha256_hash(fingerprint.as_bytes());
+    format!("SW{}", &digest[..30])
 }
 
 /// Return the current UTC timestamp in the wire/storage RFC3339 format.
@@ -318,11 +425,16 @@ impl StringCellRow for PgRow {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_confirmation_intent_update, ensure_refund_idempotency_replay_matches,
+        ensure_confirmation_intent_update, ensure_owner_payment_idempotency_replay_matches,
+        ensure_refund_idempotency_replay_matches, owner_payment_callback_payload,
+        owner_payment_reuse_matches, payment_attempt_callback_payload, provider_out_trade_no,
         required_persisted_paid_at, resolve_confirmation_attempt_replayed,
     };
     use sdkwork_contract_service::CommerceMoney;
-    use sdkwork_payment_service::{CreateOwnerRefundCommand, RefundView};
+    use sdkwork_payment_service::{
+        CreateOwnerRefundCommand, PayOwnerOrderCommand, PayOwnerOrderCommandInput,
+        PayOwnerOrderOutcome, RefundView,
+    };
 
     #[test]
     fn confirmation_replay_requires_and_preserves_persisted_paid_at() {
@@ -378,5 +490,115 @@ mod tests {
         let error = ensure_refund_idempotency_replay_matches(&command, &existing)
             .expect_err("changed amount must conflict");
         assert_eq!(error.code(), "conflict");
+    }
+
+    #[test]
+    fn owner_payment_callback_payload_preserves_domain_data_and_snapshots_provider_input() {
+        let command = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
+            tenant_id: "tenant-1".to_owned(),
+            organization_id: Some("organization-1".to_owned()),
+            owner_user_id: "user-1".to_owned(),
+            order_id: "order-1".to_owned(),
+            payment_method: "wechat_jsapi".to_owned(),
+            payment_scene: Some("mini_program".to_owned()),
+            payment_attempt_callback_payload: Some(serde_json::json!({"points": 100}).to_string()),
+            payment_metadata: serde_json::json!({"openid": "payer-1"}),
+            request_no: "request-1".to_owned(),
+            idempotency_key: "idempotency-1".to_owned(),
+        })
+        .expect("owner payment command");
+
+        let callback_payload = owner_payment_callback_payload(&command, Some("provider-account-1"));
+        let payload: serde_json::Value =
+            serde_json::from_str(&callback_payload).expect("canonical callback payload");
+        assert_eq!(payload["points"], 100);
+        assert_eq!(payload["paymentMetadata"]["openid"], "payer-1");
+        assert_eq!(payload["paymentScene"], "mini_program");
+        assert_eq!(payload["providerAccountId"], "provider-account-1");
+
+        let changed_command = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
+            tenant_id: "tenant-1".to_owned(),
+            organization_id: Some("organization-1".to_owned()),
+            owner_user_id: "user-1".to_owned(),
+            order_id: "order-1".to_owned(),
+            payment_method: "wechat_jsapi".to_owned(),
+            payment_scene: Some("mini_program".to_owned()),
+            payment_attempt_callback_payload: Some(callback_payload.clone()),
+            payment_metadata: serde_json::json!({"openid": "payer-2"}),
+            request_no: "request-2".to_owned(),
+            idempotency_key: "idempotency-1".to_owned(),
+        })
+        .expect("changed owner payment command");
+        let existing = PayOwnerOrderOutcome {
+            amount: CommerceMoney::new("100").expect("amount"),
+            order_id: "order-1".to_owned(),
+            out_trade_no: "trade-1".to_owned(),
+            payment_id: "attempt-1".to_owned(),
+            payment_method: "wechat_jsapi".to_owned(),
+            status: "pending".to_owned(),
+            payment_params: Default::default(),
+        };
+        let error = ensure_owner_payment_idempotency_replay_matches(
+            &changed_command,
+            &existing,
+            &callback_payload,
+        )
+        .expect_err("changed payer metadata must conflict");
+        assert_eq!(error.code(), "conflict");
+
+        assert!(owner_payment_reuse_matches(&command, &callback_payload));
+        assert!(!owner_payment_reuse_matches(
+            &changed_command,
+            &callback_payload
+        ));
+
+        let changed_scene = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
+            tenant_id: "tenant-1".to_owned(),
+            organization_id: Some("organization-1".to_owned()),
+            owner_user_id: "user-1".to_owned(),
+            order_id: "order-1".to_owned(),
+            payment_method: "wechat_jsapi".to_owned(),
+            payment_scene: Some("mobile_cashier_h5".to_owned()),
+            payment_attempt_callback_payload: None,
+            payment_metadata: serde_json::json!({"openid": "payer-1"}),
+            request_no: "request-3".to_owned(),
+            idempotency_key: "idempotency-2".to_owned(),
+        })
+        .expect("changed-scene owner payment command");
+        assert!(!owner_payment_reuse_matches(
+            &changed_scene,
+            &callback_payload
+        ));
+        assert!(!owner_payment_reuse_matches(&command, "{}"));
+        assert!(!owner_payment_reuse_matches(&command, "not-json"));
+    }
+
+    #[test]
+    fn two_step_attempt_callback_payload_snapshots_provider_account() {
+        let payload: serde_json::Value = serde_json::from_str(&payment_attempt_callback_payload(
+            Some("provider-account-2"),
+        ))
+        .expect("payment attempt callback payload");
+
+        assert_eq!(payload["providerAccountId"], "provider-account-2");
+        assert_eq!(payment_attempt_callback_payload(None), "{}");
+    }
+
+    #[test]
+    fn provider_trade_number_is_fixed_width_ascii_and_unambiguous() {
+        let trade = provider_out_trade_no("租户", "订单/一", "重复点击:支付");
+        assert_eq!(trade.len(), 32);
+        assert!(trade.starts_with("SW"));
+        assert!(trade
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric()));
+        assert_eq!(
+            trade,
+            provider_out_trade_no("租户", "订单/一", "重复点击:支付")
+        );
+        assert_ne!(
+            provider_out_trade_no("a:bc", "d", "e"),
+            provider_out_trade_no("a", "bc:d", "e")
+        );
     }
 }
