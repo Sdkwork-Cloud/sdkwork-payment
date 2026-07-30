@@ -6,23 +6,30 @@ mod bootstrap;
 mod generated;
 
 pub use bootstrap::{
-    assemble_api_router, assemble_backend_business_router, assemble_business_routes,
-    gateway_contract_fallback_config, ApiAssembly,
+    assemble_api_router, assemble_app_api_contribution, assemble_backend_business_router,
+    assemble_business_routes, gateway_contract_fallback_config, ApiAssembly,
+    BusinessRouterAssembly,
 };
 
 pub async fn assemble_api_router_from_env() -> Result<ApiAssembly, String> {
     let host =
         std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);
-    Ok(assemble_api_router(host).await)
+    assemble_api_router(host).await
 }
 
-pub async fn assemble_business_routes_from_env() -> Result<ApiAssembly, String> {
+pub async fn assemble_app_api_contribution_from_env() -> Result<ApiAssembly, String> {
+    let host =
+        std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);
+    assemble_app_api_contribution(host).await
+}
+
+pub async fn assemble_business_routes_from_env() -> Result<BusinessRouterAssembly, String> {
     let host =
         std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);
     Ok(assemble_business_routes(host).await)
 }
 
-pub async fn assemble_backend_business_router_from_env() -> Result<ApiAssembly, String> {
+pub async fn assemble_backend_business_router_from_env() -> Result<BusinessRouterAssembly, String> {
     let host =
         std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);
     Ok(assemble_backend_business_router(host).await)

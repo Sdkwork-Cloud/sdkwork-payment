@@ -27,7 +27,7 @@ impl PaymentDatabaseHost {
 /// Hosts register this module in `DatabaseModuleRegistry` and call
 /// `RegistryLifecycleOrchestrator::bootstrap_all_from_env()` on their shared
 /// connection pool. The framework then honors the payment module's lifecycle
-/// manifest and `SDKWORK_PAYMENT_DATABASE_*` overrides without duplicating its
+/// manifest and canonical `SDKWORK_DATABASE_*` lifecycle settings without duplicating its
 /// schema or seed assets into the integrating application.
 pub fn database_module() -> Result<DefaultDatabaseModule, SpiError> {
     let app_root = std::env::var("SDKWORK_PAYMENT_APP_ROOT")
@@ -113,8 +113,8 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_file(&database_path);
-        let seed_on_boot_key = "SDKWORK_PAYMENT_DATABASE_SEED_ON_BOOT";
-        let seed_profile_key = "SDKWORK_PAYMENT_DATABASE_SEED_PROFILE";
+        let seed_on_boot_key = "SDKWORK_DATABASE_SEED_ON_BOOT";
+        let seed_profile_key = "SDKWORK_DATABASE_SEED_PROFILE";
         let previous_seed_on_boot = std::env::var(seed_on_boot_key).ok();
         let previous_seed_profile = std::env::var(seed_profile_key).ok();
         std::env::set_var(seed_on_boot_key, "true");

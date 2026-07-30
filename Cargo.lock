@@ -1649,6 +1649,7 @@ dependencies = [
  "thiserror",
  "toml",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -1710,7 +1711,6 @@ dependencies = [
 name = "sdkwork-database-sqlx"
 version = "0.1.0"
 dependencies = [
- "libsqlite3-sys",
  "sdkwork-database-config",
  "serde",
  "sqlx",
@@ -1957,6 +1957,7 @@ dependencies = [
  "async-trait",
  "axum",
  "http",
+ "sdkwork-database-sqlx",
  "sdkwork-web-axum",
  "sdkwork-web-contract",
  "sdkwork-web-core",

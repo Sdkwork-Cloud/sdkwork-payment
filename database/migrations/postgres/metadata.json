@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "sdkwork.database.migration-metadata",
+  "engine": "postgres",
+  "sourcePolicy": "historical-immutable",
+  "migrations": {
+    "0002_provider_credentials.up.sql": {
+      "engine": "postgres",
+      "reversible": "false",
+      "rollback": "forward-fix",
+      "transactional": "true",
+      "lock": "access-exclusive",
+      "lock_timeout": "2s",
+      "statement_timeout": "30s"
+    },
+    "0003_certificate_encrypted_content.up.sql": {
+      "engine": "postgres",
+      "reversible": "false",
+      "rollback": "forward-fix",
+      "transactional": "true",
+      "lock": "access-exclusive",
+      "lock_timeout": "2s",
+      "statement_timeout": "30s"
+    }
+  }
+}

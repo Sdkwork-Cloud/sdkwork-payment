@@ -5,7 +5,7 @@ of the following environment profiles; directory ordering is never used.
 
 For CLI-driven local setup, select the profile explicitly through
 `pnpm db:seed:dev` or `pnpm db:bootstrap:dev`. The unsuffixed CLI commands use
-the `standard` profile; `SDKWORK_PAYMENT_DATABASE_SEED_PROFILE` is consumed by
+the `standard` profile; `SDKWORK_DATABASE_SEED_PROFILE` is consumed by
 embedded service startup rather than overriding the CLI subcommand default.
 
 - `development`: complete payment catalog, an active local sandbox channel, and

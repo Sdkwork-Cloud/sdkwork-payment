@@ -2,29 +2,65 @@
 
 use axum::Router;
 use sdkwork_payment_service_host::PaymentServiceHost;
-use sdkwork_web_bootstrap::ContractFallbackConfig;
+use sdkwork_web_bootstrap::{
+    ApiAssemblyContribution, ContractFallbackConfig, DatabasePoolReadinessCheck,
+};
+use sdkwork_web_core::HttpRouteManifest;
 use std::sync::Arc;
 
-pub struct ApiAssembly {
+pub type ApiAssembly = ApiAssemblyContribution;
+
+pub struct BusinessRouterAssembly {
     pub router: Router,
 }
 
-pub async fn assemble_api_router(host: Arc<PaymentServiceHost>) -> ApiAssembly {
-    assemble_business_routes(host).await
+pub async fn assemble_api_router(host: Arc<PaymentServiceHost>) -> Result<ApiAssembly, String> {
+    let router = assemble_business_routes(host.clone()).await.router;
+    let mut routes = Vec::new();
+    routes.extend_from_slice(sdkwork_routes_payment_app_api::gateway_route_manifest().routes());
+    routes.extend_from_slice(sdkwork_routes_payment_backend_api::gateway_route_manifest().routes());
+    ApiAssemblyContribution::from_manifest(
+        "sdkwork-payment",
+        "SDKWork Payment API",
+        router,
+        HttpRouteManifest::from_owned_routes(routes),
+        Vec::new(),
+        Arc::new(DatabasePoolReadinessCheck::new(
+            host.database_pool().clone(),
+        )),
+    )
 }
 
-pub async fn assemble_business_routes(host: Arc<PaymentServiceHost>) -> ApiAssembly {
+pub async fn assemble_business_routes(host: Arc<PaymentServiceHost>) -> BusinessRouterAssembly {
     let mut router = Router::new();
     router =
         router.merge(sdkwork_routes_payment_app_api::gateway_mount_business(host.clone()).await);
     router = router.merge(sdkwork_routes_payment_backend_api::gateway_mount_business(host).await);
-    ApiAssembly { router }
+    BusinessRouterAssembly { router }
 }
 
-pub async fn assemble_backend_business_router(host: Arc<PaymentServiceHost>) -> ApiAssembly {
-    ApiAssembly {
+pub async fn assemble_backend_business_router(
+    host: Arc<PaymentServiceHost>,
+) -> BusinessRouterAssembly {
+    BusinessRouterAssembly {
         router: sdkwork_routes_payment_backend_api::gateway_mount_business(host).await,
     }
+}
+
+pub async fn assemble_app_api_contribution(
+    host: Arc<PaymentServiceHost>,
+) -> Result<ApiAssemblyContribution, String> {
+    let router = sdkwork_routes_payment_app_api::gateway_mount_business(host.clone()).await;
+    ApiAssemblyContribution::from_manifest(
+        "sdkwork-payment",
+        "SDKWork Payment App API",
+        router,
+        sdkwork_routes_payment_app_api::gateway_route_manifest(),
+        Vec::new(),
+        Arc::new(DatabasePoolReadinessCheck::new(
+            host.database_pool().clone(),
+        )),
+    )
 }
 
 pub fn gateway_contract_fallback_config() -> ContractFallbackConfig {

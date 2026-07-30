@@ -116,7 +116,7 @@ List/search endpoints push `page` / `page_size` to SQL `LIMIT`/`OFFSET` with `CO
 
 ## Data stores
 
-DDL baselines: `database/ddl/baseline/sqlite/` and `database/ddl/baseline/postgres/` — structurally aligned; PostgreSQL uses `NUMERIC`/`TIMESTAMPTZ`/`JSONB`.
+DDL baselines: `tests/fixtures/database/sqlite/ddl/baseline/` and `database/ddl/baseline/postgres/` — structurally aligned; PostgreSQL uses `NUMERIC`/`TIMESTAMPTZ`/`JSONB`.
 
 ## Production hardening
 

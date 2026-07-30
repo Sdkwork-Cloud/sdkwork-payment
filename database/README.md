@@ -28,8 +28,8 @@ pnpm run db:drift:check
 ## Payment bootstrap profiles
 
 The initial payment catalog used by an embedded service is selected by
-`SDKWORK_PAYMENT_DATABASE_SEED_PROFILE` and is applied only when
-`SDKWORK_PAYMENT_DATABASE_SEED_ON_BOOT=true`. The lifecycle CLI defaults its
+`SDKWORK_DATABASE_SEED_PROFILE` and is applied only when
+`SDKWORK_DATABASE_SEED_ON_BOOT=true`. The lifecycle CLI defaults its
 `seed` and `bootstrap` commands to `standard`; use `pnpm db:seed:dev` or
 `pnpm db:bootstrap:dev` for development, and the explicit `:prod` equivalents
 for a controlled production bootstrap. `seedOnBoot` remains `false` in the
@@ -45,9 +45,9 @@ deployment configuration explicitly opts in.
 For example, a development service can use:
 
 ```text
-SDKWORK_PAYMENT_DATABASE_SEED_ON_BOOT=true
-SDKWORK_PAYMENT_DATABASE_SEED_PROFILE=development
-SDKWORK_PAYMENT_DATABASE_SEED_LOCALE=zh-CN
+SDKWORK_DATABASE_SEED_ON_BOOT=true
+SDKWORK_DATABASE_SEED_PROFILE=development
+SDKWORK_DATABASE_SEED_LOCALE=zh-CN
 ```
 
 Production deployment should run the `production` seed explicitly during its
@@ -75,8 +75,8 @@ the bootstrap marker and does not replace already configured merchant data.
 An application that embeds payment into a shared database pool must register
 payment's owned module with the framework registry rather than copying payment
 DDL or seed files into its own database directory. The registry runs each
-module's lifecycle exactly through its manifest and `SDKWORK_<SERVICE>_DATABASE_*`
-overrides.
+module's lifecycle exactly through its manifest and the process-wide
+`SDKWORK_DATABASE_*` contract.
 
 ```rust
 use sdkwork_database_lifecycle::RegistryLifecycleOrchestrator;
@@ -92,9 +92,9 @@ RegistryLifecycleOrchestrator::new(shared_pool, registry)
     .await?;
 ```
 
-Set `SDKWORK_PAYMENT_DATABASE_SEED_ON_BOOT=true` and choose `development`,
-`test`, or `production` through `SDKWORK_PAYMENT_DATABASE_SEED_PROFILE` in the
-integrating application's selected runtime profile. Do not rely on the host's
-unprefixed configuration: payment owns its own lifecycle options. Production
-continues to default to no automatic seed write unless an operator explicitly
-enables it.
+Set `SDKWORK_DATABASE_SEED_ON_BOOT=true` and choose `development`, `test`, or
+`production` through `SDKWORK_DATABASE_SEED_PROFILE` in the integrating
+application's selected runtime profile. The service code identifies Payment's
+table and lifecycle ownership; it never creates a second database env namespace.
+Production continues to default to no automatic seed write unless an operator
+explicitly enables it.

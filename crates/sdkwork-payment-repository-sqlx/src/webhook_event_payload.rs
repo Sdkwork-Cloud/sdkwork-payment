@@ -315,8 +315,9 @@ mod tests {
     fn unmatched_status_is_legal_in_postgres_and_sqlite_baselines() {
         let postgres =
             include_str!("../../../database/ddl/baseline/postgres/0001_payment_baseline.sql");
-        let sqlite =
-            include_str!("../../../database/ddl/baseline/sqlite/0001_payment_baseline.sql");
+        let sqlite = include_str!(
+            "../../../tests/fixtures/database/sqlite/ddl/baseline/0001_payment_baseline.sql"
+        );
         let legal_status_contract =
             "CHECK (status IN ('queued', 'processing', 'processed', 'failed', 'dead'))";
 

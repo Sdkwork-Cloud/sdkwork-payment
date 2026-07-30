@@ -17,8 +17,7 @@
   "kind": "sdkwork.database.module",
   "serviceCode": "PAYMENT",
   "engines": [
-    "postgres",
-    "sqlite"
+    "postgres"
   ],
   "lifecycle": {
     "activeSeedLocales": [
@@ -37,10 +36,11 @@
     "defaultSeedLocale": "zh-CN",
     "defaultSeedProfile": "standard",
     "seedOnBoot": false,
-    "autoMigrate": true
+    "autoMigrate": false
   },
   "baselineStrategy": "baseline-plus-migrations",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "contractVersion": "1.0.0",
-  "moduleId": "payment"
+  "moduleId": "payment",
+  "databaseRole": "authoritative-server"
 }

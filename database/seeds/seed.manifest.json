@@ -1,49 +1,71 @@
 {
-    "schemaVersion":  1,
-    "moduleId":  "payment",
-    "defaultLocale":  "zh-CN",
-    "profiles":  {
-                     "standard":  {
-                                      "locales":  {},
-                                      "common":  [
-                                                     "001_payment_method_catalog.sql",
-                                                     "002_production_templates.sql",
-                                                     "006_upgrade_bootstrap_templates.sql",
-                                                     "005_production_sandbox_template.sql",
-                                                     "008_production_recharge_checkout_wechat_pay.sql"
-                                                 ]
-                                  },
-                     "production":  {
-                                        "locales":  {},
-                                        "common":  [
-                                                       "001_payment_method_catalog.sql",
-                                                       "002_production_templates.sql",
-                                                       "006_upgrade_bootstrap_templates.sql",
-                                                       "005_production_sandbox_template.sql",
-                                                       "008_production_recharge_checkout_wechat_pay.sql"
-                                                   ]
-                                    },
-                     "development":  {
-                                         "locales":  {},
-                                         "common":  [
-                                                        "001_payment_method_catalog.sql",
-                                                         "002_production_templates.sql",
-                                                         "006_upgrade_bootstrap_templates.sql",
-                                                         "003_development_templates.sql",
-                                                         "007_development_demo_data.sql",
-                                                         "008_development_recharge_checkout_wechat_pay.sql"
-                                                     ]
-                                     },
-                     "test":  {
-                                  "locales":  {},
-                                  "common":  [
-                                                 "001_payment_method_catalog.sql",
-                                                 "002_production_templates.sql",
-                                                 "006_upgrade_bootstrap_templates.sql",
-                                                 "004_test_templates.sql",
-                                                 "008_test_recharge_checkout_wechat_pay.sql"
-                                             ]
-                              }
-                 },
-    "kind":  "sdkwork.database.seed"
+  "schemaVersion": 1,
+  "moduleId": "payment",
+  "defaultLocale": "zh-CN",
+  "profiles": {
+    "standard": {
+      "locales": {},
+      "common": [
+        "001_payment_method_catalog.sql",
+        "002_production_templates.sql",
+        "006_upgrade_bootstrap_templates.sql",
+        "005_production_sandbox_template.sql",
+        "008_production_recharge_checkout_wechat_pay.sql"
+      ]
+    },
+    "production": {
+      "locales": {},
+      "common": [
+        "001_payment_method_catalog.sql",
+        "002_production_templates.sql",
+        "006_upgrade_bootstrap_templates.sql",
+        "005_production_sandbox_template.sql",
+        "008_production_recharge_checkout_wechat_pay.sql"
+      ]
+    },
+    "development": {
+      "locales": {},
+      "common": [
+        "001_payment_method_catalog.sql",
+        "002_production_templates.sql",
+        "006_upgrade_bootstrap_templates.sql",
+        "003_development_templates.sql",
+        "007_development_demo_data.sql",
+        "008_development_recharge_checkout_wechat_pay.sql"
+      ]
+    },
+    "test": {
+      "locales": {},
+      "common": [
+        "001_payment_method_catalog.sql",
+        "002_production_templates.sql",
+        "006_upgrade_bootstrap_templates.sql",
+        "004_test_templates.sql",
+        "008_test_recharge_checkout_wechat_pay.sql"
+      ]
+    }
+  },
+  "kind": "sdkwork.database.seed",
+  "i18nVersion": "1.0.0",
+  "fallbackLocale": "zh-CN",
+  "supportedLocales": [
+    "zh-CN",
+    "en-US",
+    "ja-JP",
+    "de-DE",
+    "fr-FR",
+    "ru-RU",
+    "ko-KR"
+  ],
+  "activeLocales": [
+    "zh-CN"
+  ],
+  "localeSets": {
+    "zh-CN": {
+      "version": "1.0.0",
+      "required": true,
+      "checksum": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "files": []
+    }
+  }
 }

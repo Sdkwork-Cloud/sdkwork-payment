@@ -1,4 +1,4 @@
-﻿{
+{
   "license": "AGPL-3.0-or-later",
   "name": "sdkwork-payment-workspace",
   "private": true,
@@ -24,7 +24,7 @@
     "format:check": "cargo fmt --all -- --check",
     "check": "pnpm run check:app-composition && pnpm db:validate && pnpm api:assembly:validate && pnpm format:check",
     "db:validate": "node ../sdkwork-specs/tools/check-database-framework-standard.mjs --root .",
-    "db:materialize:contract": "node ../sdkwork-specs/tools/materialize-database-contract-from-baseline.mjs --root . --baseline database/ddl/baseline/postgres/0001_payment_baseline.sql --module-id payment --owner sdkwork-payment --prefixes commerce_ --engines postgres,sqlite",
+    "db:materialize:contract": "node ../sdkwork-specs/tools/materialize-database-contract-from-baseline.mjs --root . --baseline database/ddl/baseline/postgres/0001_payment_baseline.sql --module-id payment --owner sdkwork-payment --prefixes commerce_ --engines postgres",
     "db:plan": "cargo run --manifest-path ../sdkwork-database/Cargo.toml -p sdkwork-database-cli -- --app-root . plan",
     "db:plan:dev": "cargo run --manifest-path ../sdkwork-database/Cargo.toml -p sdkwork-database-cli -- --app-root . plan --profile development",
     "db:plan:prod": "cargo run --manifest-path ../sdkwork-database/Cargo.toml -p sdkwork-database-cli -- --app-root . plan --profile production",

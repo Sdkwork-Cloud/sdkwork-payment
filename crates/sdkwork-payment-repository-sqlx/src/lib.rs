@@ -45,8 +45,9 @@ pub use payment_attempt_context::{
     load_payment_attempt_provider_context_by_id_sqlite,
     load_payment_attempt_provider_context_postgres, load_payment_attempt_provider_context_sqlite,
     load_webhook_attempt_context_by_out_trade_no_postgres,
-    load_webhook_attempt_context_by_out_trade_no_sqlite, PaymentAttemptProviderContext,
-    PaymentWebhookAttemptContext, WebhookAttemptContext,
+    load_webhook_attempt_context_by_out_trade_no_sqlite, persist_attempt_enrichment_postgres,
+    persist_attempt_enrichment_sqlite, PaymentAttemptProviderContext, PaymentWebhookAttemptContext,
+    WebhookAttemptContext,
 };
 pub use payment_method::{PostgresCommercePaymentMethodStore, SqliteCommercePaymentMethodStore};
 pub use postgres_owner_order_payment::PostgresCommerceOwnerOrderPaymentStore;

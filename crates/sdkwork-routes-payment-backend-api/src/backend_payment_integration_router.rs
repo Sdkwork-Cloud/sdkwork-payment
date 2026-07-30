@@ -6,7 +6,6 @@ use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use sdkwork_database_sqlx::DatabasePool;
 use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{
     payment_credential_cipher, provider_registry_for_account, resolve_secret_ref,
@@ -169,10 +168,12 @@ struct WebhookSignatureTestBody {
 }
 
 pub fn build_backend_payment_integration_router(host: Arc<PaymentServiceHost>) -> Router {
-    let pool = match host.database_pool() {
-        DatabasePool::Sqlite(pool, _) => IntegrationPool::Sqlite(pool.clone()),
-        DatabasePool::Postgres(pool, _) => IntegrationPool::Postgres(pool.clone()),
-    };
+    let pool = host
+        .database_pool()
+        .as_postgres()
+        .expect("payment backend integration routes require an authoritative PostgreSQL pool")
+        .clone();
+    let pool = IntegrationPool::Postgres(pool);
     build_router(IntegrationState { pool })
 }
 
