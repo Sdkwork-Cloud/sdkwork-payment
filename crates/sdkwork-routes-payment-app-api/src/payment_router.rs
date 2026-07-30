@@ -228,61 +228,10 @@ struct CreatePaymentResponse {
     payment_url: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PaymentAppRouterMountOptions {
-    pub include_order_payments_list: bool,
-}
-
-impl PaymentAppRouterMountOptions {
-    pub fn standalone() -> Self {
-        Self {
-            include_order_payments_list: false,
-        }
-    }
-
-    pub fn federated_commerce() -> Self {
-        Self {
-            include_order_payments_list: false,
-        }
-    }
-}
-
-const FEDERATED_COMMERCE_ENV: &str = "SDKWORK_PAYMENT_FEDERATED_COMMERCE";
-
-fn env_flag_enabled(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "true" | "1" | "yes"
-    )
-}
-
-/// Resolve payment app router mount options for unified-process hosts that compose
-/// sdkwork-order alongside sdkwork-payment on one bind.
-pub fn resolve_payment_app_router_mount_options_from_env() -> PaymentAppRouterMountOptions {
-    match std::env::var(FEDERATED_COMMERCE_ENV) {
-        Ok(value) if env_flag_enabled(&value) => PaymentAppRouterMountOptions::federated_commerce(),
-        _ => PaymentAppRouterMountOptions::standalone(),
-    }
-}
-
 pub fn app_payment_router_with_sqlite_pool(
     pool: SqlitePool,
     registry: Arc<PaymentProviderRegistry>,
     credentials: ProviderCredentialBundle,
-) -> Router {
-    app_payment_router_with_sqlite_pool_and_options(
-        pool,
-        registry,
-        credentials,
-        resolve_payment_app_router_mount_options_from_env(),
-    )
-}
-
-pub fn app_payment_router_with_sqlite_pool_and_options(
-    pool: SqlitePool,
-    registry: Arc<PaymentProviderRegistry>,
-    credentials: ProviderCredentialBundle,
-    options: PaymentAppRouterMountOptions,
 ) -> Router {
     let method_store = Arc::new(SqliteCommercePaymentMethodStore::new(pool.clone()));
     let store = Arc::new(CompositeCommercePaymentStore {
@@ -299,37 +248,20 @@ pub fn app_payment_router_with_sqlite_pool_and_options(
             credentials: credentials.clone(),
         }),
     });
-    build_app_payment_router_with_options(
-        AppPaymentState {
-            store,
-            checkout: Some(PaymentCheckoutDeps::Sqlite {
-                pool,
-                registry,
-                credentials,
-            }),
-        },
-        options,
-    )
+    build_app_payment_router_with_state(AppPaymentState {
+        store,
+        checkout: Some(PaymentCheckoutDeps::Sqlite {
+            pool,
+            registry,
+            credentials,
+        }),
+    })
 }
 
 pub fn app_payment_router_with_postgres_pool(
     pool: PgPool,
     registry: Arc<PaymentProviderRegistry>,
     credentials: ProviderCredentialBundle,
-) -> Router {
-    app_payment_router_with_postgres_pool_and_options(
-        pool,
-        registry,
-        credentials,
-        resolve_payment_app_router_mount_options_from_env(),
-    )
-}
-
-pub fn app_payment_router_with_postgres_pool_and_options(
-    pool: PgPool,
-    registry: Arc<PaymentProviderRegistry>,
-    credentials: ProviderCredentialBundle,
-    options: PaymentAppRouterMountOptions,
 ) -> Router {
     let method_store = Arc::new(PostgresCommercePaymentMethodStore::new(pool.clone()));
     let store = Arc::new(CompositeCommercePaymentStore {
@@ -346,35 +278,26 @@ pub fn app_payment_router_with_postgres_pool_and_options(
             credentials: credentials.clone(),
         }),
     });
-    build_app_payment_router_with_options(
-        AppPaymentState {
-            store,
-            checkout: Some(PaymentCheckoutDeps::Postgres {
-                pool,
-                registry,
-                credentials,
-            }),
-        },
-        options,
-    )
+    build_app_payment_router_with_state(AppPaymentState {
+        store,
+        checkout: Some(PaymentCheckoutDeps::Postgres {
+            pool,
+            registry,
+            credentials,
+        }),
+    })
 }
 
 /// Store-only router without PSP checkout enrichment. Prefer [`app_payment_router_with_sqlite_pool`]
 /// or [`app_payment_router_with_postgres_pool`] in production gateways.
 pub fn build_app_payment_router(store: Arc<dyn CommercePaymentStore>) -> Router {
-    build_app_payment_router_with_options(
-        AppPaymentState {
-            store,
-            checkout: None,
-        },
-        resolve_payment_app_router_mount_options_from_env(),
-    )
+    build_app_payment_router_with_state(AppPaymentState {
+        store,
+        checkout: None,
+    })
 }
 
-pub(crate) fn build_app_payment_router_with_options(
-    state: AppPaymentState,
-    _options: PaymentAppRouterMountOptions,
-) -> Router {
+fn build_app_payment_router_with_state(state: AppPaymentState) -> Router {
     Router::new()
         .route("/app/v3/api/payments/methods", get(list_payment_methods))
         .route("/app/v3/api/payments/records", get(list_payment_records))
@@ -1559,34 +1482,4 @@ fn payment_system_response(
     error: CommerceServiceError,
 ) -> Response {
     map_service_error(context, error)
-}
-
-#[cfg(test)]
-mod mount_options_tests {
-    use super::*;
-
-    #[test]
-    fn resolve_mount_options_from_env() {
-        let previous = std::env::var(FEDERATED_COMMERCE_ENV).ok();
-
-        // SAFETY: single-threaded unit test with env restore.
-        unsafe {
-            std::env::set_var(FEDERATED_COMMERCE_ENV, "true");
-        }
-        assert!(!resolve_payment_app_router_mount_options_from_env().include_order_payments_list);
-
-        // SAFETY: single-threaded unit test with env restore.
-        unsafe {
-            std::env::remove_var(FEDERATED_COMMERCE_ENV);
-        }
-        assert!(!resolve_payment_app_router_mount_options_from_env().include_order_payments_list);
-
-        // SAFETY: single-threaded unit test with env restore.
-        unsafe {
-            match previous {
-                Some(value) => std::env::set_var(FEDERATED_COMMERCE_ENV, value),
-                None => std::env::remove_var(FEDERATED_COMMERCE_ENV),
-            }
-        }
-    }
 }

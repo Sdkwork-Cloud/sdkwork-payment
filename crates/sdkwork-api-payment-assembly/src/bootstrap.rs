@@ -63,6 +63,28 @@ pub async fn assemble_app_api_contribution(
     )
 }
 
+/// Builds the Payment App API contribution for a host that also composes Order routes.
+pub async fn assemble_federated_app_api_contribution(
+    host: Arc<PaymentServiceHost>,
+) -> Result<ApiAssemblyContribution, String> {
+    let router =
+        sdkwork_routes_payment_app_api::gateway_mount_federated_business(host.clone()).await;
+    ApiAssemblyContribution::from_manifest(
+        "sdkwork-payment",
+        "SDKWork Payment Federated App API",
+        router,
+        sdkwork_routes_payment_app_api::federated_gateway_route_manifest(),
+        Vec::new(),
+        Arc::new(DatabasePoolReadinessCheck::new(
+            host.database_pool().clone(),
+        )),
+    )
+}
+
+pub fn federated_app_route_manifest() -> HttpRouteManifest {
+    sdkwork_routes_payment_app_api::federated_gateway_route_manifest()
+}
+
 pub fn gateway_contract_fallback_config() -> ContractFallbackConfig {
     let app_manifest = sdkwork_routes_payment_app_api::gateway_route_manifest();
     let backend_manifest = sdkwork_routes_payment_backend_api::gateway_route_manifest();

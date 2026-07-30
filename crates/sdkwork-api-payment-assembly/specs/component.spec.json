@@ -42,12 +42,16 @@
       "sdkwork_api_payment_assembly::assemble_api_router_from_env",
       "sdkwork_api_payment_assembly::assemble_app_api_contribution",
       "sdkwork_api_payment_assembly::assemble_app_api_contribution_from_env",
+      "sdkwork_api_payment_assembly::assemble_federated_app_api_contribution",
+      "sdkwork_api_payment_assembly::assemble_federated_app_api_contribution_from_env",
+      "sdkwork_api_payment_assembly::federated_app_route_manifest",
       "sdkwork_api_payment_assembly::assemble_backend_business_router_from_env",
       "sdkwork_api_payment_assembly::ApiAssembly"
     ],
     "runtimeEntrypoints": [
       "sdkwork_api_payment_assembly::assemble_api_router_from_env",
       "sdkwork_api_payment_assembly::assemble_app_api_contribution_from_env",
+      "sdkwork_api_payment_assembly::assemble_federated_app_api_contribution_from_env",
       "sdkwork_api_payment_assembly::assemble_backend_business_router_from_env"
     ],
     "routeManifest": "assembly-manifest.json",

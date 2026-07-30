@@ -7,7 +7,8 @@ mod generated;
 
 pub use bootstrap::{
     assemble_api_router, assemble_app_api_contribution, assemble_backend_business_router,
-    assemble_business_routes, gateway_contract_fallback_config, ApiAssembly,
+    assemble_business_routes, assemble_federated_app_api_contribution,
+    federated_app_route_manifest, gateway_contract_fallback_config, ApiAssembly,
     BusinessRouterAssembly,
 };
 
@@ -21,6 +22,12 @@ pub async fn assemble_app_api_contribution_from_env() -> Result<ApiAssembly, Str
     let host =
         std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);
     assemble_app_api_contribution(host).await
+}
+
+pub async fn assemble_federated_app_api_contribution_from_env() -> Result<ApiAssembly, String> {
+    let host =
+        std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);
+    assemble_federated_app_api_contribution(host).await
 }
 
 pub async fn assemble_business_routes_from_env() -> Result<BusinessRouterAssembly, String> {

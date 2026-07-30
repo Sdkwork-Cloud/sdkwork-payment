@@ -10,6 +10,15 @@ use crate::{
 };
 
 pub fn build_payment_app_router(host: Arc<PaymentServiceHost>) -> Router {
+    build_payment_active_app_router(host).merge(payment_webhook_router_deprecated())
+}
+
+/// Builds the Payment routes safe to compose with the Order App API on one listener.
+pub fn build_payment_federated_app_router(host: Arc<PaymentServiceHost>) -> Router {
+    build_payment_active_app_router(host)
+}
+
+fn build_payment_active_app_router(host: Arc<PaymentServiceHost>) -> Router {
     let credentials = ProviderCredentialBundle::from_env();
     let registry = Arc::new(PaymentProviderRegistry::from_credentials(
         credentials.clone(),
@@ -35,7 +44,6 @@ pub fn build_payment_app_router(host: Arc<PaymentServiceHost>) -> Router {
             registry,
             credentials,
         ))
-        .merge(payment_webhook_router_deprecated())
 }
 
 pub async fn build_payment_app_router_with_framework(host: Arc<PaymentServiceHost>) -> Router {

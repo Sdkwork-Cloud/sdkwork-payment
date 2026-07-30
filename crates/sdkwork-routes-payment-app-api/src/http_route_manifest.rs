@@ -6,6 +6,7 @@ use sdkwork_web_core::{HttpMethod, HttpRoute, HttpRouteManifest};
 
 /// Canonical app-api prefix.
 pub const APP_API_PREFIX: &str = "/app/v3/api";
+const DEPRECATED_WEBHOOK_OPERATION_ID: &str = "payments.webhooks.receiveDeprecated";
 
 /// Infrastructure paths are public; payment business routes remain protected.
 pub fn payment_app_api_public_path_prefixes() -> Vec<String> {
@@ -113,7 +114,7 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     .with_idempotent(true),
     HttpRoute::public(
         HttpMethod::Post,
-        // Deprecated 410 shim 鈥?live PSP webhooks: order POST /orders/payments/webhooks/{providerCode}
+        // Deprecated 410 shim. Live PSP webhooks are owned by the Order App API.
         "/app/v3/api/payments/webhooks/{providerCode}",
         "commerce",
         "payments.webhooks.receiveDeprecated",
@@ -143,6 +144,17 @@ const HTTP_ROUTES: &[HttpRoute] = &[
 /// Build the payment app-api route manifest.
 pub fn app_route_manifest() -> HttpRouteManifest {
     HttpRouteManifest::new(HTTP_ROUTES)
+}
+
+/// Build the active Payment manifest for a host that also composes Order routes.
+pub fn federated_app_route_manifest() -> HttpRouteManifest {
+    HttpRouteManifest::from_owned_routes(
+        HTTP_ROUTES
+            .iter()
+            .copied()
+            .filter(|route| route.operation_id != DEPRECATED_WEBHOOK_OPERATION_ID)
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -186,6 +198,19 @@ mod tests {
                 APP_API_PREFIX,
             );
         }
+    }
+
+    #[test]
+    fn federated_manifest_excludes_the_standalone_deprecation_shim() {
+        let manifest = federated_app_route_manifest();
+        assert!(manifest
+            .routes()
+            .iter()
+            .all(|route| route.operation_id != DEPRECATED_WEBHOOK_OPERATION_ID));
+        assert_eq!(
+            app_route_manifest().routes().len() - 1,
+            manifest.routes().len()
+        );
     }
 
     #[test]

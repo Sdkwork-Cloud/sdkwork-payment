@@ -22,7 +22,16 @@
     "apiAuthority": "apis/app-api/payment/sdkwork-payment-app-api.openapi.yaml",
     "apiPrefix": "/app/v3/api",
     "routeManifest": "sdks/_route-manifests/app-api/sdkwork-routes-payment-app-api.route-manifest.json",
-    "runtimeEntrypoints": ["sdkwork_routes_payment_app_api::gateway_mount_business"],
+    "publicExports": [
+      "sdkwork_routes_payment_app_api::gateway_mount_business",
+      "sdkwork_routes_payment_app_api::gateway_mount_federated_business",
+      "sdkwork_routes_payment_app_api::gateway_route_manifest",
+      "sdkwork_routes_payment_app_api::federated_gateway_route_manifest"
+    ],
+    "runtimeEntrypoints": [
+      "sdkwork_routes_payment_app_api::gateway_mount_business",
+      "sdkwork_routes_payment_app_api::gateway_mount_federated_business"
+    ],
     "requestContext": "WebRequestContext",
     "authMode": "dual-token",
     "wireProtocol": "sdkwork-v3"
