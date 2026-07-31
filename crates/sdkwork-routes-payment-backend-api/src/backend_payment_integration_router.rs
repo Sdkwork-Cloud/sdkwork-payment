@@ -1722,6 +1722,7 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_integration_store_persists_and_isolates_admin_resources() {
+        crate::ensure_test_payment_credential_cipher();
         let pool = SqlitePool::connect("sqlite::memory:")
             .await
             .expect("sqlite pool");

@@ -1,7 +1,7 @@
 use sdkwork_utils_rust::{aes_gcm_decrypt, aes_gcm_encrypt, derive_aes_256_key, sha256_hash};
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 pub const PAYMENT_CREDENTIAL_ALGORITHM: &str = "aes256gcm-hkdf-v1";
@@ -45,13 +45,10 @@ pub struct LocalFilePaymentCredentialCipher {
 }
 
 impl LocalFilePaymentCredentialCipher {
-    pub fn load_or_create_default() -> Result<Self, String> {
-        let path = std::env::current_dir()
-            .map_err(|_| "payment credential key storage is unavailable".to_owned())?
-            .join(".runtime")
-            .join("payment")
-            .join("credential-master.key");
-        Self::load_or_create(path)
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
+        let master_key = fs::read(path)
+            .map_err(|_| "payment credential key storage is unavailable".to_owned())?;
+        Self::from_key_material(master_key)
     }
 
     pub fn load_or_create(path: impl AsRef<Path>) -> Result<Self, String> {
@@ -78,14 +75,6 @@ impl LocalFilePaymentCredentialCipher {
             master_key: Arc::new(master_key),
             key_id,
         })
-    }
-
-    pub fn key_path() -> Result<PathBuf, String> {
-        Ok(std::env::current_dir()
-            .map_err(|_| "payment credential key storage is unavailable".to_owned())?
-            .join(".runtime")
-            .join("payment")
-            .join("credential-master.key"))
     }
 
     fn derived_key(&self, scope: &CredentialCipherScope<'_>) -> [u8; 32] {
@@ -142,14 +131,15 @@ pub fn install_payment_credential_cipher(
         .map_err(|_| "payment credential cipher is already initialized".to_owned())
 }
 
+pub fn payment_credential_cipher_is_installed() -> bool {
+    PAYMENT_CREDENTIAL_CIPHER.get().is_some()
+}
+
 pub fn payment_credential_cipher() -> Result<Arc<dyn PaymentCredentialCipher>, String> {
-    if let Some(cipher) = PAYMENT_CREDENTIAL_CIPHER.get() {
-        return Ok(cipher.clone());
-    }
-    let cipher: Arc<dyn PaymentCredentialCipher> =
-        Arc::new(LocalFilePaymentCredentialCipher::load_or_create_default()?);
-    let _ = PAYMENT_CREDENTIAL_CIPHER.set(cipher.clone());
-    Ok(PAYMENT_CREDENTIAL_CIPHER.get().cloned().unwrap_or(cipher))
+    PAYMENT_CREDENTIAL_CIPHER
+        .get()
+        .cloned()
+        .ok_or_else(|| "payment credential cipher is not initialized by the host".to_owned())
 }
 
 fn create_master_key(path: &Path) -> Result<Vec<u8>, String> {

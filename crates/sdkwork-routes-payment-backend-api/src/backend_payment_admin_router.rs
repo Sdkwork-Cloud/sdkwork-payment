@@ -3064,6 +3064,7 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_provider_account_upsert_preserves_commercial_configuration() {
+        crate::ensure_test_payment_credential_cipher();
         let pool = SqlitePool::connect("sqlite::memory:")
             .await
             .expect("sqlite pool");

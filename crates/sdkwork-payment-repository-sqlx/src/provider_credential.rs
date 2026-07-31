@@ -311,9 +311,17 @@ fn credential_error(_error: impl std::fmt::Display) -> CommerceServiceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sdkwork_payment_providers::{
+        install_payment_credential_cipher, LocalFilePaymentCredentialCipher,
+    };
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn sqlite_rotation_persists_ciphertext_and_supersedes_previous_value() {
+        let _ = install_payment_credential_cipher(Arc::new(
+            LocalFilePaymentCredentialCipher::from_key_material(vec![9; 64])
+                .expect("test credential cipher"),
+        ));
         let pool = SqlitePool::connect("sqlite::memory:").await.expect("pool");
         sqlx::query("CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, secret_ref TEXT NOT NULL, webhook_secret_ref TEXT, certificate_ref TEXT, version INTEGER NOT NULL DEFAULT 0, updated_at TEXT, deleted_at TEXT)")
             .execute(&pool).await.expect("account table");

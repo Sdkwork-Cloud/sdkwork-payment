@@ -20,9 +20,9 @@ pub use adapter::{
 pub use adapter::{PaymentNormalizeWebhookRequest, PaymentVerifyWebhookRequest};
 pub use checkout::{enrich_pay_owner_order_outcome, CheckoutContext};
 pub use credential_cipher::{
-    install_payment_credential_cipher, payment_credential_cipher, CredentialCipherScope,
-    EncryptedPaymentCredential, LocalFilePaymentCredentialCipher, PaymentCredentialCipher,
-    PAYMENT_CREDENTIAL_ALGORITHM,
+    install_payment_credential_cipher, payment_credential_cipher,
+    payment_credential_cipher_is_installed, CredentialCipherScope, EncryptedPaymentCredential,
+    LocalFilePaymentCredentialCipher, PaymentCredentialCipher, PAYMENT_CREDENTIAL_ALGORITHM,
 };
 pub use credentials::{
     build_order_payment_webhook_url, resolve_secret_ref, EnvPaymentCredentialResolver,

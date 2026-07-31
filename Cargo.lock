@@ -1808,8 +1808,6 @@ dependencies = [
  "sdkwork-database-lifecycle",
  "sdkwork-database-spi",
  "sdkwork-database-sqlx",
- "sqlx",
- "tokio",
 ]
 
 [[package]]
@@ -1866,6 +1864,9 @@ dependencies = [
  "sdkwork-database-spi",
  "sdkwork-database-sqlx",
  "sdkwork-payment-database-host",
+ "sdkwork-payment-providers",
+ "sdkwork-web-bootstrap",
+ "sdkwork-web-core",
 ]
 
 [[package]]

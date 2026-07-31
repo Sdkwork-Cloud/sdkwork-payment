@@ -21,7 +21,7 @@ problem: Payment execution has strong provider, channel, webhook, refund, and re
 - Changing public HTTP paths, generated SDKs, or response envelopes.
 - Adding or modifying a database migration in this requirement.
 - Moving order lifecycle, recharge packages, or the account ledger into payment.
-- Replacing local credential encryption with a production KMS in this change.
+- Implementing a concrete production KMS provider; the host injection boundary remains provider-neutral.
 - Completing the route/repository extraction or payment-method contract migration without human review.
 
 ## Acceptance Criteria
@@ -33,6 +33,7 @@ problem: Payment execution has strong provider, channel, webhook, refund, and re
 - Stripe and WeChat Pay signatures outside a 300-second clock-skew window fail verification.
 - Exact webhook event deduplication, state-transition validation, and historical account routing remain unchanged.
 - Root workspace membership is deterministic and contains no duplicate crate entry.
+- Production-like Payment bootstrap requires a preinstalled cipher or an existing protected master-key file; development/test keys use the canonical user-private secrets directory and never a source checkout.
 - Public contracts and generated SDK output remain unchanged.
 
 ## Non-Functional Requirements
@@ -48,6 +49,7 @@ problem: Payment execution has strong provider, channel, webhook, refund, and re
 - persistence
 - provider adapters
 - architecture
+- runtime configuration
 
 ## Trace
 
@@ -73,6 +75,7 @@ problem: Payment execution has strong provider, channel, webhook, refund, and re
 - `cargo test -p sdkwork-payment-providers`
 - `cargo test -p sdkwork-payment-repository-sqlx`
 - `cargo test -p sdkwork-payment-service`
+- `cargo test -p sdkwork-payment-service-host`
 - `cargo fmt --all -- --check`
 - `node ../sdkwork-specs/tools/check-application-layering.mjs --root .`
 - `node ../sdkwork-specs/tools/check-rust-backend-composition.mjs --root .`
@@ -81,5 +84,5 @@ problem: Payment execution has strong provider, channel, webhook, refund, and re
 
 - Approve the proposed payment-method family/product contract before a public API or data migration.
 - Approve a partial unique active-provider-account database constraint and rollout plan before migration.
-- Approve production KMS requirements and fail-closed startup policy before changing credential runtime behavior.
+- Approve any concrete production KMS provider, key-rotation protocol, and multi-replica rollout before changing the provider-neutral cipher boundary.
 - Approve extraction of SQL and provider orchestration from route crates before broad module movement.

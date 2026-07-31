@@ -33,6 +33,12 @@ pub fn build_payment_backend_router(host: Arc<PaymentServiceHost>) -> Router {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::backend_payment_integration_router::backend_payment_integration_router_with_sqlite_pool;
+    use crate::{
+        backend_payment_admin_router_with_sqlite_pool,
+        backend_payment_intent_router_with_sqlite_pool,
+        backend_payment_refund_router_with_sqlite_pool,
+    };
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
     use sdkwork_web_core::HttpMethod;

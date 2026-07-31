@@ -116,7 +116,7 @@ List/search endpoints push `page` / `page_size` to SQL `LIMIT`/`OFFSET` with `CO
 
 ## Data stores
 
-DDL baselines: `tests/fixtures/database/sqlite/ddl/baseline/` and `database/ddl/baseline/postgres/` — structurally aligned; PostgreSQL uses `NUMERIC`/`TIMESTAMPTZ`/`JSONB`.
+The authoritative Payment database has one DDL baseline at `database/ddl/baseline/postgres/`. The manifest declares `databaseRole: authoritative-server` and `engines: [postgres]`; SQLite fixtures and lifecycle runs are not release or compatibility evidence for this service boundary.
 
 ## Production hardening
 
@@ -152,7 +152,7 @@ Backend admin upserts (methods, provider accounts, channels, route rules) and re
 
 WeChat product routing uses `paymentMethod` as the upstream V3 product key. `wechat_jsapi` requires `payerOpenId`; `wechat_h5` requires `clientIp`; Native and App do not require those payer fields. `paymentScene` remains a client/channel scene selector and is not substituted for the provider product key.
 
-Credential envelopes use `PaymentCredentialCipher` with AES-256-GCM and an HKDF context bound to tenant, provider account, and credential kind. The standalone host creates its wrapping key once at `.runtime/payment/credential-master.key`, which is excluded from source control; federated production hosts may install a KMS-backed implementation through `install_payment_credential_cipher`. The wrapping key is never stored in the payment database. Back up or centrally manage that key before running multiple replicas, because losing it makes stored credentials intentionally undecryptable.
+Credential envelopes use `PaymentCredentialCipher` with AES-256-GCM and an HKDF context bound to tenant, provider account, and credential kind. Filesystem discovery belongs to `PaymentServiceHost`, not the provider library. Development and test hosts create the local wrapping key once at `~/.sdkwork/commerce/secrets/payment-credential-master.key`; `SDKWORK_PAYMENT_CREDENTIAL_MASTER_KEY_FILE` may select another absolute path outside every source checkout. Production-like hosts never create an implicit local key: they must either point that variable at an existing protected shared secret file (for example `/etc/sdkwork/commerce/payment-credential-master.secret`) or install a KMS-backed implementation through `install_payment_credential_cipher` before Payment bootstrap. The wrapping key is never stored in the payment database. Back up or centrally manage it before running multiple replicas, because losing it makes stored credentials intentionally undecryptable.
 
 - CORS: `PAYMENT_API_CORS_ORIGINS` whitelist (no `*`)
 - Graceful shutdown, 30s request timeout, 1 MiB body limit

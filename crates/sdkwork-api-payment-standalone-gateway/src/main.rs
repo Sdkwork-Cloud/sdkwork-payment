@@ -20,6 +20,7 @@ async fn main() {
     let host = Arc::new(PaymentServiceHost::new().await);
     let business = assemble_api_router(host)
         .await
+        .expect("payment API assembly failed")
         .router
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MiB，支付请求体不会超过
         .layer(TimeoutLayer::new(Duration::from_secs(30))) // 30s 超时，防止慢 SQL 拖垮线程池

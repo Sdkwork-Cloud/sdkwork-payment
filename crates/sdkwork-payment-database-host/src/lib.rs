@@ -86,17 +86,7 @@ async fn bootstrap_payment_database(pool: DatabasePool) -> Result<PaymentDatabas
 #[cfg(test)]
 mod tests {
     use super::database_module;
-    use sdkwork_database_config::{DatabaseConfig, DatabaseEngine};
-    use sdkwork_database_lifecycle::RegistryLifecycleOrchestrator;
-    use sdkwork_database_spi::{DatabaseAssetProvider, DatabaseModuleRegistry};
-    use sdkwork_database_sqlx::{create_pool_from_config, DatabasePool};
-
-    fn restore_env(key: &str, previous: Option<String>) {
-        match previous {
-            Some(value) => std::env::set_var(key, value),
-            None => std::env::remove_var(key),
-        }
-    }
+    use sdkwork_database_spi::DatabaseAssetProvider;
 
     #[test]
     fn database_module_exposes_payment_owned_assets_for_federated_hosts() {
@@ -104,87 +94,5 @@ mod tests {
 
         assert_eq!(module.manifest().module_id, "payment");
         assert!(module.seeds_dir().join("seed.manifest.json").is_file());
-    }
-
-    #[tokio::test]
-    async fn registry_bootstrap_applies_payment_test_profile_on_shared_pool() {
-        let database_path = std::env::temp_dir().join(format!(
-            "sdkwork-payment-registry-{}.sqlite",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&database_path);
-        let seed_on_boot_key = "SDKWORK_DATABASE_SEED_ON_BOOT";
-        let seed_profile_key = "SDKWORK_DATABASE_SEED_PROFILE";
-        let previous_seed_on_boot = std::env::var(seed_on_boot_key).ok();
-        let previous_seed_profile = std::env::var(seed_profile_key).ok();
-        std::env::set_var(seed_on_boot_key, "true");
-        std::env::set_var(seed_profile_key, "test");
-
-        let result = async {
-            let pool = create_pool_from_config(DatabaseConfig {
-                engine: DatabaseEngine::Sqlite,
-                url: format!("sqlite:{}", database_path.display()),
-                ..DatabaseConfig::default()
-            })
-            .await
-            .expect("shared sqlite pool");
-            let registry = DatabaseModuleRegistry::builder()
-                .register(database_module().expect("payment database module"))
-                .expect("register payment database module")
-                .build();
-            let results = RegistryLifecycleOrchestrator::new(pool.clone(), registry)
-                .with_applied_by("payment-database-host-test")
-                .bootstrap_all_from_env()
-                .await
-                .expect("bootstrap payment module through registry");
-
-            assert_eq!(results, vec![("payment".to_owned(), 2, 5)]);
-            let DatabasePool::Sqlite(sqlite_pool, _) = &pool else {
-                panic!("expected sqlite pool");
-            };
-            let method_count = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM commerce_payment_method WHERE status = 'active'",
-            )
-            .fetch_one(sqlite_pool)
-            .await
-            .expect("active payment method count");
-            assert_eq!(method_count, 16);
-
-            let recharge_channel_count = sqlx::query_scalar::<_, i64>(
-                r#"
-                SELECT COUNT(*)
-                FROM commerce_payment_method m
-                INNER JOIN commerce_payment_channel c
-                    ON c.tenant_id = m.tenant_id
-                   AND c.method_id = m.id
-                INNER JOIN commerce_payment_provider_account a
-                    ON a.id = c.provider_account_id
-                   AND a.tenant_id = c.tenant_id
-                WHERE m.tenant_id = '100001'
-                  AND m.organization_id IN ('100002', '0')
-                  AND m.method_key = 'wechat_pay'
-                  AND m.status = 'active'
-                  AND m.deleted_at IS NULL
-                  AND c.organization_id IN ('100002', '0')
-                  AND c.currency_code = 'CNY'
-                  AND c.status = 'active'
-                  AND c.deleted_at IS NULL
-                  AND a.organization_id IN ('100002', '0')
-                  AND a.status = 'active'
-                  AND a.deleted_at IS NULL
-                "#,
-            )
-            .fetch_one(sqlite_pool)
-            .await
-            .expect("eligible recharge checkout channel count");
-            assert_eq!(recharge_channel_count, 1);
-            sqlite_pool.close().await;
-        }
-        .await;
-
-        restore_env(seed_on_boot_key, previous_seed_on_boot);
-        restore_env(seed_profile_key, previous_seed_profile);
-        let _ = std::fs::remove_file(&database_path);
-        result
     }
 }

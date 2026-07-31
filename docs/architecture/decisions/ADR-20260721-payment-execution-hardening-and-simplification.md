@@ -1,10 +1,10 @@
 # ADR-20260721 Payment Execution Hardening And Simplification
 
-Status: proposed
+Status: accepted
 Requirement: REQ-2026-0002
 Owner: SDKWork payment maintainers
 Date: 2026-07-21
-Specs: ARCHITECTURE_DECISION_SPEC.md, APPLICATION_LAYERED_ARCHITECTURE_SPEC.md, DATABASE_SPEC.md, SECURITY_SPEC.md, INTEGRATION_SPEC.md
+Specs: ARCHITECTURE_DECISION_SPEC.md, APPLICATION_LAYERED_ARCHITECTURE_SPEC.md, DATABASE_SPEC.md, SECURITY_SPEC.md, INTEGRATION_SPEC.md, RUNTIME_DIRECTORY_SPEC.md
 
 ## Context
 
@@ -27,7 +27,7 @@ The repository has nine Rust crates and about thirty thousand lines of authored 
 5. Require refunds to resolve their original succeeded payment attempt from tenant, organization, owner, order, and currency evidence.
 6. Preserve generic checkout method compatibility for current callers. A future reviewed contract will separate a customer-facing payment method family from the provider product/scene selected by routing; seeds are compatibility data, not the permanent naming model.
 7. Simplify implementation in phases by moving SQL stores and provider orchestration out of route crates into repository/service modules. Do not collapse provider, persistence, route, assembly, or gateway boundaries merely to reduce crate count.
-8. Defer database uniqueness migration and KMS startup policy to separately reviewed migration/security work.
+8. Defer the database uniqueness migration to separately reviewed migration work. Production-like Payment bootstrap must fail closed unless the host installs a shared cipher implementation or configures an existing protected master-key file. Only development and test may create a local key, under the canonical user-private SDKWork secrets directory.
 
 ## Alternatives
 
@@ -43,7 +43,7 @@ The repository has nine Rust crates and about thirty thousand lines of authored 
 - Some previously accepted stale webhook deliveries or mismatched idempotency replays now fail closed.
 - SQLite and PostgreSQL repositories need explicit parity tests.
 - The route crates remain larger than the target architecture until the phased extraction is reviewed and completed.
-- Production multi-replica credential encryption still requires an explicitly installed shared key provider or KMS implementation.
+- Production multi-replica credential encryption requires an explicitly installed shared key provider, KMS implementation, or protected shared key file; repository-local key storage is rejected.
 
 ## Verification
 
@@ -51,6 +51,8 @@ The repository has nine Rust crates and about thirty thousand lines of authored 
 - Repository integration tests cover replay conflicts, owner scope, and exact refund-attempt binding.
 - Layering and Rust composition validators identify remaining route-to-SQL debt.
 - API and SDK checks prove no public contract drift.
+- Service-host tests prove production rejects implicit keys and development resolves only the canonical user-private path.
+- Workspace layout validation proves no source root contains or produces `.runtime/`.
 
 ## Supersedes / Superseded By
 
