@@ -8,8 +8,10 @@ import {
   type TabsTriggerProps,
 } from "@sdkwork/ui-pc-react";
 
-export interface PaymentAdminWorkspaceProps
-  extends Omit<React.HTMLAttributes<HTMLElement>, "title"> {
+export interface PaymentAdminWorkspaceProps {
+  children?: React.ReactNode;
+  className?: string;
+  "data-slot"?: string;
   description?: React.ReactNode;
   error?: React.ReactNode;
   title: React.ReactNode;
@@ -19,17 +21,22 @@ export interface PaymentAdminWorkspaceProps
 export function PaymentAdminWorkspace({
   children,
   className,
+  "data-slot": dataSlot,
   description,
   error,
   title,
-  ...props
 }: PaymentAdminWorkspaceProps) {
   const titleId = React.useId();
   const descriptionId = React.useId();
   const classes = ["min-w-0 space-y-4", className].filter(Boolean).join(" ");
 
   return (
-    <section aria-describedby={description ? descriptionId : undefined} aria-labelledby={titleId} className={classes} {...props}>
+    <section
+      aria-describedby={description ? descriptionId : undefined}
+      aria-labelledby={titleId}
+      className={classes}
+      data-slot={dataSlot}
+    >
       <span className="sr-only" id={titleId}>{title}</span>
       {description ? <span className="sr-only" id={descriptionId}>{description}</span> : null}
 

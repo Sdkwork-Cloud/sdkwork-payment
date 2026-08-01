@@ -42,8 +42,6 @@ import type {
   PaymentProviderAdminController,
   PaymentProviderAdminState,
   PaymentProviderAccountView,
-  PaymentSubMerchantDraft,
-  PaymentSubMerchantUpdateDraft,
 } from "../types/provider-admin-types";
 
 export interface PaymentProviderAdminWorkspaceProps {
@@ -99,7 +97,7 @@ export function PaymentProviderAdminWorkspace(
     [state.providerAccounts],
   );
 
-  const selectedPartnerAccount = state.selectedProviderAccount
+  const selectedPartnerAccount = state.selectedProviderAccount?.accountMode === "partner"
     ? state.selectedProviderAccount
     : partnerAccounts[0];
 
@@ -162,11 +160,23 @@ export function PaymentProviderAdminWorkspace(
   function handleSelect(account: PaymentProviderAccountView) {
     controller.selectProviderAccount(account.id);
     if (account.accountMode === "partner") {
-      void controller.loadMoreSubMerchants(account.id);
+      loadSubMerchants(account.id);
       if (!props.section) {
         setTab("submerchants");
       }
     }
+  }
+
+  function loadProviderAccounts() {
+    void controller.loadMoreProviderAccounts().catch(() => {
+      // The controller exposes the failure through state.lastError.
+    });
+  }
+
+  function loadSubMerchants(providerAccountId?: string) {
+    void controller.loadMoreSubMerchants(providerAccountId).catch(() => {
+      // The controller exposes the failure through state.lastError.
+    });
   }
 
   return (
@@ -229,7 +239,7 @@ export function PaymentProviderAdminWorkspace(
               onEdit={(account) => setDialog({ kind: "edit", account })}
               onTest={(account) => setDialog({ kind: "test", account })}
               onRotate={(account) => setDialog({ kind: "rotate", account })}
-              onLoadMore={() => void controller.loadMoreProviderAccounts()}
+              onLoadMore={loadProviderAccounts}
               onCreate={() => setDialog({ kind: "create" })}
             />
           </PaymentAdminTabsContent>
@@ -256,7 +266,7 @@ export function PaymentProviderAdminWorkspace(
                       const account = partnerAccounts.find((item) => item.id === nextId);
                       if (account) {
                         controller.selectProviderAccount(account.id);
-                        void controller.loadMoreSubMerchants(account.id);
+                        loadSubMerchants(account.id);
                       }
                     }}
                   >
@@ -279,9 +289,7 @@ export function PaymentProviderAdminWorkspace(
                 onCreate={(draft) => void controller.createSubMerchant(draft)}
                 onUpdate={(id, draft) => void controller.updateSubMerchant(id, draft)}
                 onDelete={(id) => void controller.deleteSubMerchant(id)}
-                onLoadMore={() =>
-                  void controller.loadMoreSubMerchants(selectedPartnerAccount?.id)
-                }
+                onLoadMore={() => loadSubMerchants(selectedPartnerAccount?.id)}
               />
             </div>
           </PaymentAdminTabsContent>
@@ -332,7 +340,7 @@ export function PaymentProviderAdminWorkspace(
           {dialog.kind === "test" ? (
             <div className="space-y-3">
               <p className="text-sm text-[var(--sdk-color-text-secondary)]">
-                Validate the saved credential references and provider adapter for{" "}
+                Validate the saved credentials and provider adapter for{" "}
                 <strong>{dialog.account.accountNo}</strong> ({dialog.account.providerCode} /{" "}
                 {dialog.account.environment}). The result updates the provider account's
                 <code className="mx-1 rounded bg-[var(--sdk-color-bg-subtle)] px-1 text-xs">

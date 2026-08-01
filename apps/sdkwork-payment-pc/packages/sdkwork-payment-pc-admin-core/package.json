@@ -57,7 +57,7 @@
     "react-dom": { "optional": true }
   },
   "devDependencies": {
-    "typescript": "^6.0.2"
+    "typescript": "catalog:"
   },
   "sdkwork": {
     "architecture": "pc-admin",

@@ -15,9 +15,11 @@
 import {
   createSdkWorkPagedListSession,
   extractSdkWorkResourceItem,
+  type SdkWorkPageInfo,
   type SdkWorkPagedListSession,
 } from "@sdkwork/payment-contracts";
 import type { SdkworkPaymentBackendService } from "@sdkwork/payment-service";
+import { uuid } from "@sdkwork/utils";
 import {
   asRecord,
   asRequiredString,
@@ -26,18 +28,12 @@ import {
 } from "@sdkwork/payment-pc-admin-core";
 import type {
   CreatePaymentProviderAdminControllerInput,
-  PaymentProviderAccountDraft,
-  PaymentProviderAccountTestOptions,
   PaymentProviderAccountTestResult,
-  PaymentProviderAccountUpdateDraft,
   PaymentProviderAccountView,
   PaymentProviderAdminController,
   PaymentProviderAdminState,
   PaymentProviderAdminStatus,
-  PaymentSubMerchantDraft,
-  PaymentSubMerchantUpdateDraft,
   PaymentSubMerchantView,
-  PaymentCredentialRotateDraft,
 } from "../types/provider-admin-types";
 
 type Snapshot = Pick<PaymentProviderAdminState, "providerAccounts" | "subMerchants">;
@@ -173,11 +169,19 @@ function createSessions(service: SdkworkPaymentBackendService): ProviderAdminSes
   };
 }
 
-function snapshotFromSessions(sessions: ProviderAdminSessions): Snapshot {
-  return {
-    providerAccounts: [...sessions.providerAccounts.getItems()],
-    subMerchants: [...sessions.subMerchants.getItems()],
-  };
+function pageInfoFromSessions(
+  sessions: ProviderAdminSessions,
+): Partial<Record<keyof Snapshot, SdkWorkPageInfo>> {
+  const pageInfo: Partial<Record<keyof Snapshot, SdkWorkPageInfo>> = {};
+  const providerAccounts = sessions.providerAccounts.getPageInfo();
+  const subMerchants = sessions.subMerchants.getPageInfo();
+  if (providerAccounts) {
+    pageInfo.providerAccounts = providerAccounts;
+  }
+  if (subMerchants) {
+    pageInfo.subMerchants = subMerchants;
+  }
+  return pageInfo;
 }
 
 export function createPaymentProviderAdminController(
@@ -201,16 +205,29 @@ export function createPaymentProviderAdminController(
       providerAccounts: [...sessions.providerAccounts.getItems()],
       subMerchants: [...sessions.subMerchants.getItems()],
     };
+    const selectedProviderAccount = Object.prototype.hasOwnProperty.call(patch, "selectedProviderAccount")
+      ? patch.selectedProviderAccount
+      : state.selectedProviderAccount
+        ? nextSnapshot.providerAccounts.find((account) => account.id === state.selectedProviderAccount?.id)
+        : undefined;
+    const selectedSubMerchant = Object.prototype.hasOwnProperty.call(patch, "selectedSubMerchant")
+      ? patch.selectedSubMerchant
+      : state.selectedSubMerchant
+        ? nextSnapshot.subMerchants.find((merchant) => merchant.id === state.selectedSubMerchant?.id)
+        : undefined;
     state = {
       ...state,
       ...patch,
       ...cloneSnapshot(nextSnapshot),
+      listPageInfo: pageInfoFromSessions(sessions),
+      selectedProviderAccount,
+      selectedSubMerchant,
     };
     emit();
   }
 
   function setStatus(status: PaymentProviderAdminStatus, lastError?: string): void {
-    state = { ...state, status, ...(lastError === undefined ? {} : { lastError }) };
+    state = { ...state, status, lastError };
     emit();
   }
 
@@ -226,7 +243,11 @@ export function createPaymentProviderAdminController(
         await sessions.providerAccounts.list();
       }
       if (options.reload === "subMerchants" || options.reload === "both") {
-        await sessions.subMerchants.list();
+        await sessions.subMerchants.list(
+          sessions.subMerchantsProviderAccountId
+            ? { providerAccountId: sessions.subMerchantsProviderAccountId }
+            : undefined,
+        );
       }
       setState({ status: "ready", lastError: undefined });
       return result;
@@ -249,47 +270,78 @@ export function createPaymentProviderAdminController(
     },
 
     async load() {
-      setStatus("loading", undefined);
       sessions.providerAccounts.reset();
       sessions.subMerchants.reset();
       sessions.subMerchantsProviderAccountId = undefined;
+      setState({
+        status: "loading",
+        lastError: undefined,
+        selectedProviderAccount: undefined,
+        selectedSubMerchant: undefined,
+      });
       try {
-        await Promise.all([
-          sessions.providerAccounts.list(),
-          sessions.subMerchants.list(),
-        ]);
+        await sessions.providerAccounts.list();
+        const firstPartnerAccount = sessions.providerAccounts
+          .getItems()
+          .find((account) => account.accountMode === "partner");
+        if (firstPartnerAccount) {
+          sessions.subMerchantsProviderAccountId = firstPartnerAccount.id;
+          await sessions.subMerchants.list({ providerAccountId: firstPartnerAccount.id });
+        }
         setState({
           status: "ready",
           lastError: undefined,
-          selectedProviderAccount: undefined,
+          selectedProviderAccount: firstPartnerAccount,
           selectedSubMerchant: undefined,
         });
         return state;
       } catch (error) {
-        setStatus("error", error instanceof Error ? error.message : "Failed to load provider admin data.");
+        setState({
+          status: "error",
+          lastError: error instanceof Error ? error.message : "Failed to load provider admin data.",
+        });
         throw error;
       }
     },
 
     async loadMoreProviderAccounts() {
+      setStatus("loading", undefined);
       try {
-        return await sessions.providerAccounts.loadMore();
-      } finally {
-        setState({});
+        const items = await sessions.providerAccounts.loadMore();
+        setState({ status: "ready", lastError: undefined });
+        return items;
+      } catch (error) {
+        setState({
+          status: "error",
+          lastError: error instanceof Error ? error.message : "Failed to load more provider accounts.",
+        });
+        throw error;
       }
     },
 
     async loadMoreSubMerchants(providerAccountId) {
-      if (providerAccountId && sessions.subMerchantsProviderAccountId !== providerAccountId) {
-        sessions.subMerchants.reset();
-        sessions.subMerchantsProviderAccountId = providerAccountId;
-        return sessions.subMerchants.list({ providerAccountId });
+      setStatus("loading", undefined);
+      try {
+        if (providerAccountId && sessions.subMerchantsProviderAccountId !== providerAccountId) {
+          sessions.subMerchants.reset();
+          sessions.subMerchantsProviderAccountId = providerAccountId;
+          setState({ selectedSubMerchant: undefined });
+          const items = await sessions.subMerchants.list({ providerAccountId });
+          setState({ status: "ready", lastError: undefined });
+          return items;
+        }
+        const items = await sessions.subMerchants.loadMore(
+          providerAccountId ? { providerAccountId } : undefined,
+        );
+        setState({ status: "ready", lastError: undefined });
+        return items;
+      } catch (error) {
+        setState({
+          status: "error",
+          lastError: error instanceof Error ? error.message : "Failed to load more sub-merchants.",
+        });
+        throw error;
       }
-      const items = await sessions.subMerchants.loadMore(
-        providerAccountId ? { providerAccountId } : undefined,
-      );
-      setState({});
-      return items;
     },
 
     selectProviderAccount(id) {
@@ -313,7 +365,9 @@ export function createPaymentProviderAdminController(
     async createProviderAccount(draft) {
       return wrapMutation(
         async () => {
-          const response = await service.providerAccounts.create(draft);
+          const response = await service.providerAccounts.create(draft, {
+            idempotencyKey: paymentCommandIdempotencyKey("provider-account-create"),
+          });
           const item = extractSdkWorkResourceItem<unknown>(response);
           const mapped = mapProviderAccount(item);
           if (!mapped) {
@@ -329,7 +383,9 @@ export function createPaymentProviderAdminController(
     async updateProviderAccount(id, draft) {
       return wrapMutation(
         async () => {
-          const response = await service.providerAccounts.update(id, draft);
+          const response = await service.providerAccounts.update(id, draft, {
+            idempotencyKey: paymentCommandIdempotencyKey("provider-account-update"),
+          });
           const item = extractSdkWorkResourceItem<unknown>(response);
           const mapped = mapProviderAccount(item);
           if (!mapped) {
@@ -345,7 +401,9 @@ export function createPaymentProviderAdminController(
     async testProviderAccount(id, options) {
       setStatus("testing", undefined);
       try {
-        const response = await service.providerAccounts.test(id, options ?? {});
+        const response = await service.providerAccounts.test(id, options ?? {}, {
+          idempotencyKey: paymentCommandIdempotencyKey("provider-account-test"),
+        });
         const item = extractSdkWorkResourceItem<unknown>(response);
         const mapped = mapTestResult(item);
         if (!mapped) {
@@ -368,7 +426,9 @@ export function createPaymentProviderAdminController(
     async rotateProviderAccountCredentials(id, draft) {
       return wrapMutation(
         async () => {
-          const response = await service.providerAccounts.credentials.rotate(id, draft);
+          const response = await service.providerAccounts.credentials.rotate(id, draft, {
+            idempotencyKey: paymentCommandIdempotencyKey("provider-account-rotate"),
+          });
           const item = extractSdkWorkResourceItem<unknown>(response);
           const mapped = mapProviderAccount(item);
           if (!mapped) {
@@ -388,7 +448,9 @@ export function createPaymentProviderAdminController(
     async createSubMerchant(draft) {
       return wrapMutation(
         async () => {
-          const response = await service.subMerchants.create(draft);
+          const response = await service.subMerchants.create(draft, {
+            idempotencyKey: paymentCommandIdempotencyKey("sub-merchant-create"),
+          });
           const item = extractSdkWorkResourceItem<unknown>(response);
           const mapped = mapSubMerchant(item);
           if (!mapped) {
@@ -404,7 +466,9 @@ export function createPaymentProviderAdminController(
     async updateSubMerchant(id, draft) {
       return wrapMutation(
         async () => {
-          const response = await service.subMerchants.update(id, draft);
+          const response = await service.subMerchants.update(id, draft, {
+            idempotencyKey: paymentCommandIdempotencyKey("sub-merchant-update"),
+          });
           const item = extractSdkWorkResourceItem<unknown>(response);
           const mapped = mapSubMerchant(item);
           if (!mapped) {
@@ -427,4 +491,8 @@ export function createPaymentProviderAdminController(
       );
     },
   };
+}
+
+function paymentCommandIdempotencyKey(prefix: string): string {
+  return `${prefix}-${uuid()}`;
 }

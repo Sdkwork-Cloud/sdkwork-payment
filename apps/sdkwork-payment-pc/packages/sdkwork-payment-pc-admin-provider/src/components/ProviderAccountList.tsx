@@ -3,7 +3,6 @@
  * credential test/rotate action shortcuts. Designed for the admin workspace.
  */
 
-import * as React from "react";
 import { Badge, Button } from "@sdkwork/ui-pc-react";
 import {
   SdkworkPaymentListPaginationControls,

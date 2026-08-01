@@ -109,7 +109,15 @@ export function extractSdkWorkResourceItem<T = unknown>(value: unknown): T | und
   return value as T;
 }
 
-const LIST_QUERY_KEYS = new Set(["page", "page_size", "pageSize", "cursor", "sort", "q"]);
+const LIST_QUERY_KEYS = new Set(["page", "pageSize", "cursor", "sort", "q"]);
+const FORBIDDEN_SDK_LIST_QUERY_KEYS = [
+  "page_size",
+  "limit",
+  "page_no",
+  "pageNo",
+  "per_page",
+  "size",
+] as const;
 
 function readOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -130,7 +138,7 @@ function readOptionalNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-/** Build a standard offset/cursor list query. */
+/** Build language-level SDK list parameters; generated transport owns wire serialization. */
 export function buildSdkWorkListQuery(input?: {
   readonly cursor?: string;
   readonly page?: number;
@@ -144,7 +152,7 @@ export function buildSdkWorkListQuery(input?: {
     query.page = input.page;
   }
   if (input?.pageSize !== undefined) {
-    query.page_size = clampListPageSize(input.pageSize) ?? SDKWORK_DEFAULT_LIST_PAGE_SIZE;
+    query.pageSize = clampListPageSize(input.pageSize) ?? SDKWORK_DEFAULT_LIST_PAGE_SIZE;
   }
   if (useCursor && input?.cursor) {
     query.cursor = input.cursor.trim();
@@ -155,24 +163,30 @@ export function buildSdkWorkListQuery(input?: {
   if (input?.q) {
     query.q = input.q;
   }
-  if (!("page_size" in query)) {
-    query.page_size = SDKWORK_DEFAULT_LIST_PAGE_SIZE;
+  if (!("pageSize" in query)) {
+    query.pageSize = SDKWORK_DEFAULT_LIST_PAGE_SIZE;
   }
   return query;
 }
 
 /**
  * Merge loose controller params with canonical list query defaults.
- * Preserves domain filters (for example `providerCode`) while enforcing `page_size`.
+ * Preserves domain filters (for example `providerCode`) while enforcing the
+ * generated TypeScript SDK's `pageSize` language field. The generated client
+ * serializes it as HTTP `page_size`.
  */
 export function resolveSdkWorkListQuery(
   params?: Record<string, unknown>,
 ): Record<string, string | number> {
+  for (const key of FORBIDDEN_SDK_LIST_QUERY_KEYS) {
+    if (params && key in params) {
+      throw new Error(`${key} is not a valid generated SDK list parameter; use pageSize.`);
+    }
+  }
   const query = buildSdkWorkListQuery({
     page: readOptionalNumber(params?.page),
-    pageSize: clampListPageSize(
-      readOptionalNumber(params?.page_size ?? params?.pageSize),
-    ) ?? SDKWORK_DEFAULT_LIST_PAGE_SIZE,
+    pageSize: clampListPageSize(readOptionalNumber(params?.pageSize))
+      ?? SDKWORK_DEFAULT_LIST_PAGE_SIZE,
     cursor: readOptionalString(params?.cursor),
     q: readOptionalString(params?.q),
     sort: readOptionalString(params?.sort),
@@ -262,45 +276,74 @@ export function createSdkWorkPagedListSession<T>(
   let lastListParams: Record<string, unknown> | undefined;
   let items: readonly T[] = [];
   let listPageInfo: SdkWorkPageInfo | undefined;
+  let requestVersion = 0;
+  let loadMoreInFlight: Promise<readonly T[]> | undefined;
 
-  const applyPage = (params: Record<string, unknown> | undefined, append: boolean): Promise<readonly T[]> => {
-    if (!append) {
-      lastListParams = params ? { ...params } : undefined;
-    }
+  const applyPage = async (
+    params: Record<string, unknown> | undefined,
+    append: boolean,
+    expectedVersion: number,
+  ): Promise<readonly T[]> => {
     const query = resolveSdkWorkListQuery(append ? lastListParams : params);
-    return options.fetchPage(query).then((response) => {
-      const page = extractSdkWorkListPage(response);
-      const mapped = page.items
-        .map(options.mapItem)
-        .filter((item): item is T => item !== undefined);
-      const merged = mergeSdkWorkListPage(append ? items : [], { ...page, items: mapped }, append ? "append" : "replace");
-      items = merged.items;
-      listPageInfo = merged.pageInfo;
+    const response = await options.fetchPage(query);
+    if (expectedVersion !== requestVersion) {
       return items;
-    });
+    }
+    const page = extractSdkWorkListPage(response);
+    const mapped = page.items
+      .map(options.mapItem)
+      .filter((item): item is T => item !== undefined);
+    const merged = mergeSdkWorkListPage(
+      append ? items : [],
+      { ...page, items: mapped },
+      append ? "append" : "replace",
+    );
+    items = merged.items;
+    listPageInfo = merged.pageInfo;
+    return items;
   };
 
   return {
     getItems: () => items,
     getPageInfo: () => (listPageInfo ? { ...listPageInfo } : undefined),
-    list: (params) => applyPage(params, false),
-    loadMore: async (params) => {
+    list: (params) => {
+      const currentVersion = ++requestVersion;
+      loadMoreInFlight = undefined;
+      lastListParams = params ? { ...params } : undefined;
+      return applyPage(lastListParams, false, currentVersion);
+    },
+    loadMore: (params) => {
+      if (loadMoreInFlight) {
+        return loadMoreInFlight;
+      }
       if (params) {
         lastListParams = { ...(lastListParams ?? {}), ...params };
       }
       const nextQuery = buildNextSdkWorkListQuery(lastListParams, listPageInfo);
       if (!nextQuery) {
-        return items;
+        return Promise.resolve(items);
       }
       lastListParams = { ...nextQuery };
-      return applyPage(lastListParams, true);
+      const currentVersion = requestVersion;
+      let pending: Promise<readonly T[]>;
+      pending = applyPage(lastListParams, true, currentVersion).finally(() => {
+        if (loadMoreInFlight === pending) {
+          loadMoreInFlight = undefined;
+        }
+      });
+      loadMoreInFlight = pending;
+      return pending;
     },
     reset: () => {
+      requestVersion += 1;
+      loadMoreInFlight = undefined;
       lastListParams = undefined;
       items = [];
       listPageInfo = undefined;
     },
     setItems: (next) => {
+      requestVersion += 1;
+      loadMoreInFlight = undefined;
       items = [...next];
     },
   };
