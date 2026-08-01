@@ -1479,7 +1479,7 @@ async fn load_resource(
     match pool {
         IntegrationPool::Sqlite(pool) => {
             let sql = format!("SELECT {columns} FROM {table} WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL LIMIT 1");
-            let row = sqlx::query(&sql)
+            let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(id)
                 .bind(&subject.tenant_id)
                 .bind(&subject.organization_id)
@@ -1497,7 +1497,7 @@ async fn load_resource(
                 ResourceKind::Certificate => "id, certificate_no, provider_code, kind, content_ref, fingerprint_sha256, CAST(valid_until AS TEXT) AS valid_until, issuer_cn, subject_cn, status, CAST(metadata AS TEXT) AS metadata, CAST(created_at AS TEXT) AS created_at, CAST(updated_at AS TEXT) AS updated_at",
             };
             let sql = format!("SELECT {columns} FROM {table} WHERE id = CAST($1 AS TEXT) AND tenant_id = CAST($2 AS TEXT) AND organization_id = CAST($3 AS TEXT) AND deleted_at IS NULL LIMIT 1");
-            let row = sqlx::query(&sql)
+            let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(id)
                 .bind(&subject.tenant_id)
                 .bind(&subject.organization_id)
@@ -1551,7 +1551,7 @@ async fn soft_delete_resource(
     let affected = match pool {
         IntegrationPool::Sqlite(pool) => {
             let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ?, version = version + 1 WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL");
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(&now)
                 .bind(&now)
                 .bind(id)
@@ -1564,7 +1564,7 @@ async fn soft_delete_resource(
         }
         IntegrationPool::Postgres(pool) => {
             let sql = format!("UPDATE {table} SET deleted_at = CAST($1 AS TIMESTAMPTZ), updated_at = CAST($1 AS TIMESTAMPTZ), version = version + 1 WHERE id = CAST($2 AS TEXT) AND tenant_id = CAST($3 AS TEXT) AND organization_id = CAST($4 AS TEXT) AND deleted_at IS NULL");
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(&now)
                 .bind(id)
                 .bind(&subject.tenant_id)
@@ -1732,7 +1732,7 @@ mod tests {
             "CREATE TABLE commerce_payment_certificate (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, certificate_no TEXT NOT NULL, provider_code TEXT NOT NULL, kind TEXT NOT NULL, content_ref TEXT NOT NULL, ciphertext TEXT, encryption_key_id TEXT, encryption_algorithm TEXT, fingerprint_sha256 TEXT, valid_until TEXT, issuer_cn TEXT, subject_cn TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
             "CREATE TABLE commerce_payment_webhook_event (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, event_id TEXT NOT NULL, event_type TEXT NOT NULL, provider_code TEXT, payload TEXT NOT NULL, status TEXT NOT NULL, received_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
         ] {
-            sqlx::query(statement)
+            sqlx::query(sqlx::AssertSqlSafe(statement))
                 .execute(&pool)
                 .await
                 .expect("test schema");

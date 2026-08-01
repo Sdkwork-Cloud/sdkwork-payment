@@ -198,7 +198,7 @@ impl PostgresCommerceRefundStore {
             sql.push_str(" ORDER BY r.created_at DESC, r.id DESC LIMIT $5 OFFSET $6");
         }
 
-        let mut db_query = sqlx::query(&sql)
+        let mut db_query = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(query.organization_id.as_deref())

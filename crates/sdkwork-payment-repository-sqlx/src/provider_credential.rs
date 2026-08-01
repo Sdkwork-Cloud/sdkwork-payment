@@ -266,7 +266,7 @@ async fn update_legacy_marker_sqlite(
 ) -> Result<(), CommerceServiceError> {
     let column = credential_marker_column(kind)?;
     let sql = format!("UPDATE commerce_payment_provider_account SET {column} = ?, version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id = CAST(? AS TEXT)");
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(format!("database:{kind}"))
         .bind(account_id)
         .execute(&mut **transaction)
@@ -282,7 +282,7 @@ async fn update_legacy_marker_postgres(
 ) -> Result<(), CommerceServiceError> {
     let column = credential_marker_column(kind)?;
     let sql = format!("UPDATE commerce_payment_provider_account SET {column} = $1, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = CAST($2 AS TEXT)");
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(format!("database:{kind}"))
         .bind(account_id)
         .execute(&mut **transaction)

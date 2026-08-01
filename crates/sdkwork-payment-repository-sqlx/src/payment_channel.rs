@@ -315,7 +315,7 @@ mod tests {
             "CREATE TABLE commerce_payment_channel (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT, method_id TEXT, provider_code TEXT NOT NULL, scene_code TEXT NOT NULL, currency_code TEXT NOT NULL, status TEXT NOT NULL, priority INTEGER NOT NULL, sort_order INTEGER NOT NULL, deleted_at TEXT)",
             "CREATE TABLE commerce_payment_route_rule (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, priority INTEGER NOT NULL, purchase_type TEXT, country_code TEXT, currency_code TEXT, client_platform TEXT, amount_min TEXT, amount_max TEXT, user_segment TEXT, risk_level TEXT, channel_id TEXT NOT NULL, status TEXT NOT NULL, starts_at TEXT, ends_at TEXT, deleted_at TEXT)",
         ] {
-            sqlx::query(ddl).execute(&pool).await.expect("create table");
+            sqlx::query(sqlx::AssertSqlSafe(ddl)).execute(&pool).await.expect("create table");
         }
         sqlx::query("INSERT INTO commerce_payment_method VALUES ('method-card','tenant-1','org-1','stripe_card','stripe','active',0,NULL), ('method-legacy','tenant-1','org-1','legacy_pay','sandbox','active',1,NULL)")
             .execute(&pool).await.expect("insert methods");

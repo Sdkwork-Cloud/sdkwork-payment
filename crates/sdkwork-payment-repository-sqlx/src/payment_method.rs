@@ -232,7 +232,7 @@ impl SqliteCommercePaymentMethodStore {
 ORDER BY COALESCE(m.sort_order, 0) ASC, m.id ASC
 LIMIT ?4 OFFSET ?5"
         );
-        let rows = sqlx::query(&sql)
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(query.scene_code_filter.as_deref())
@@ -271,7 +271,7 @@ impl PostgresCommercePaymentMethodStore {
 ORDER BY COALESCE(m.sort_order, 0) ASC, m.id ASC
 LIMIT $4 OFFSET $5"
         );
-        let rows = sqlx::query(&sql)
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(query.scene_code_filter.as_deref())

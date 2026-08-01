@@ -191,7 +191,7 @@ WHERE o.tenant_id = CAST($1 AS TEXT)
 ORDER BY COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) DESC NULLS LAST, o.id DESC
 LIMIT $4 OFFSET $5"
         );
-        let rows = sqlx::query(&sql)
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(&query.owner_user_id)
@@ -228,7 +228,7 @@ WHERE o.tenant_id = CAST($1 AS TEXT)
 ORDER BY COALESCE(pa.paid_at, pa.created_at, o.paid_at, o.created_at) DESC NULLS LAST, o.id DESC
 LIMIT $5 OFFSET $6"
         );
-        let rows = sqlx::query(&sql)
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(&query.owner_user_id)
@@ -264,7 +264,7 @@ WHERE o.tenant_id = CAST($1 AS TEXT)
   AND (pa.id = CAST($4 AS TEXT) OR pi.id = CAST($4 AS TEXT) OR o.id = CAST($4 AS TEXT))
 LIMIT 1"
         );
-        let row = sqlx::query(&sql)
+        let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(&query.owner_user_id)
@@ -292,7 +292,7 @@ WHERE o.tenant_id = CAST($1 AS TEXT)
   AND COALESCE(NULLIF(pa.out_trade_no, ''), NULLIF(o.order_no, '')) = CAST($4 AS TEXT)
 LIMIT 1"
         );
-        let row = sqlx::query(&sql)
+        let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(&query.owner_user_id)
@@ -321,7 +321,7 @@ WHERE o.tenant_id = CAST($1 AS TEXT)
   AND o.owner_user_id = CAST($3 AS TEXT)
 ) stats"
         );
-        let row = sqlx::query(&sql)
+        let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&query.tenant_id)
             .bind(query.organization_id.as_deref())
             .bind(&query.owner_user_id)
