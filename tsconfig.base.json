@@ -9,6 +9,7 @@
       "@sdkwork/ui-pc-react": ["../sdkwork-ui/sdkwork-ui-pc-react/src/index.ts"],
       "@sdkwork/ui-pc-react/theme": ["../sdkwork-ui/sdkwork-ui-pc-react/src/theme/index.ts"],
       "@sdkwork/utils": ["../sdkwork-utils/packages/sdkwork-utils-typescript/src/index.ts"],
+      "@sdkwork/utils/money": ["../sdkwork-utils/packages/sdkwork-utils-typescript/src/money.ts"],
       "@sdkwork/payment-contracts": ["./apps/sdkwork-payment-common/packages/sdkwork-payment-contracts/src/index.ts"],
       "@sdkwork/payment-service": ["./apps/sdkwork-payment-common/packages/sdkwork-payment-service/src/index.ts"],
       "@sdkwork/payment-sdk-ports": ["./apps/sdkwork-payment-common/packages/sdkwork-payment-sdk-ports/src/index.ts"],

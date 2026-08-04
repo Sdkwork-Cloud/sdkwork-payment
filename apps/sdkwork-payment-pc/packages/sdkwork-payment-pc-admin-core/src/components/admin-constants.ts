@@ -7,6 +7,8 @@
  * `REPLAY_MAX_RETRIES` definitions across the 4 admin capability packages.
  */
 
+import { formatMoney } from "@sdkwork/utils/money";
+
 export const ADMIN_PROVIDER_CODES = ["stripe", "alipay", "wechat_pay", "sandbox"] as const;
 export type AdminProviderCode = (typeof ADMIN_PROVIDER_CODES)[number];
 
@@ -118,9 +120,9 @@ export function formatAdminTimestamp(value: string | undefined | null): string {
  * displays (Stripe Dashboard amount column, Adyen Customer Area balance).
  *
  * Payment amounts are typically strings matching `^[0-9]+(\.[0-9]{1,2})?$`
- * per OpenAPI; this helper parses to a number and applies `Intl.NumberFormat`
- * with `style: "currency"`. Falls back to a plain number + currency code
- * suffix when the ISO 4217 code is unknown to the runtime.
+ * per OpenAPI; this helper parses to a number and applies the shared
+ * `formatMoney` (symbol mode). Falls back to a plain number + currency code
+ * suffix when the ISO 4217 code is unknown.
  *
  * Returns "—" for falsy or invalid amounts.
  */
@@ -136,16 +138,10 @@ export function formatAdminAmount(
     return String(amount);
   }
   const code = currencyCode ?? undefined;
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: code,
-      currencyDisplay: "symbol",
-    }).format(numeric);
-  } catch {
-    // Unknown / invalid ISO 4217 code — fall back to plain number + code suffix.
-    return `${numeric.toFixed(2)} ${code ?? ""}`.trim();
+  if (!code) {
+    return `${numeric.toFixed(2)} `.trim();
   }
+  return formatMoney(numeric, { currency: code, mode: "symbol" }) ?? `${numeric.toFixed(2)} ${code}`.trim();
 }
 
 /**

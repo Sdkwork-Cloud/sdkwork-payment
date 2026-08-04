@@ -6,7 +6,7 @@ import {
   type PaymentBackendSdkClient,
   type PaymentSdkMethod,
 } from "@sdkwork/payment-sdk-ports";
-import { formatCurrency as formatSdkworkCurrency } from "@sdkwork/utils";
+import { formatMoney } from "@sdkwork/utils/money";
 
 // 重新导出 SDK 客户端类型，避免消费方需要直接依赖 @sdkwork/payment-sdk-ports。
 export type { PaymentAppSdkClient, PaymentBackendSdkClient } from "@sdkwork/payment-sdk-ports";
@@ -262,10 +262,7 @@ export function toSdkworkPaymentNumber(value: unknown, fallback = 0): number {
 }
 
 export function formatSdkworkPaymentCurrencyCny(value: number | null | undefined, language = "en-US"): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return "--";
-  }
-  return formatSdkworkCurrency(value, "CNY", language) ?? "--";
+  return formatMoney(value, { currency: "CNY", locale: language, mode: "symbol" }) ?? "--";
 }
 
 export function readSdkworkMediaResource(value: unknown): SdkworkMediaResource | undefined {
