@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@sdkwork/appbase-pc-react": "workspace:*",
+    "@sdkwork/payment-pc-core": "workspace:*",
     "@sdkwork/payment-service": "workspace:*"
   },
   "devDependencies": {

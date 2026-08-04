@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_method (
 );
 
 -- Self-heal: back-fill columns when the table was pre-created by another module
--- (e.g. sdkwork-clawrouter commerce_bootstrap). Idempotent table creation is a
+-- (e.g. sdkwork-cloudrouter commerce_bootstrap). Idempotent table creation is a
 -- no-op on existing tables, so ALTER TABLE ensures the payment schema is complete.
 ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS provider_code TEXT;
 ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_provider_account (
 );
 
 -- Self-heal: back-fill columns when the table was pre-created by another module.
--- The Claw Router commerce_bootstrap creates a simpler commerce_payment_provider_account
+-- The Cloud Router commerce_bootstrap creates a simpler commerce_payment_provider_account
 -- without account_mode, capabilities, metadata, version, deleted_at, etc.
 ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS account_mode TEXT NOT NULL DEFAULT 'direct';
 ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS partner_provider_account_id TEXT;
