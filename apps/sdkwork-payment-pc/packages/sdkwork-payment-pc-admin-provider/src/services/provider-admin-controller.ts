@@ -398,6 +398,22 @@ export function createPaymentProviderAdminController(
       );
     },
 
+    async deleteProviderAccount(id) {
+      return wrapMutation(
+        async () => {
+          await service.providerAccounts.delete(id);
+        },
+        "Failed to delete provider account.",
+        { reload: "providerAccounts" },
+      ).then(() => {
+        const wasSelected = state.selectedProviderAccount?.id === id;
+        if (wasSelected) {
+          state = { ...state, selectedProviderAccount: undefined };
+          emit();
+        }
+      });
+    },
+
     async testProviderAccount(id, options) {
       setStatus("testing", undefined);
       try {

@@ -3,7 +3,7 @@ import type { ProviderAccount } from './provider-account';
 
 export interface ProviderAccountListResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { items: ProviderAccount[]; pageInfo: PageInfo; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

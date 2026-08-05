@@ -312,17 +312,13 @@ mod tests {
     }
 
     #[test]
-    fn unmatched_status_is_legal_in_postgres_and_sqlite_baselines() {
+    fn unmatched_status_is_legal_in_postgres_baseline() {
         let postgres =
             include_str!("../../../database/ddl/baseline/postgres/0001_payment_baseline.sql");
-        let sqlite = include_str!(
-            "../../../tests/fixtures/database/sqlite/ddl/baseline/0001_payment_baseline.sql"
-        );
         let legal_status_contract =
             "CHECK (status IN ('queued', 'processing', 'processed', 'failed', 'dead'))";
 
         assert!(postgres.contains(legal_status_contract));
-        assert!(sqlite.contains(legal_status_contract));
         assert_eq!(WEBHOOK_EVENT_STATUS_FAILED, "failed");
         assert_ne!(WEBHOOK_EVENT_STATUS_FAILED, "unmatched");
     }

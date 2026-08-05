@@ -111,6 +111,12 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     )
     .with_idempotent(true),
     HttpRoute::dual_token(
+        HttpMethod::Delete,
+        "/backend/v3/api/payments/provider_accounts/{providerAccountId}",
+        "payments",
+        "providerAccounts.delete",
+    ),
+    HttpRoute::dual_token(
         HttpMethod::Post,
         "/backend/v3/api/payments/provider_accounts/{providerAccountId}/test",
         "payments",

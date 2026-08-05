@@ -24,10 +24,12 @@ export interface ProviderAccountListProps {
   canEdit: boolean;
   canRotate: boolean;
   canTest: boolean;
+  canDelete: boolean;
   onSelect(account: PaymentProviderAccountView): void;
   onEdit(account: PaymentProviderAccountView): void;
   onTest(account: PaymentProviderAccountView): void;
   onRotate(account: PaymentProviderAccountView): void;
+  onDelete(account: PaymentProviderAccountView): void;
   // Empty-state inline create button callback; parent component wires it to the create dialog
   onCreate(): void;
   onLoadMore(): void;
@@ -82,7 +84,24 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
           </div> : null}
         </div>
       ) : (
-        <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wider text-[var(--sdk-color-text-muted)]">
+              Provider Accounts
+            </div>
+            {/* Persistent create button: keeps the add-provider-account entry visible
+                even when the list already has records. */}
+            {props.canCreate ? <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={props.onCreate}
+              disabled={props.busy}
+            >
+              Add provider account
+            </Button> : null}
+          </div>
+          <ul className="divide-y divide-[var(--sdk-color-border-subtle)] rounded-md border border-[var(--sdk-color-border-subtle)]">
           {props.accounts.map((account) => {
             const isSelected = props.selectedId === account.id;
             return (
@@ -170,6 +189,16 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
                   >
                     Edit
                   </Button> : null}
+                  {props.canDelete ? <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => props.onDelete(account)}
+                    disabled={props.busy}
+                    title="Cannot delete while another operation is in progress"
+                  >
+                    Delete
+                  </Button> : null}
                   <Button
                     type="button"
                     size="sm"
@@ -183,7 +212,8 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
               </li>
             );
           })}
-        </ul>
+          </ul>
+        </div>
       )}
       <SdkworkPaymentListPaginationControls
         busy={props.busy ?? false}

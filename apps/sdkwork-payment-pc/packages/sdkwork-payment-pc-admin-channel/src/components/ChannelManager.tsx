@@ -33,10 +33,12 @@ import {
 import {
   AdminFieldLabel,
   adminPaymentMethodKeyOption,
+  BaseDataSelectField,
   PaymentMethodIcon,
   PaymentProviderIcon,
   PaymentSceneIcon,
   SdkworkPaymentListPaginationControls,
+  type PaymentBaseDataOption,
 } from "@sdkwork/payment-pc-admin-core";
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
 import type {
@@ -56,6 +58,9 @@ export interface ChannelManagerProps {
   pageInfo?: SdkWorkPageInfo;
   busy?: boolean;
   canCreate: boolean;
+  /** Base-data options resolved by the host app; free-text fallback when empty. */
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onCreate(draft: PaymentChannelDraft): Promise<void> | void;
   onLoadMore(): void;
 }
@@ -201,6 +206,8 @@ export function ChannelManager(props: ChannelManagerProps) {
           <ChannelForm
             methods={props.methods}
             providerAccounts={props.providerAccounts}
+            countryOptions={props.countryOptions}
+            currencyOptions={props.currencyOptions}
             onCancel={() => setOpen(false)}
             onSubmit={async (draft) => {
               await props.onCreate(draft);
@@ -216,6 +223,8 @@ export function ChannelManager(props: ChannelManagerProps) {
 interface ChannelFormProps {
   methods: readonly PaymentMethodView[];
   providerAccounts: readonly PaymentProviderAccountView[];
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onCancel(): void;
   onSubmit(draft: PaymentChannelDraft): Promise<void> | void;
 }
@@ -385,24 +394,24 @@ function ChannelForm(props: ChannelFormProps) {
         </AdminFieldLabel>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-        <AdminFieldLabel label="Currency" htmlFor="channel-form-currency">
-          <Input
-            id="channel-form-currency"
-            value={currencyCode}
-            onChange={(event) => setCurrencyCode(event.target.value)}
-            placeholder="CNY"
-            maxLength={3}
-          />
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Country" htmlFor="channel-form-country">
-          <Input
-            id="channel-form-country"
-            value={countryCode}
-            onChange={(event) => setCountryCode(event.target.value)}
-            placeholder="CN"
-            maxLength={2}
-          />
-        </AdminFieldLabel>
+        <BaseDataSelectField
+          id="channel-form-currency"
+          label="Currency"
+          options={props.currencyOptions}
+          value={currencyCode}
+          maxLength={3}
+          placeholder="CNY"
+          onChange={setCurrencyCode}
+        />
+        <BaseDataSelectField
+          id="channel-form-country"
+          label="Country"
+          options={props.countryOptions}
+          value={countryCode}
+          maxLength={2}
+          placeholder="CN"
+          onChange={setCountryCode}
+        />
         <AdminFieldLabel label="Priority" htmlFor="channel-form-priority">
           <Input
             id="channel-form-priority"

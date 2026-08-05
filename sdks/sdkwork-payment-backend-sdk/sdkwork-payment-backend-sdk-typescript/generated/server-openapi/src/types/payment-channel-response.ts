@@ -2,7 +2,7 @@ import type { PaymentChannel } from './payment-channel';
 
 export interface PaymentChannelResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { item: PaymentChannel; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

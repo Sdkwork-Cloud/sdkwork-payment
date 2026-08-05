@@ -2,7 +2,7 @@ import type { WebhookSignatureTestResult } from './webhook-signature-test-result
 
 export interface WebhookSignatureTestResultResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { item: WebhookSignatureTestResult; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

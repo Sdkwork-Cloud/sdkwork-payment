@@ -30,7 +30,9 @@ import {
 import {
   ADMIN_PROVIDER_LABEL,
   AdminFieldLabel,
+  BaseDataSelectField,
   formatAdminTimestamp,
+  type PaymentBaseDataOption,
 } from "@sdkwork/payment-pc-admin-core";
 import type {
   PaymentDevSandboxTriggerResult,
@@ -45,6 +47,8 @@ export interface WebhookDebuggerProps {
   busy?: boolean;
   lastSandboxTriggerResult?: PaymentDevSandboxTriggerResult;
   lastSignatureTestResult?: PaymentDevWebhookSignatureTestResult;
+  /** Base-data options resolved by the host app; free-text fallback when empty. */
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onSandboxTrigger(
     providerAccountId: string,
     eventType: string,
@@ -88,6 +92,7 @@ export function WebhookDebugger(props: WebhookDebuggerProps) {
         accounts={eligibleAccounts}
         busy={props.busy}
         lastResult={props.lastSandboxTriggerResult}
+        currencyOptions={props.currencyOptions}
         onTrigger={props.onSandboxTrigger}
       />
       <SignatureTestPanel
@@ -105,6 +110,7 @@ interface SandboxTriggerPanelProps {
   accounts: readonly PaymentProviderAccountView[];
   busy?: boolean;
   lastResult?: PaymentDevSandboxTriggerResult;
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onTrigger(
     providerAccountId: string,
     eventType: string,
@@ -214,15 +220,16 @@ function SandboxTriggerPanel(props: SandboxTriggerPanelProps) {
               disabled={props.busy}
             />
           </AdminFieldLabel>
-          <AdminFieldLabel label="Currency (optional)" htmlFor="webhook-debugger-trigger-currency">
-            <Input
-              id="webhook-debugger-trigger-currency"
-              value={currencyCode}
-              onChange={(event) => setCurrencyCode(event.target.value)}
-              placeholder="e.g., USD"
-              disabled={props.busy}
-            />
-          </AdminFieldLabel>
+          <BaseDataSelectField
+            id="webhook-debugger-trigger-currency"
+            label="Currency (optional)"
+            options={props.currencyOptions}
+            value={currencyCode}
+            maxLength={3}
+            placeholder="e.g., USD"
+            disabled={props.busy}
+            onChange={setCurrencyCode}
+          />
           <AdminFieldLabel label="Out trade no (optional)" htmlFor="webhook-debugger-trigger-out-trade-no">
             <Input
               id="webhook-debugger-trigger-out-trade-no"

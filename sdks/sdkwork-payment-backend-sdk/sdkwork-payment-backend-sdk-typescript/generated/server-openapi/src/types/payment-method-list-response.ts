@@ -3,7 +3,7 @@ import type { PaymentMethod } from './payment-method';
 
 export interface PaymentMethodListResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { items: PaymentMethod[]; pageInfo: PageInfo; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

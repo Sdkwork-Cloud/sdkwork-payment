@@ -34,10 +34,12 @@ import {
 } from "@sdkwork/ui-pc-react";
 import {
   AdminFieldLabel,
+  BaseDataSelectField,
   ConfirmDialog,
   PaymentProviderIcon,
   PaymentSceneIcon,
   SdkworkPaymentListPaginationControls,
+  type PaymentBaseDataOption,
 } from "@sdkwork/payment-pc-admin-core";
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
 import type {
@@ -56,6 +58,9 @@ export interface RouteRuleManagerProps {
   canCreate: boolean;
   canDelete: boolean;
   canUpdate: boolean;
+  /** Base-data options resolved by the host app; free-text fallback when empty. */
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onCreate(draft: PaymentRouteRuleDraft): Promise<void> | void;
   onUpdate(id: string, draft: PaymentRouteRuleUpdateDraft): Promise<void> | void;
   onDelete(id: string): Promise<void> | void;
@@ -278,6 +283,8 @@ export function RouteRuleManager(props: RouteRuleManagerProps) {
               mode={dialog.kind === "create" ? "create" : "update"}
               initial={dialog.kind === "edit" ? dialog.rule : undefined}
               channels={props.channels}
+              countryOptions={props.countryOptions}
+              currencyOptions={props.currencyOptions}
               onCancel={() => setDialog({ kind: "closed" })}
               onSubmit={
                 dialog.kind === "create"
@@ -322,6 +329,8 @@ interface RouteRuleFormProps {
   mode: "create" | "update";
   initial?: PaymentRouteRuleView;
   channels: readonly PaymentChannelView[];
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onCancel(): void;
   onSubmit(draft: PaymentRouteRuleDraft | PaymentRouteRuleUpdateDraft): Promise<void> | void;
 }
@@ -495,24 +504,24 @@ function RouteRuleForm(props: RouteRuleFormProps) {
               placeholder="e.g., ios, android, web, mini_program"
             />
           </AdminFieldLabel>
-          <AdminFieldLabel label="Country" htmlFor="rule-form-country">
-            <Input
-              id="rule-form-country"
-              value={countryCode}
-              onChange={(event) => setCountryCode(event.target.value)}
-              placeholder="CN"
-              maxLength={2}
-            />
-          </AdminFieldLabel>
-          <AdminFieldLabel label="Currency" htmlFor="rule-form-currency">
-            <Input
-              id="rule-form-currency"
-              value={currencyCode}
-              onChange={(event) => setCurrencyCode(event.target.value)}
-              placeholder="CNY"
-              maxLength={3}
-            />
-          </AdminFieldLabel>
+          <BaseDataSelectField
+            id="rule-form-country"
+            label="Country"
+            options={props.countryOptions}
+            value={countryCode}
+            maxLength={2}
+            placeholder="CN"
+            onChange={setCountryCode}
+          />
+          <BaseDataSelectField
+            id="rule-form-currency"
+            label="Currency"
+            options={props.currencyOptions}
+            value={currencyCode}
+            maxLength={3}
+            placeholder="CNY"
+            onChange={setCurrencyCode}
+          />
           <AdminFieldLabel label="Amount min" htmlFor="rule-form-amount-min">
             <Input
               id="rule-form-amount-min"

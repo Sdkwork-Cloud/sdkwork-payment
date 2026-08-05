@@ -28,6 +28,7 @@ import {
   PaymentAdminTabsList,
   PaymentAdminTabsTrigger,
   PaymentAdminWorkspace,
+  type PaymentBaseDataOption,
 } from "@sdkwork/payment-pc-admin-core";
 import { CertificateManager } from "../components/CertificateManager";
 import { EnvironmentSwitcher } from "../components/EnvironmentSwitcher";
@@ -49,6 +50,8 @@ export interface PaymentDevConfigAdminWorkspaceProps {
   title?: string;
   description?: string;
   section?: PaymentDevConfigAdminSection;
+  /** Base-data options resolved by the host app; free-text fallback when empty. */
+  currencyOptions?: readonly PaymentBaseDataOption[];
 }
 
 export function PaymentDevConfigAdminWorkspace(
@@ -154,6 +157,7 @@ export function PaymentDevConfigAdminWorkspace(
         busy={busy}
         lastSandboxTriggerResult={state.lastSandboxTriggerResult}
         lastSignatureTestResult={state.lastSignatureTestResult}
+        currencyOptions={props.currencyOptions}
         onSandboxTrigger={handleSandboxTrigger}
         onSignatureTest={handleSignatureTest}
       />

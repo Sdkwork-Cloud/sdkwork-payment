@@ -2,7 +2,7 @@ import type { RouteRule } from './route-rule';
 
 export interface RouteRuleResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { item: RouteRule; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

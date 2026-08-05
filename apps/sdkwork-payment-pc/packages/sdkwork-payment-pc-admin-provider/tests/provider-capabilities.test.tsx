@@ -27,19 +27,21 @@ describe("payment provider capabilities", () => {
         canEdit={false}
         canRotate={false}
         canTest={false}
+        canDelete={false}
         onCreate={vi.fn()}
         onEdit={vi.fn()}
         onLoadMore={vi.fn()}
         onRotate={vi.fn()}
         onSelect={vi.fn()}
         onTest={vi.fn()}
+        onDelete={vi.fn()}
       />,
     );
 
     expect(screen.getByText("stripe-main")).toBeInTheDocument();
     expect(document.querySelector('[data-provider="stripe"]')).not.toBeNull();
     expect(screen.getByLabelText("Credential readiness")).toBeInTheDocument();
-    for (const action of ["Create provider account", "Edit", "Rotate", "Test"]) {
+    for (const action of ["Add provider account", "Create provider account", "Edit", "Rotate", "Test", "Delete"]) {
       expect(screen.queryByRole("button", { name: action })).not.toBeInTheDocument();
     }
   });

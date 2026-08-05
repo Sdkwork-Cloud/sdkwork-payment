@@ -108,6 +108,15 @@ export interface PaymentProviderAccountTestResult {
   readonly testedAt: string;
 }
 
+/**
+ * Base-data select option (countries/currencies served by the
+ * sdkwork-appbase base-data capability). Shared with the other payment admin
+ * capability packages via admin-core; the host app resolves the records and
+ * passes the options down, and forms degrade to free-text fields when no
+ * options are available.
+ */
+export type { PaymentBaseDataOption } from "@sdkwork/payment-pc-admin-core";
+
 export interface PaymentProviderAccountDraft {
   readonly accountNo: string;
   readonly providerCode: PaymentProviderCode;
@@ -206,6 +215,7 @@ export interface PaymentProviderAdminController {
   selectSubMerchant(id?: string): PaymentSubMerchantView | undefined;
   createProviderAccount(draft: PaymentProviderAccountDraft): Promise<PaymentProviderAccountView>;
   updateProviderAccount(id: string, draft: PaymentProviderAccountUpdateDraft): Promise<PaymentProviderAccountView>;
+  deleteProviderAccount(id: string): Promise<void>;
   testProviderAccount(id: string, options?: PaymentProviderAccountTestOptions): Promise<PaymentProviderAccountTestResult>;
   rotateProviderAccountCredentials(id: string, draft: PaymentCredentialRotateDraft): Promise<PaymentProviderAccountView>;
   createSubMerchant(draft: PaymentSubMerchantDraft): Promise<PaymentSubMerchantView>;

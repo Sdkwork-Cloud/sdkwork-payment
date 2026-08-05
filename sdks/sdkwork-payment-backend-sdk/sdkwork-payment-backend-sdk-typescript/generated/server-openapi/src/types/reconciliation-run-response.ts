@@ -2,7 +2,7 @@ import type { ReconciliationRun } from './reconciliation-run';
 
 export interface ReconciliationRunResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { item: ReconciliationRun; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

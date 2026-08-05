@@ -36,9 +36,11 @@ import {
 import {
   AdminFieldLabel,
   ADMIN_PROVIDER_FORM_OPTIONS,
+  BaseDataSelectField,
   PaymentProviderIcon,
 } from "@sdkwork/payment-pc-admin-core";
 import type {
+  PaymentBaseDataOption,
   PaymentProviderAccountDraft,
   PaymentProviderAccountMode,
   PaymentProviderAccountUpdateDraft,
@@ -72,6 +74,13 @@ export interface ProviderAccountFormProps {
   initial?: Partial<PaymentProviderAccountView>;
   mode: "create" | "update";
   partnerAccountOptions?: readonly PaymentProviderAccountView[];
+  /**
+   * Base-data options resolved by the host app (served by the
+   * sdkwork-appbase base-data capability). When empty or omitted the
+   * corresponding field degrades to a free-text input.
+   */
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onCancel(): void;
   onSubmit(
     draft: PaymentProviderAccountDraft | PaymentProviderAccountUpdateDraft,
@@ -355,24 +364,24 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
             </SelectContent>
           </Select>
         </AdminFieldLabel>
-        <AdminFieldLabel label="Country Code" htmlFor="provider-country-code">
-          <Input
-            id="provider-country-code"
-            value={state.countryCode}
-            onChange={(event) => update("countryCode", event.target.value)}
-            maxLength={2}
-            placeholder="CN"
-          />
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Settlement Currency" htmlFor="provider-settlement-currency">
-          <Input
-            id="provider-settlement-currency"
-            value={state.settlementCurrency}
-            onChange={(event) => update("settlementCurrency", event.target.value)}
-            maxLength={3}
-            placeholder="CNY"
-          />
-        </AdminFieldLabel>
+        <BaseDataSelectField
+          id="provider-country-code"
+          label="Country Code"
+          options={props.countryOptions}
+          value={state.countryCode}
+          maxLength={2}
+          placeholder="CN"
+          onChange={(value) => update("countryCode", value)}
+        />
+        <BaseDataSelectField
+          id="provider-settlement-currency"
+          label="Settlement Currency"
+          options={props.currencyOptions}
+          value={state.settlementCurrency}
+          maxLength={3}
+          placeholder="CNY"
+          onChange={(value) => update("settlementCurrency", value)}
+        />
       </div>
 
       {showPartnerFields ? (

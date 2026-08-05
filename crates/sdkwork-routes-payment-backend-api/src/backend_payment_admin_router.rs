@@ -64,6 +64,16 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
         provider_account_id: String,
     ) -> CommerceBackendPaymentAdminFuture<'a, bool>;
 
+    /// Soft-deletes a provider account (marks deleted_at). Returns
+    /// `Conflict` while non-deleted channels or sub-merchants still reference
+    /// the account, and `NotFound` when the account does not exist or was
+    /// already deleted.
+    fn delete_provider_account<'a>(
+        &'a self,
+        scope: BackendTenantScope,
+        provider_account_id: String,
+    ) -> CommerceBackendPaymentAdminFuture<'a, ()>;
+
     fn list_channels<'a>(
         &'a self,
         query: BackendTenantListQuery,
@@ -713,6 +723,92 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                 ))
             })?;
             Ok(ready.is_some())
+        })
+    }
+
+    fn delete_provider_account<'a>(
+        &'a self,
+        scope: BackendTenantScope,
+        provider_account_id: String,
+    ) -> CommerceBackendPaymentAdminFuture<'a, ()> {
+        Box::pin(async move {
+            let channel_reference = sqlx::query(
+                r#"
+                SELECT 1
+                FROM commerce_payment_channel
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                  AND provider_account_id = CAST(? AS TEXT)
+                  AND deleted_at IS NULL
+                LIMIT 1
+                "#,
+            )
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .bind(scope.organization_id.as_deref())
+            .bind(&provider_account_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| {
+                CommerceServiceError::storage(format!(
+                    "failed to check provider account channel references: {error}"
+                ))
+            })?;
+            if channel_reference.is_some() {
+                return Err(CommerceServiceError::conflict(
+                    "provider account is referenced by payment channels; unbind them before deleting the account",
+                ));
+            }
+            let sub_merchant_reference = sqlx::query(
+                r#"
+                SELECT 1
+                FROM commerce_payment_sub_merchant
+                WHERE tenant_id = CAST(? AS TEXT)
+                  AND organization_id = CAST(? AS TEXT)
+                  AND provider_account_id = CAST(? AS TEXT)
+                  AND deleted_at IS NULL
+                LIMIT 1
+                "#,
+            )
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .bind(&provider_account_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| {
+                CommerceServiceError::storage(format!(
+                    "failed to check provider account sub-merchant references: {error}"
+                ))
+            })?;
+            if sub_merchant_reference.is_some() {
+                return Err(CommerceServiceError::conflict(
+                    "provider account is referenced by sub-merchants; unbind them before deleting the account",
+                ));
+            }
+            let result = sqlx::query(
+                r#"
+                UPDATE commerce_payment_provider_account
+                SET deleted_at = ?
+                WHERE id = CAST(? AS TEXT)
+                  AND tenant_id = CAST(? AS TEXT)
+                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
+                  AND deleted_at IS NULL
+                "#,
+            )
+            .bind(current_timestamp_string())
+            .bind(&provider_account_id)
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .bind(scope.organization_id.as_deref())
+            .execute(&self.pool)
+            .await
+            .map_err(|error| {
+                CommerceServiceError::storage(format!("failed to delete provider account: {error}"))
+            })?;
+            if result.rows_affected() == 0 {
+                return Err(CommerceServiceError::not_found("provider account not found"));
+            }
+            Ok(())
         })
     }
 
@@ -1415,6 +1511,90 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
         })
     }
 
+    fn delete_provider_account<'a>(
+        &'a self,
+        scope: BackendTenantScope,
+        provider_account_id: String,
+    ) -> CommerceBackendPaymentAdminFuture<'a, ()> {
+        Box::pin(async move {
+            let channel_reference = sqlx::query(
+                r#"
+                SELECT 1
+                FROM commerce_payment_channel
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND (organization_id IS NULL AND $2::text IS NULL OR organization_id = CAST($2 AS TEXT))
+                  AND provider_account_id = CAST($3 AS TEXT)
+                  AND deleted_at IS NULL
+                LIMIT 1
+                "#,
+            )
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .bind(&provider_account_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| {
+                CommerceServiceError::storage(format!(
+                    "failed to check provider account channel references: {error}"
+                ))
+            })?;
+            if channel_reference.is_some() {
+                return Err(CommerceServiceError::conflict(
+                    "provider account is referenced by payment channels; unbind them before deleting the account",
+                ));
+            }
+            let sub_merchant_reference = sqlx::query(
+                r#"
+                SELECT 1
+                FROM commerce_payment_sub_merchant
+                WHERE tenant_id = CAST($1 AS TEXT)
+                  AND organization_id = CAST($2 AS TEXT)
+                  AND provider_account_id = CAST($3 AS TEXT)
+                  AND deleted_at IS NULL
+                LIMIT 1
+                "#,
+            )
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .bind(&provider_account_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| {
+                CommerceServiceError::storage(format!(
+                    "failed to check provider account sub-merchant references: {error}"
+                ))
+            })?;
+            if sub_merchant_reference.is_some() {
+                return Err(CommerceServiceError::conflict(
+                    "provider account is referenced by sub-merchants; unbind them before deleting the account",
+                ));
+            }
+            let result = sqlx::query(
+                r#"
+                UPDATE commerce_payment_provider_account
+                SET deleted_at = $1
+                WHERE id = CAST($2 AS TEXT)
+                  AND tenant_id = CAST($3 AS TEXT)
+                  AND (organization_id IS NULL AND $4::text IS NULL OR organization_id = CAST($4 AS TEXT))
+                  AND deleted_at IS NULL
+                "#,
+            )
+            .bind(current_timestamp_string())
+            .bind(&provider_account_id)
+            .bind(&scope.tenant_id)
+            .bind(scope.organization_id.as_deref())
+            .execute(&self.pool)
+            .await
+            .map_err(|error| {
+                CommerceServiceError::storage(format!("failed to delete provider account: {error}"))
+            })?;
+            if result.rows_affected() == 0 {
+                return Err(CommerceServiceError::not_found("provider account not found"));
+            }
+            Ok(())
+        })
+    }
+
     fn list_channels<'a>(
         &'a self,
         query: BackendTenantListQuery,
@@ -1806,7 +1986,7 @@ pub fn build_backend_payment_admin_router(
         )
         .route(
             "/backend/v3/api/payments/provider_accounts/{providerAccountId}",
-            patch(update_provider_account),
+            patch(update_provider_account).delete(delete_provider_account),
         )
         .route(
             "/backend/v3/api/payments/channels",
@@ -2020,6 +2200,33 @@ async fn update_provider_account(
         body,
     )
     .await
+}
+
+async fn delete_provider_account(
+    State(state): State<BackendPaymentAdminState>,
+    runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
+    Path(provider_account_id): Path<String>,
+) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
+    let subject = match backend_runtime_subject_from_extension(runtime_context) {
+        Ok(subject) => subject,
+        Err(message) => return unauthorized_response(ctx, message),
+    };
+    let scope = BackendTenantScope {
+        tenant_id: subject.tenant_id,
+        organization_id: subject.organization_id,
+    };
+    match state
+        .store
+        .delete_provider_account(scope, provider_account_id)
+        .await
+    {
+        Ok(()) => success_no_content(ctx),
+        Err(error) => {
+            backend_payment_error_response(ctx, "payment provider account delete failed", error)
+        }
+    }
 }
 
 async fn upsert_provider_account_inner(
@@ -3267,6 +3474,109 @@ mod tests {
             )
             .await
             .expect("mock activation readiness"));
+    }
+
+    #[tokio::test]
+    async fn sqlite_provider_account_delete_soft_deletes_and_guards_references() {
+        crate::ensure_test_payment_credential_cipher();
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("sqlite pool");
+        for statement in [
+            "CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, account_no TEXT NOT NULL, provider_code TEXT NOT NULL, merchant_id TEXT, account_mode TEXT NOT NULL DEFAULT 'direct', partner_provider_account_id TEXT, environment TEXT NOT NULL, country_code TEXT, settlement_currency TEXT NOT NULL, secret_ref TEXT NOT NULL, webhook_secret_ref TEXT, certificate_ref TEXT, capabilities TEXT NOT NULL DEFAULT '{}', metadata TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, certificate_expires_at TEXT, last_tested_at TEXT, last_test_status TEXT, version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
+            "CREATE TABLE commerce_payment_channel (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT, method_id TEXT, provider_code TEXT NOT NULL, scene_code TEXT NOT NULL DEFAULT 'api', currency_code TEXT NOT NULL DEFAULT 'CNY', status TEXT NOT NULL DEFAULT 'active', priority INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, deleted_at TEXT)",
+            "CREATE TABLE commerce_payment_sub_merchant (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, external_sub_merchant_id TEXT NOT NULL, sub_appid TEXT, sub_mch_id TEXT, display_name TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
+            "CREATE TABLE commerce_payment_provider_credential (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, credential_kind TEXT NOT NULL, ciphertext TEXT NOT NULL, encryption_key_id TEXT NOT NULL, encryption_algorithm TEXT NOT NULL, fingerprint_sha256 TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, rotated_at TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT)",
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(statement))
+                .execute(&pool)
+                .await
+                .expect("test schema");
+        }
+        let store = SqliteBackendPaymentAdminStore::new(pool);
+        let scope = BackendTenantScope {
+            tenant_id: "tenant-delete".to_owned(),
+            organization_id: Some("org-delete".to_owned()),
+        };
+        sqlx::query("INSERT INTO commerce_payment_provider_account (id, tenant_id, organization_id, account_no, provider_code, environment, settlement_currency, secret_ref, status, created_at, updated_at) VALUES ('account-delete-1', 'tenant-delete', 'org-delete', 'delete-me', 'sandbox', 'sandbox', 'CNY', 'ref', 'inactive', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+            .execute(&store.pool)
+            .await
+            .expect("provider account");
+
+        // 删除成功后列表不再返回该账户。
+        store
+            .delete_provider_account(scope.clone(), "account-delete-1".to_owned())
+            .await
+            .expect("delete provider account");
+        let page = store
+            .list_provider_accounts(BackendTenantListQuery {
+                scope: scope.clone(),
+                offset: 0,
+                limit: 20,
+            })
+            .await
+            .expect("list provider accounts");
+        assert_eq!(page.total_items, 0);
+
+        // 重复删除返回 NotFound。
+        let error = store
+            .delete_provider_account(scope.clone(), "account-delete-1".to_owned())
+            .await
+            .expect_err("delete already-deleted provider account");
+        assert_eq!(error.code(), "not-found");
+
+        // 其他租户删除返回 NotFound（租户隔离）。
+        let error = store
+            .delete_provider_account(
+                BackendTenantScope {
+                    tenant_id: "tenant-other".to_owned(),
+                    organization_id: Some("org-other".to_owned()),
+                },
+                "account-delete-1".to_owned(),
+            )
+            .await
+            .expect_err("delete provider account across tenants");
+        assert_eq!(error.code(), "not-found");
+
+        // 被未删除渠道引用时返回 Conflict。
+        sqlx::query("INSERT INTO commerce_payment_provider_account (id, tenant_id, organization_id, account_no, provider_code, environment, settlement_currency, secret_ref, status, created_at, updated_at) VALUES ('account-referenced', 'tenant-delete', 'org-delete', 'referenced', 'sandbox', 'sandbox', 'CNY', 'ref', 'inactive', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+            .execute(&store.pool)
+            .await
+            .expect("referenced provider account");
+        sqlx::query("INSERT INTO commerce_payment_channel (id, tenant_id, organization_id, provider_account_id, provider_code, status) VALUES ('channel-1', 'tenant-delete', 'org-delete', 'account-referenced', 'sandbox', 'active')")
+            .execute(&store.pool)
+            .await
+            .expect("referencing channel");
+        let error = store
+            .delete_provider_account(scope.clone(), "account-referenced".to_owned())
+            .await
+            .expect_err("delete referenced provider account");
+        assert_eq!(error.code(), "conflict");
+
+        // 解除渠道引用后删除成功。
+        sqlx::query("DELETE FROM commerce_payment_channel WHERE id = 'channel-1'")
+            .execute(&store.pool)
+            .await
+            .expect("remove referencing channel");
+        store
+            .delete_provider_account(scope.clone(), "account-referenced".to_owned())
+            .await
+            .expect("delete provider account after unbinding");
+
+        // 被未删除子商户引用时返回 Conflict。
+        sqlx::query("INSERT INTO commerce_payment_provider_account (id, tenant_id, organization_id, account_no, provider_code, environment, settlement_currency, secret_ref, status, created_at, updated_at) VALUES ('account-submerchant', 'tenant-delete', 'org-delete', 'with-sub', 'stripe', 'sandbox', 'CNY', 'ref', 'inactive', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+            .execute(&store.pool)
+            .await
+            .expect("sub-merchant provider account");
+        sqlx::query("INSERT INTO commerce_payment_sub_merchant (id, tenant_id, organization_id, provider_account_id, external_sub_merchant_id, status, created_at, updated_at) VALUES ('sub-1', 'tenant-delete', 'org-delete', 'account-submerchant', 'ext-sub-1', 'active', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+            .execute(&store.pool)
+            .await
+            .expect("referencing sub-merchant");
+        let error = store
+            .delete_provider_account(scope.clone(), "account-submerchant".to_owned())
+            .await
+            .expect_err("delete provider account referenced by sub-merchant");
+        assert_eq!(error.code(), "conflict");
     }
 }
 

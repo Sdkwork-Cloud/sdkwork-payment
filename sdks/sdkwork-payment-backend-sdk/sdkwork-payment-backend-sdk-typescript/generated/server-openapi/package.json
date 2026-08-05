@@ -1,6 +1,6 @@
 {
   "name": "sdkwork-payment-backend-sdk-generated-typescript",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "sdkworkRole": "transport",
   "description": "Generator-owned TypeScript transport SDK for sdkwork-payment-backend-sdk.",
@@ -26,7 +26,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@sdkwork/sdk-common": "^1.0.2"
+    "@sdkwork/sdk-common": "^1.0.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

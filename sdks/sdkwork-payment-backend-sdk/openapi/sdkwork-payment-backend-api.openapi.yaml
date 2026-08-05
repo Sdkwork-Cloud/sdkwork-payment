@@ -430,6 +430,37 @@
         "x-sdkwork-server-request-id": true,
         "x-sdkwork-permission": "commerce.payments.provider_accounts.update",
         "x-sdkwork-idempotent": true
+      },
+      "delete": {
+        "tags": ["payments"],
+        "summary": "Provider account delete.",
+        "description": "Soft-deletes a provider account (marks deleted_at). Rejected with 409 while the account is still referenced by an active payment channel or sub-merchant.",
+        "operationId": "providerAccounts.delete",
+        "parameters": [
+          { "name": "providerAccountId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "No content" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        },
+        "security": [{ "AuthToken": [], "AccessToken": [] }],
+        "x-sdkwork-auth-mode": "dual-token",
+        "x-sdkwork-forbid-credential-headers": false,
+        "x-sdkwork-owner": "sdkwork-payment",
+        "x-sdkwork-api-authority": "sdkwork-payment-backend-api",
+        "x-sdkwork-domain": "commerce",
+        "x-sdkwork-resource": "providerAccounts",
+        "x-sdkwork-request-context": "WebRequestContext",
+        "x-sdkwork-api-surface": "backend-api",
+        "x-sdkwork-server-request-id": true,
+        "x-sdkwork-permission": "commerce.payments.provider_accounts.delete"
       }
     },
     "/backend/v3/api/payments/provider_accounts/{providerAccountId}/test": {

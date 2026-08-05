@@ -34,9 +34,11 @@ import {
   ADMIN_PROVIDER_LABEL,
   adminPaymentMethodKeysForProvider,
   adminPaymentMethodKeyOption,
+  BaseDataSelectField,
   PaymentMethodIcon,
   PaymentProviderIcon,
   SdkworkPaymentListPaginationControls,
+  type PaymentBaseDataOption,
 } from "@sdkwork/payment-pc-admin-core";
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
 import type {
@@ -55,6 +57,9 @@ export interface PaymentMethodManagerProps {
   selectedId?: string;
   canCreate: boolean;
   canUpdate: boolean;
+  /** Base-data options resolved by the host app; free-text fallback when empty. */
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onSelect(method: PaymentMethodView): void;
   onCreate(draft: PaymentMethodDraft): Promise<void> | void;
   onUpdate(methodKey: string, draft: PaymentMethodUpdateDraft): Promise<void> | void;
@@ -225,6 +230,8 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
             <PaymentMethodForm
               mode={dialog.kind === "create" ? "create" : "update"}
               initial={dialog.kind === "edit" ? dialog.method : undefined}
+              countryOptions={props.countryOptions}
+              currencyOptions={props.currencyOptions}
               onCancel={() => setDialog({ kind: "closed" })}
               onSubmit={
                 dialog.kind === "create"
@@ -242,6 +249,8 @@ export function PaymentMethodManager(props: PaymentMethodManagerProps) {
 interface PaymentMethodFormProps {
   mode: "create" | "update";
   initial?: PaymentMethodView;
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
   onCancel(): void;
   onSubmit(draft: PaymentMethodDraft | PaymentMethodUpdateDraft): Promise<void> | void;
 }
@@ -450,24 +459,24 @@ function PaymentMethodForm(props: PaymentMethodFormProps) {
         </p>
       )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <AdminFieldLabel label="Currency" htmlFor="method-form-currency">
-          <Input
-            id="method-form-currency"
-            value={currencyCode}
-            onChange={(event) => setCurrencyCode(event.target.value)}
-            placeholder="CNY"
-            maxLength={3}
-          />
-        </AdminFieldLabel>
-        <AdminFieldLabel label="Country" htmlFor="method-form-country">
-          <Input
-            id="method-form-country"
-            value={countryCode}
-            onChange={(event) => setCountryCode(event.target.value)}
-            placeholder="CN"
-            maxLength={2}
-          />
-        </AdminFieldLabel>
+        <BaseDataSelectField
+          id="method-form-currency"
+          label="Currency"
+          options={props.currencyOptions}
+          value={currencyCode}
+          maxLength={3}
+          placeholder="CNY"
+          onChange={setCurrencyCode}
+        />
+        <BaseDataSelectField
+          id="method-form-country"
+          label="Country"
+          options={props.countryOptions}
+          value={countryCode}
+          maxLength={2}
+          placeholder="CN"
+          onChange={setCountryCode}
+        />
         <AdminFieldLabel label="Sort order" htmlFor="method-form-sort">
           <Input
             id="method-form-sort"

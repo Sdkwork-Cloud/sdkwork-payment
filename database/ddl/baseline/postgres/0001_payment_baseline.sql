@@ -606,3 +606,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_reconciliation_run_no
 CREATE INDEX IF NOT EXISTS idx_commerce_payment_reconciliation_run_period
     ON commerce_payment_reconciliation_run (tenant_id, provider_code, period_start DESC)
     WHERE deleted_at IS NULL;
+
+-- =============================================================================
+-- 11. commerce_payment_provider
+-- =============================================================================
+-- Provider catalog: the mainstream PSP inventory read by the admin payment
+-- center (GET /backend/v3/api/payments/providers) and by payment routing.
+-- Rows must stay aligned with the runtime adapter registry
+-- (sdkwork-payment-providers registry.rs): providers with an adapter are
+-- active; future mainstream providers are inactive placeholders until their
+-- adapter exists. capabilities is a fixed read-contract value, not stored here.
+CREATE TABLE IF NOT EXISTS commerce_payment_provider (
+    id                   TEXT PRIMARY KEY,
+    tenant_id            TEXT NOT NULL,
+    organization_id      TEXT,
+    provider_code        TEXT NOT NULL,
+    display_name         TEXT NOT NULL,
+    provider_type        TEXT NOT NULL,
+    supported_countries  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    supported_currencies JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status               TEXT NOT NULL DEFAULT 'active'
+                         CHECK (status IN ('active', 'inactive', 'disabled')),
+    sort_order           INTEGER NOT NULL DEFAULT 0,
+    version              BIGINT NOT NULL DEFAULT 0,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at           TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_provider_tenant_org_code
+    ON commerce_payment_provider (tenant_id, COALESCE(organization_id, ''), provider_code)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_provider_status
+    ON commerce_payment_provider (tenant_id, provider_code, status)
+    WHERE deleted_at IS NULL;

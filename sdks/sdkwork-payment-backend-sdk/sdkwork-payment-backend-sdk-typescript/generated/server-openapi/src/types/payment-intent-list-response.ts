@@ -3,7 +3,7 @@ import type { PaymentIntent } from './payment-intent';
 
 export interface PaymentIntentListResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { items: PaymentIntent[]; pageInfo: PageInfo; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

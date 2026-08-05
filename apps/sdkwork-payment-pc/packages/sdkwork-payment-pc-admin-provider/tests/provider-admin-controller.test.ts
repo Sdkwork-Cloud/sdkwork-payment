@@ -56,6 +56,7 @@ function createBackendService() {
   }));
   const providerAccountsCreate = vi.fn(async (..._args: unknown[]) => providerAccount);
   const providerAccountsUpdate = vi.fn(async (..._args: unknown[]) => providerAccount);
+  const providerAccountsDelete = vi.fn(async () => undefined);
   const providerAccountsTest = vi.fn(async (..._args: unknown[]) => ({
     ok: true,
     providerCode: "stripe",
@@ -69,6 +70,7 @@ function createBackendService() {
   return {
     calls: {
       providerAccountsCreate,
+      providerAccountsDelete,
       providerAccountsList,
       providerAccountsRotate,
       providerAccountsTest,
@@ -82,6 +84,7 @@ function createBackendService() {
         list: providerAccountsList,
         create: providerAccountsCreate,
         update: providerAccountsUpdate,
+        delete: providerAccountsDelete,
         test: providerAccountsTest,
         credentials: { rotate: providerAccountsRotate },
       },
@@ -179,5 +182,30 @@ describe("payment provider admin controller", () => {
         providerAccountId: providerAccount.id,
       });
     }
+  });
+
+  it("deletes a provider account through the generated SDK and reloads the list", async () => {
+    const { calls, service } = createBackendService();
+    const controller = createPaymentProviderAdminController({ service });
+    await controller.load();
+    const listCallsBeforeDelete = calls.providerAccountsList.mock.calls.length;
+
+    await controller.deleteProviderAccount(providerAccount.id);
+
+    expect(calls.providerAccountsDelete).toHaveBeenCalledTimes(1);
+    expect(calls.providerAccountsDelete).toHaveBeenCalledWith(providerAccount.id);
+    // 删除成功后刷新列表。
+    expect(calls.providerAccountsList.mock.calls.length).toBe(listCallsBeforeDelete + 1);
+  });
+
+  it("clears the selected provider account after it is deleted", async () => {
+    const { service } = createBackendService();
+    const controller = createPaymentProviderAdminController({ service });
+    await controller.load();
+    expect(controller.getState().selectedProviderAccount?.id).toBe(providerAccount.id);
+
+    await controller.deleteProviderAccount(providerAccount.id);
+
+    expect(controller.getState().selectedProviderAccount).toBeUndefined();
   });
 });

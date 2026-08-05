@@ -48,3 +48,6 @@ tables:
   - name: commerce_payment_reconciliation_run
     lifecycle_status: active
     owner: sdkwork-payment
+  - name: commerce_payment_provider
+    lifecycle_status: active
+    owner: sdkwork-payment

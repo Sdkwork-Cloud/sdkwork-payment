@@ -25,6 +25,7 @@ import {
 } from "@sdkwork/ui-pc-react";
 import {
   AdminFieldLabel,
+  ConfirmDialog,
   PaymentAdminI18nBoundary,
   PaymentAdminTabsContent,
   PaymentAdminTabsList,
@@ -35,6 +36,7 @@ import { ProviderAccountForm } from "../components/ProviderAccountForm";
 import { ProviderAccountList } from "../components/ProviderAccountList";
 import { SubMerchantManager } from "../components/SubMerchantManager";
 import type {
+  PaymentBaseDataOption,
   PaymentCredentialRotateDraft,
   PaymentProviderAccountDraft,
   PaymentProviderAccountTestOptions,
@@ -50,6 +52,15 @@ export interface PaymentProviderAdminWorkspaceProps {
   section?: PaymentProviderAdminSection;
   title?: string;
   description?: string;
+  /** Optional actions rendered at the far right of the tab list row. */
+  tabActions?: React.ReactNode;
+  /**
+   * Base-data options resolved by the host app (sdkwork-appbase base-data
+   * capability). When empty/omitted the account form degrades to free-text
+   * country/currency inputs.
+   */
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
 }
 
 export type PaymentProviderAdminSection = "accounts" | "submerchants";
@@ -57,6 +68,7 @@ export type PaymentProviderAdminSection = "accounts" | "submerchants";
 export interface PaymentProviderAdminCapabilities {
   canCreateProviderAccount: boolean;
   canUpdateProviderAccount: boolean;
+  canDeleteProviderAccount: boolean;
   canTestProviderAccount: boolean;
   canRotateProviderCredentials: boolean;
   canCreateSubMerchant: boolean;
@@ -68,6 +80,7 @@ type DialogState =
   | { kind: "closed" }
   | { kind: "create" }
   | { kind: "edit"; account: PaymentProviderAccountView }
+  | { kind: "delete"; account: PaymentProviderAccountView }
   | { kind: "test"; account: PaymentProviderAccountView }
   | { kind: "rotate"; account: PaymentProviderAccountView };
 
@@ -157,6 +170,14 @@ export function PaymentProviderAdminWorkspace(
     setDialog({ kind: "closed" });
   }
 
+  async function handleDelete() {
+    if (dialog.kind !== "delete") {
+      return;
+    }
+    await controller.deleteProviderAccount(dialog.account.id);
+    setDialog({ kind: "closed" });
+  }
+
   function handleSelect(account: PaymentProviderAccountView) {
     controller.selectProviderAccount(account.id);
     if (account.accountMode === "partner") {
@@ -220,10 +241,13 @@ export function PaymentProviderAdminWorkspace(
           }}
         >
           {!props.section ? (
-            <PaymentAdminTabsList aria-label="Payment provider sections">
-              <PaymentAdminTabsTrigger value="accounts">Provider accounts</PaymentAdminTabsTrigger>
-              <PaymentAdminTabsTrigger value="submerchants">Sub-merchants</PaymentAdminTabsTrigger>
-            </PaymentAdminTabsList>
+            <div className="flex items-center justify-between gap-2">
+              <PaymentAdminTabsList aria-label="Payment provider sections">
+                <PaymentAdminTabsTrigger value="accounts">Provider accounts</PaymentAdminTabsTrigger>
+                <PaymentAdminTabsTrigger value="submerchants">Sub-merchants</PaymentAdminTabsTrigger>
+              </PaymentAdminTabsList>
+              {props.tabActions ?? null}
+            </div>
           ) : null}
           <PaymentAdminTabsContent value="accounts">
             <ProviderAccountList
@@ -235,10 +259,12 @@ export function PaymentProviderAdminWorkspace(
               canEdit={props.capabilities.canUpdateProviderAccount}
               canRotate={props.capabilities.canRotateProviderCredentials}
               canTest={props.capabilities.canTestProviderAccount}
+              canDelete={props.capabilities.canDeleteProviderAccount}
               onSelect={handleSelect}
               onEdit={(account) => setDialog({ kind: "edit", account })}
               onTest={(account) => setDialog({ kind: "test", account })}
               onRotate={(account) => setDialog({ kind: "rotate", account })}
+              onDelete={(account) => setDialog({ kind: "delete", account })}
               onLoadMore={loadProviderAccounts}
               onCreate={() => setDialog({ kind: "create" })}
             />
@@ -314,6 +340,8 @@ export function PaymentProviderAdminWorkspace(
               mode={dialog.kind === "create" ? "create" : "update"}
               initial={dialog.kind === "edit" ? dialog.account : undefined}
               partnerAccountOptions={partnerAccounts}
+              countryOptions={props.countryOptions}
+              currencyOptions={props.currencyOptions}
               onCancel={() => setDialog({ kind: "closed" })}
               onSubmit={
                 dialog.kind === "create"
@@ -372,6 +400,25 @@ export function PaymentProviderAdminWorkspace(
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={dialog.kind === "delete"}
+        title="Delete provider account?"
+        description={
+          dialog.kind === "delete"
+            ? `Delete provider account ${dialog.account.accountNo} (${dialog.account.providerCode} / ${dialog.account.environment})? The account is soft-deleted and no longer listed. Accounts still referenced by payment channels or sub-merchants cannot be deleted.`
+            : ""
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        busy={state.status === "saving"}
+        onConfirm={() => void handleDelete()}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDialog({ kind: "closed" });
+          }
+        }}
+      />
 
       <Dialog
         open={dialog.kind === "rotate"}

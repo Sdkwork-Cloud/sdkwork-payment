@@ -3,7 +3,7 @@ import type { SubMerchant } from './sub-merchant';
 
 export interface SubMerchantListResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { items: SubMerchant[]; pageInfo: PageInfo; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

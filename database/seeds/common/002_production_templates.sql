@@ -1,3 +1,22 @@
+-- Provider catalog: the mainstream PSP inventory read by the admin payment
+-- center (GET /backend/v3/api/payments/providers). Providers with a runtime
+-- adapter (sdkwork-payment-providers registry) are active; future mainstream
+-- providers are inactive placeholders until their adapter exists. The read
+-- contract hardcodes capabilities, so they are not stored per row.
+INSERT INTO commerce_payment_provider (
+    id, tenant_id, organization_id, provider_code, display_name, provider_type,
+    supported_countries, supported_currencies, status, sort_order,
+    created_at, updated_at
+)
+VALUES
+    ('bootstrap-provider-stripe', '100001', '0', 'stripe', 'Stripe', 'card', '["US","GB","CA","AU","HK","SG","JP","DE","FR","CN"]', '["USD","CNY","EUR","GBP","CAD","AUD","HKD","SGD","JPY"]', 'active', 100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('bootstrap-provider-alipay', '100001', '0', 'alipay', 'Alipay', 'wallet', '["CN","HK","SG","MY","JP","US"]', '["CNY","USD","HKD","SGD","JPY"]', 'active', 200, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('bootstrap-provider-wechat-pay', '100001', '0', 'wechat_pay', 'WeChat Pay', 'wallet', '["CN","HK","SG","US"]', '["CNY","USD","HKD","SGD"]', 'active', 300, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('bootstrap-provider-paypal', '100001', '0', 'paypal', 'PayPal', 'wallet', '["US","GB","DE","FR","CA","AU"]', '["USD","EUR","GBP","CAD","AUD"]', 'inactive', 400, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('bootstrap-provider-apple-pay', '100001', '0', 'apple_pay', 'Apple Pay', 'wallet', '["US","GB","CA","AU","JP","CN"]', '["USD","CNY","GBP","CAD","AUD","JPY"]', 'inactive', 500, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('bootstrap-provider-google-pay', '100001', '0', 'google_pay', 'Google Pay', 'wallet', '["US","GB","CA","AU","JP"]', '["USD","GBP","CAD","AUD","JPY"]', 'inactive', 600, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT DO NOTHING;
+
 -- External PSP accounts are intentionally inactive until an operator attaches
 -- approved secret references and enables the reviewed payment path. Their
 -- methods/channels are pre-wired; runtime eligibility is gated by this account.

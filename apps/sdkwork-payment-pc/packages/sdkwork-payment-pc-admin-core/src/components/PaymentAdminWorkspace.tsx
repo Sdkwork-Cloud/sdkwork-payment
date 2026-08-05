@@ -66,7 +66,11 @@ export function PaymentAdminTabsList({ className, ...props }: TabsListProps) {
 
 export function PaymentAdminTabsTrigger({ className, ...props }: TabsTriggerProps) {
   const classes = [
-    "h-9 min-w-fit shrink-0 rounded-none border-b-2 border-transparent px-3 py-2 text-xs shadow-none data-[state=active]:border-[var(--sdk-color-brand-primary)] data-[state=active]:!bg-transparent data-[state=active]:shadow-none",
+    // Triggers size to content instead of h-9: the tab list is h-9 with a 2px
+    // bottom border (34px content box), so fixed 36px triggers overflow and
+    // force a vertical scrollbar on the list (overflow-x: auto makes
+    // overflow-y compute to auto as well).
+    "min-w-fit shrink-0 rounded-none border-b-2 border-transparent px-3 py-2 text-xs shadow-none data-[state=active]:border-[var(--sdk-color-brand-primary)] data-[state=active]:!bg-transparent data-[state=active]:shadow-none",
     className,
   ].filter(Boolean).join(" ");
 

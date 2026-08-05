@@ -26,6 +26,7 @@ import {
   PaymentAdminTabsList,
   PaymentAdminTabsTrigger,
   PaymentAdminWorkspace,
+  type PaymentBaseDataOption,
 } from "@sdkwork/payment-pc-admin-core";
 import { ChannelManager } from "../components/ChannelManager";
 import { PaymentMethodManager } from "../components/PaymentMethodManager";
@@ -46,6 +47,9 @@ export interface PaymentChannelAdminWorkspaceProps {
   section?: PaymentChannelAdminSection;
   title?: string;
   description?: string;
+  /** Base-data options resolved by the host app; forms fall back to free text when empty. */
+  countryOptions?: readonly PaymentBaseDataOption[];
+  currencyOptions?: readonly PaymentBaseDataOption[];
 }
 
 export interface PaymentChannelAdminCapabilities {
@@ -146,6 +150,8 @@ export function PaymentChannelAdminWorkspace(
               selectedId={state.selectedMethodId}
               canCreate={props.capabilities.canCreateMethod}
               canUpdate={props.capabilities.canUpdateMethod}
+              countryOptions={props.countryOptions}
+              currencyOptions={props.currencyOptions}
               onSelect={(method) => handleSelectMethod(method.id)}
               onCreate={handleCreateMethod}
               onUpdate={handleUpdateMethod}
@@ -161,6 +167,8 @@ export function PaymentChannelAdminWorkspace(
               pageInfo={state.listPageInfo?.channels}
               busy={busy}
               canCreate={props.capabilities.canCreateChannel}
+              countryOptions={props.countryOptions}
+              currencyOptions={props.currencyOptions}
               onCreate={handleCreateChannel}
               onLoadMore={() => void controller.loadMoreChannels()}
             />
@@ -175,6 +183,8 @@ export function PaymentChannelAdminWorkspace(
               canCreate={props.capabilities.canCreateRouteRule}
               canDelete={props.capabilities.canDeleteRouteRule}
               canUpdate={props.capabilities.canUpdateRouteRule}
+              countryOptions={props.countryOptions}
+              currencyOptions={props.currencyOptions}
               onCreate={handleCreateRouteRule}
               onUpdate={handleUpdateRouteRule}
               onDelete={handleDeleteRouteRule}

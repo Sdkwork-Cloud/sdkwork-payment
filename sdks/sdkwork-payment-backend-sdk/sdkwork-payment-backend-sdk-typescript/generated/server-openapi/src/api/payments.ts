@@ -1,5 +1,5 @@
 import { backendApiPath } from './paths';
-import type { HttpClient } from '../http/client';
+import type { ApiRequestOptions, HttpClient } from '../http/client';
 
 import type { Certificate, CreateCertificateCommand, CreatePaymentChannelCommand, CreatePaymentMethodCommand, CreateProviderAccountCommand, CreateReconciliationRunCommand, CreateRefundCommand, CreateRouteRuleCommand, CreateSubMerchantCommand, CredentialRotateCommand, PageInfo, PaymentAttempt, PaymentChannel, PaymentIntent, PaymentMethod, ProviderAccount, ProviderAccountTestCommand, ProviderAccountTestResult, ReconciliationRun, Refund, RetryRefundCommand, RouteRule, SandboxTriggerCommand, SdkWorkAsyncData, SdkWorkCommandData, SubMerchant, UpdatePaymentMethodCommand, UpdateProviderAccountCommand, UpdateRouteRuleCommand, UpdateSubMerchantCommand, WebhookEvent, WebhookEventsReplayRequest, WebhookSignatureTestCommand, WebhookSignatureTestResult } from '../types';
 
@@ -21,25 +21,25 @@ export class PaymentsDevApi {
 
 
 /** Sandbox event trigger (dev config). */
-  async sandboxTrigger(body: SandboxTriggerCommand, params?: PaymentsDevSandboxTriggerParams): Promise<SdkWorkAsyncData> {
+  async sandboxTrigger(body: SandboxTriggerCommand, params?: PaymentsDevSandboxTriggerParams, requestOptions?: ApiRequestOptions): Promise<SdkWorkAsyncData> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<SdkWorkAsyncData>(backendApiPath(`/payments/dev/sandbox_trigger`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<SdkWorkAsyncData>(backendApiPath(`/payments/dev/sandbox_trigger`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'command' });
   }
 
 /** Webhook signature verification test (dev config). */
-  async webhookSignatureTest(body: WebhookSignatureTestCommand, params?: PaymentsDevWebhookSignatureTestParams): Promise<WebhookSignatureTestResult> {
+  async webhookSignatureTest(body: WebhookSignatureTestCommand, params?: PaymentsDevWebhookSignatureTestParams, requestOptions?: ApiRequestOptions): Promise<WebhookSignatureTestResult> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<WebhookSignatureTestResult>(backendApiPath(`/payments/dev/webhook_signature_test`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<WebhookSignatureTestResult>(backendApiPath(`/payments/dev/webhook_signature_test`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 }
 
@@ -66,7 +66,7 @@ export class PaymentsReconciliationRunsApi {
 
 
 /** Reconciliation runs list. */
-  async list(params?: PaymentsReconciliationRunsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsReconciliationRunsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: ReconciliationRun[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -76,18 +76,18 @@ export class PaymentsReconciliationRunsApi {
       { name: 'providerCode', value: params?.providerCode, style: 'form', explode: true, allowReserved: false },
       { name: 'providerAccountId', value: params?.providerAccountId, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/reconciliation_runs`), query));
+    return this.client.request<{ items: ReconciliationRun[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/reconciliation_runs`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Reconciliation run create. */
-  async create(body: CreateReconciliationRunCommand, params?: PaymentsReconciliationRunsCreateParams): Promise<ReconciliationRun> {
+  async create(body: CreateReconciliationRunCommand, params?: PaymentsReconciliationRunsCreateParams, requestOptions?: ApiRequestOptions): Promise<ReconciliationRun> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<ReconciliationRun>(backendApiPath(`/payments/reconciliation_runs`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<ReconciliationRun>(backendApiPath(`/payments/reconciliation_runs`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 }
 
@@ -110,7 +110,7 @@ export class PaymentsWebhookEventsApi {
 
 
 /** Webhook events list. */
-  async list(params?: PaymentsWebhookEventsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsWebhookEventsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: WebhookEvent[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -120,12 +120,12 @@ export class PaymentsWebhookEventsApi {
       { name: 'providerCode', value: params?.providerCode, style: 'form', explode: true, allowReserved: false },
       { name: 'eventType', value: params?.eventType, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/webhook_events`), query));
+    return this.client.request<{ items: WebhookEvent[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/webhook_events`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Webhook event replay. */
-  async replay(eventId: string, body?: WebhookEventsReplayRequest): Promise<SdkWorkCommandData> {
-    return this.client.post<SdkWorkCommandData>(backendApiPath(`/payments/webhook_events/${serializePathParameter(eventId, { name: 'eventId', style: 'simple', explode: false })}/replay`), body, undefined, undefined, 'application/json');
+  async replay(eventId: string, body?: WebhookEventsReplayRequest, requestOptions?: ApiRequestOptions): Promise<SdkWorkCommandData> {
+    return this.client.request<SdkWorkCommandData>(backendApiPath(`/payments/webhook_events/${serializePathParameter(eventId, { name: 'eventId', style: 'simple', explode: false })}/replay`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', sdkworkUnwrapKind: 'command' });
   }
 }
 
@@ -148,7 +148,7 @@ export class PaymentsAttemptsApi {
 
 
 /** Payment attempts list. */
-  async list(params?: PaymentsAttemptsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsAttemptsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: PaymentAttempt[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -158,7 +158,7 @@ export class PaymentsAttemptsApi {
       { name: 'providerCode', value: params?.providerCode, style: 'form', explode: true, allowReserved: false },
       { name: 'paymentIntentId', value: params?.paymentIntentId, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/attempts`), query));
+    return this.client.request<{ items: PaymentAttempt[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/attempts`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 }
 
@@ -185,7 +185,7 @@ export class PaymentsCertificatesApi {
 
 
 /** Certificates list. */
-  async list(params?: PaymentsCertificatesListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsCertificatesListParams, requestOptions?: ApiRequestOptions): Promise<{ items: Certificate[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -195,28 +195,28 @@ export class PaymentsCertificatesApi {
       { name: 'certificateType', value: params?.certificateType, style: 'form', explode: true, allowReserved: false },
       { name: 'expiringWithinDays', value: params?.expiringWithinDays, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/certificates`), query));
+    return this.client.request<{ items: Certificate[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/certificates`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Certificate create (upload/register PEM). */
-  async create(body: CreateCertificateCommand, params?: PaymentsCertificatesCreateParams): Promise<Certificate> {
+  async create(body: CreateCertificateCommand, params?: PaymentsCertificatesCreateParams, requestOptions?: ApiRequestOptions): Promise<Certificate> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<Certificate>(backendApiPath(`/payments/certificates`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<Certificate>(backendApiPath(`/payments/certificates`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 
 /** Certificate retrieve. */
-  async retrieve(certificateId: string): Promise<Certificate> {
-    return this.client.get<Certificate>(backendApiPath(`/payments/certificates/${serializePathParameter(certificateId, { name: 'certificateId', style: 'simple', explode: false })}`));
+  async retrieve(certificateId: string, requestOptions?: ApiRequestOptions): Promise<Certificate> {
+    return this.client.request<Certificate>(backendApiPath(`/payments/certificates/${serializePathParameter(certificateId, { name: 'certificateId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'item' });
   }
 
 /** Certificate delete. */
-  async delete(certificateId: string): Promise<void> {
-    return this.client.delete<void>(backendApiPath(`/payments/certificates/${serializePathParameter(certificateId, { name: 'certificateId', style: 'simple', explode: false })}`));
+  async delete(certificateId: string, requestOptions?: ApiRequestOptions): Promise<void> {
+    return this.client.request<void>(backendApiPath(`/payments/certificates/${serializePathParameter(certificateId, { name: 'certificateId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'DELETE' as any });
   }
 }
 
@@ -247,7 +247,7 @@ export class PaymentsSubMerchantsApi {
 
 
 /** Sub-merchants list (ISV/partner mode only). */
-  async list(params?: PaymentsSubMerchantsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsSubMerchantsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: SubMerchant[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -257,39 +257,39 @@ export class PaymentsSubMerchantsApi {
       { name: 'providerCode', value: params?.providerCode, style: 'form', explode: true, allowReserved: false },
       { name: 'status', value: params?.status, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/sub_merchants`), query));
+    return this.client.request<{ items: SubMerchant[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/sub_merchants`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Sub-merchant create (ISV/partner mode only). */
-  async create(body: CreateSubMerchantCommand, params?: PaymentsSubMerchantsCreateParams): Promise<SubMerchant> {
+  async create(body: CreateSubMerchantCommand, params?: PaymentsSubMerchantsCreateParams, requestOptions?: ApiRequestOptions): Promise<SubMerchant> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<SubMerchant>(backendApiPath(`/payments/sub_merchants`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<SubMerchant>(backendApiPath(`/payments/sub_merchants`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 
 /** Sub-merchant retrieve. */
-  async retrieve(subMerchantId: string): Promise<SubMerchant> {
-    return this.client.get<SubMerchant>(backendApiPath(`/payments/sub_merchants/${serializePathParameter(subMerchantId, { name: 'subMerchantId', style: 'simple', explode: false })}`));
+  async retrieve(subMerchantId: string, requestOptions?: ApiRequestOptions): Promise<SubMerchant> {
+    return this.client.request<SubMerchant>(backendApiPath(`/payments/sub_merchants/${serializePathParameter(subMerchantId, { name: 'subMerchantId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'item' });
   }
 
 /** Sub-merchant update. */
-  async update(subMerchantId: string, body: UpdateSubMerchantCommand, params?: PaymentsSubMerchantsUpdateParams): Promise<SubMerchant> {
+  async update(subMerchantId: string, body: UpdateSubMerchantCommand, params?: PaymentsSubMerchantsUpdateParams, requestOptions?: ApiRequestOptions): Promise<SubMerchant> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.patch<SubMerchant>(backendApiPath(`/payments/sub_merchants/${serializePathParameter(subMerchantId, { name: 'subMerchantId', style: 'simple', explode: false })}`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<SubMerchant>(backendApiPath(`/payments/sub_merchants/${serializePathParameter(subMerchantId, { name: 'subMerchantId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'PATCH' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 
 /** Sub-merchant delete. */
-  async delete(subMerchantId: string): Promise<void> {
-    return this.client.delete<void>(backendApiPath(`/payments/sub_merchants/${serializePathParameter(subMerchantId, { name: 'subMerchantId', style: 'simple', explode: false })}`));
+  async delete(subMerchantId: string, requestOptions?: ApiRequestOptions): Promise<void> {
+    return this.client.request<void>(backendApiPath(`/payments/sub_merchants/${serializePathParameter(subMerchantId, { name: 'subMerchantId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'DELETE' as any });
   }
 }
 
@@ -319,7 +319,7 @@ export class PaymentsRouteRulesApi {
 
 
 /** Route rules list. */
-  async list(params?: PaymentsRouteRulesListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsRouteRulesListParams, requestOptions?: ApiRequestOptions): Promise<{ items: RouteRule[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -328,34 +328,34 @@ export class PaymentsRouteRulesApi {
       { name: 'status', value: params?.status, style: 'form', explode: true, allowReserved: false },
       { name: 'channelId', value: params?.channelId, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/route_rules`), query));
+    return this.client.request<{ items: RouteRule[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/route_rules`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Route rule create. */
-  async create(body: CreateRouteRuleCommand, params?: PaymentsRouteRulesCreateParams): Promise<RouteRule> {
+  async create(body: CreateRouteRuleCommand, params?: PaymentsRouteRulesCreateParams, requestOptions?: ApiRequestOptions): Promise<RouteRule> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<RouteRule>(backendApiPath(`/payments/route_rules`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<RouteRule>(backendApiPath(`/payments/route_rules`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 
 /** Route rule update. */
-  async update(routeRuleId: string, body: UpdateRouteRuleCommand, params?: PaymentsRouteRulesUpdateParams): Promise<RouteRule> {
+  async update(routeRuleId: string, body: UpdateRouteRuleCommand, params?: PaymentsRouteRulesUpdateParams, requestOptions?: ApiRequestOptions): Promise<RouteRule> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.patch<RouteRule>(backendApiPath(`/payments/route_rules/${serializePathParameter(routeRuleId, { name: 'routeRuleId', style: 'simple', explode: false })}`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<RouteRule>(backendApiPath(`/payments/route_rules/${serializePathParameter(routeRuleId, { name: 'routeRuleId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'PATCH' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 
 /** Route rule delete. */
-  async delete(routeRuleId: string): Promise<void> {
-    return this.client.delete<void>(backendApiPath(`/payments/route_rules/${serializePathParameter(routeRuleId, { name: 'routeRuleId', style: 'simple', explode: false })}`));
+  async delete(routeRuleId: string, requestOptions?: ApiRequestOptions): Promise<void> {
+    return this.client.request<void>(backendApiPath(`/payments/route_rules/${serializePathParameter(routeRuleId, { name: 'routeRuleId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'DELETE' as any });
   }
 }
 
@@ -382,7 +382,7 @@ export class PaymentsChannelsApi {
 
 
 /** Payment channels list. */
-  async list(params?: PaymentsChannelsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsChannelsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: PaymentChannel[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -392,18 +392,18 @@ export class PaymentsChannelsApi {
       { name: 'sceneCode', value: params?.sceneCode, style: 'form', explode: true, allowReserved: false },
       { name: 'status', value: params?.status, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/channels`), query));
+    return this.client.request<{ items: PaymentChannel[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/channels`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Payment channel create. */
-  async create(body: CreatePaymentChannelCommand, params?: PaymentsChannelsCreateParams): Promise<PaymentChannel> {
+  async create(body: CreatePaymentChannelCommand, params?: PaymentsChannelsCreateParams, requestOptions?: ApiRequestOptions): Promise<PaymentChannel> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<PaymentChannel>(backendApiPath(`/payments/channels`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<PaymentChannel>(backendApiPath(`/payments/channels`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 }
 
@@ -420,14 +420,14 @@ export class PaymentsProviderAccountsCredentialsApi {
 
 
 /** Provider account credential rotation. */
-  async rotate(providerAccountId: string, body: CredentialRotateCommand, params?: PaymentsProviderAccountsCredentialsRotateParams): Promise<ProviderAccount> {
+  async rotate(providerAccountId: string, body: CredentialRotateCommand, params?: PaymentsProviderAccountsCredentialsRotateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<ProviderAccount>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}/credentials/rotate`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<ProviderAccount>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}/credentials/rotate`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 }
 
@@ -465,7 +465,7 @@ export class PaymentsProviderAccountsApi {
 
 
 /** Provider accounts list. */
-  async list(params?: PaymentsProviderAccountsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsProviderAccountsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: ProviderAccount[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -476,40 +476,45 @@ export class PaymentsProviderAccountsApi {
       { name: 'accountMode', value: params?.accountMode, style: 'form', explode: true, allowReserved: false },
       { name: 'status', value: params?.status, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/provider_accounts`), query));
+    return this.client.request<{ items: ProviderAccount[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/provider_accounts`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Provider account create. */
-  async create(body: CreateProviderAccountCommand, params?: PaymentsProviderAccountsCreateParams): Promise<ProviderAccount> {
+  async create(body: CreateProviderAccountCommand, params?: PaymentsProviderAccountsCreateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<ProviderAccount>(backendApiPath(`/payments/provider_accounts`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<ProviderAccount>(backendApiPath(`/payments/provider_accounts`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 
 /** Provider account update. */
-  async update(providerAccountId: string, body: UpdateProviderAccountCommand, params?: PaymentsProviderAccountsUpdateParams): Promise<ProviderAccount> {
+  async update(providerAccountId: string, body: UpdateProviderAccountCommand, params?: PaymentsProviderAccountsUpdateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.patch<ProviderAccount>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<ProviderAccount>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'PATCH' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
+  }
+
+/** Provider account delete. */
+  async delete(providerAccountId: string, requestOptions?: ApiRequestOptions): Promise<void> {
+    return this.client.request<void>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'DELETE' as any });
   }
 
 /** Provider account credential connectivity test. */
-  async test(providerAccountId: string, body?: ProviderAccountTestCommand, params?: PaymentsProviderAccountsTestParams): Promise<ProviderAccountTestResult> {
+  async test(providerAccountId: string, body?: ProviderAccountTestCommand, params?: PaymentsProviderAccountsTestParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccountTestResult> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<ProviderAccountTestResult>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}/test`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<ProviderAccountTestResult>(backendApiPath(`/payments/provider_accounts/${serializePathParameter(providerAccountId, { name: 'providerAccountId', style: 'simple', explode: false })}/test`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 }
 
@@ -538,7 +543,7 @@ export class PaymentsMethodsApi {
 
 
 /** Payment methods list. */
-  async list(params?: PaymentsMethodsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsMethodsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: PaymentMethod[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -546,29 +551,29 @@ export class PaymentsMethodsApi {
       { name: 'q', value: params?.q, style: 'form', explode: true, allowReserved: false },
       { name: 'status', value: params?.status, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/methods`), query));
+    return this.client.request<{ items: PaymentMethod[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/methods`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Payment method create. */
-  async create(body: CreatePaymentMethodCommand, params?: PaymentsMethodsCreateParams): Promise<PaymentMethod> {
+  async create(body: CreatePaymentMethodCommand, params?: PaymentsMethodsCreateParams, requestOptions?: ApiRequestOptions): Promise<PaymentMethod> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<PaymentMethod>(backendApiPath(`/payments/methods`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<PaymentMethod>(backendApiPath(`/payments/methods`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 
 /** Payment method update. */
-  async update(methodKey: string, body: UpdatePaymentMethodCommand, params?: PaymentsMethodsUpdateParams): Promise<PaymentMethod> {
+  async update(methodKey: string, body: UpdatePaymentMethodCommand, params?: PaymentsMethodsUpdateParams, requestOptions?: ApiRequestOptions): Promise<PaymentMethod> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.patch<PaymentMethod>(backendApiPath(`/payments/methods/${serializePathParameter(methodKey, { name: 'methodKey', style: 'simple', explode: false })}`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<PaymentMethod>(backendApiPath(`/payments/methods/${serializePathParameter(methodKey, { name: 'methodKey', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'PATCH' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 }
 
@@ -598,7 +603,7 @@ export class PaymentsRefundsApi {
 
 
 /** Refunds list. */
-  async list(params?: PaymentsRefundsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsRefundsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: Refund[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -607,34 +612,34 @@ export class PaymentsRefundsApi {
       { name: 'order_id', value: params?.orderId, style: 'form', explode: true, allowReserved: false },
       { name: 'payment_intent_id', value: params?.paymentIntentId, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/refunds`), query));
+    return this.client.request<{ items: Refund[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/refunds`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Refund create. */
-  async create(body: CreateRefundCommand, params?: PaymentsRefundsCreateParams): Promise<Refund> {
+  async create(body: CreateRefundCommand, params?: PaymentsRefundsCreateParams, requestOptions?: ApiRequestOptions): Promise<Refund> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<Refund>(backendApiPath(`/payments/refunds`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<Refund>(backendApiPath(`/payments/refunds`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
   }
 
 /** Refund retrieve. */
-  async retrieve(refundId: string): Promise<Refund> {
-    return this.client.get<Refund>(backendApiPath(`/payments/refunds/${serializePathParameter(refundId, { name: 'refundId', style: 'simple', explode: false })}`));
+  async retrieve(refundId: string, requestOptions?: ApiRequestOptions): Promise<Refund> {
+    return this.client.request<Refund>(backendApiPath(`/payments/refunds/${serializePathParameter(refundId, { name: 'refundId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'item' });
   }
 
 /** Refund provider submission retry. */
-  async retry(refundId: string, body: RetryRefundCommand, params?: PaymentsRefundsRetryParams): Promise<SdkWorkCommandData> {
+  async retry(refundId: string, body: RetryRefundCommand, params?: PaymentsRefundsRetryParams, requestOptions?: ApiRequestOptions): Promise<SdkWorkCommandData> {
     const requestHeaders = buildRequestHeaders(
       {
         'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
-    return this.client.post<SdkWorkCommandData>(backendApiPath(`/payments/refunds/${serializePathParameter(refundId, { name: 'refundId', style: 'simple', explode: false })}/retry`), body, undefined, requestHeaders, 'application/json');
+    return this.client.request<SdkWorkCommandData>(backendApiPath(`/payments/refunds/${serializePathParameter(refundId, { name: 'refundId', style: 'simple', explode: false })}/retry`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'command' });
   }
 }
 
@@ -657,7 +662,7 @@ export class PaymentsIntentsApi {
 
 
 /** Payment intents list. */
-  async list(params?: PaymentsIntentsListParams): Promise<Record<string, unknown>> {
+  async list(params?: PaymentsIntentsListParams, requestOptions?: ApiRequestOptions): Promise<{ items: PaymentIntent[]; pageInfo: PageInfo; }> {
     const query = buildQueryString([
       { name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },
       { name: 'page_size', value: params?.pageSize, style: 'form', explode: true, allowReserved: false },
@@ -667,12 +672,12 @@ export class PaymentsIntentsApi {
       { name: 'ownerUserId', value: params?.ownerUserId, style: 'form', explode: true, allowReserved: false },
       { name: 'orderId', value: params?.orderId, style: 'form', explode: true, allowReserved: false },
     ]);
-    return this.client.get<Record<string, unknown>>(appendQueryString(backendApiPath(`/payments/intents`), query));
+    return this.client.request<{ items: PaymentIntent[]; pageInfo: PageInfo; }>(appendQueryString(backendApiPath(`/payments/intents`), query), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'page' });
   }
 
 /** Payment intent retrieve. */
-  async retrieve(paymentIntentId: string): Promise<PaymentIntent> {
-    return this.client.get<PaymentIntent>(backendApiPath(`/payments/intents/${serializePathParameter(paymentIntentId, { name: 'paymentIntentId', style: 'simple', explode: false })}`));
+  async retrieve(paymentIntentId: string, requestOptions?: ApiRequestOptions): Promise<PaymentIntent> {
+    return this.client.request<PaymentIntent>(backendApiPath(`/payments/intents/${serializePathParameter(paymentIntentId, { name: 'paymentIntentId', style: 'simple', explode: false })}`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, sdkworkUnwrapKind: 'item' });
   }
 }
 

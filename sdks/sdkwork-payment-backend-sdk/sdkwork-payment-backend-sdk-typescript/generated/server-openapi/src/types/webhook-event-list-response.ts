@@ -3,7 +3,7 @@ import type { WebhookEvent } from './webhook-event';
 
 export interface WebhookEventListResponse {
   code: 0;
-  data: unknown & Record<string, unknown>;
+  data: unknown & { items: WebhookEvent[]; pageInfo: PageInfo; };
   /** Server-owned request correlation id. */
   traceId: string;
 }

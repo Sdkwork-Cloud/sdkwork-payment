@@ -5,20 +5,20 @@ Generated SDKWork v3 dual-token transport SDK.
 ## Installation
 
 ```bash
-npm install sdkwork-payment-backend-sdk-generated-typescript
+npm install @sdkwork/payment-backend-sdk
 # or
-yarn add sdkwork-payment-backend-sdk-generated-typescript
+yarn add @sdkwork/payment-backend-sdk
 # or
-pnpm add sdkwork-payment-backend-sdk-generated-typescript
+pnpm add @sdkwork/payment-backend-sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { SdkworkBackendClient } from 'sdkwork-payment-backend-sdk-generated-typescript';
+import { SdkworkBackendClient } from '@sdkwork/payment-backend-sdk';
 
 const client = new SdkworkBackendClient({
-  baseUrl: 'http://127.0.0.1:8080',
+  baseUrl: 'http://localhost:8080',
   timeout: 30000,
 });
 
@@ -48,10 +48,10 @@ Access-Token: <accessToken>
 ## Configuration (Non-Auth)
 
 ```typescript
-import { SdkworkBackendClient } from 'sdkwork-payment-backend-sdk-generated-typescript';
+import { SdkworkBackendClient } from '@sdkwork/payment-backend-sdk';
 
 const client = new SdkworkBackendClient({
-  baseUrl: 'http://127.0.0.1:8080',
+  baseUrl: 'http://localhost:8080',
   timeout: 30000, // Request timeout in ms
   headers: {      // Custom headers
     'X-Custom-Header': 'value',
@@ -82,7 +82,7 @@ const result = await client.payments.methods.list(params);
 ## Error Handling
 
 ```typescript
-import { SdkworkBackendClient, NetworkError, TimeoutError, AuthenticationError } from 'sdkwork-payment-backend-sdk-generated-typescript';
+import { SdkworkBackendClient, NetworkError, TimeoutError, AuthenticationError } from '@sdkwork/payment-backend-sdk';
 
 try {
   const params = {
