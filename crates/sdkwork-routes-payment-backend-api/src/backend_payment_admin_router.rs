@@ -227,6 +227,7 @@ struct UpsertProviderAccountBody {
     account_no: Option<String>,
     provider_code: Option<String>,
     merchant_id: Option<String>,
+    account_name: Option<String>,
     environment: Option<String>,
     country_code: Option<String>,
     settlement_currency: Option<String>,
@@ -251,6 +252,7 @@ pub struct BackendProviderAccountPayload {
     pub account_no: String,
     pub provider_code: Option<String>,
     pub merchant_id: Option<String>,
+    pub account_name: Option<String>,
     pub environment: Option<String>,
     pub country_code: Option<String>,
     pub settlement_currency: Option<String>,
@@ -490,7 +492,8 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
             let scope = query.scope;
             let rows = sqlx::query(
                 r#"
-                SELECT id, account_no, provider_code, merchant_id, account_mode,
+                SELECT id, account_no, provider_code, merchant_id, account_name,
+                       account_name_i18n, account_mode,
                        partner_provider_account_id, environment, country_code,
                        settlement_currency, secret_ref, webhook_secret_ref, certificate_ref,
                        capabilities, metadata, status, last_tested_at, last_test_status,
@@ -526,6 +529,8 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                         "accountNo": sqlite_string(row, "account_no"),
                         "providerCode": sqlite_string(row, "provider_code"),
                         "merchantId": sqlite_string(row, "merchant_id"),
+                        "accountName": sqlite_optional_string(row, "account_name"),
+                        "accountNameI18n": sqlite_json(row, "account_name_i18n"),
                         "accountMode": sqlite_string(row, "account_mode"),
                         "partnerProviderAccountId": sqlite_string(row, "partner_provider_account_id"),
                         "environment": sqlite_string(row, "environment"),
@@ -568,6 +573,7 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                     UPDATE commerce_payment_provider_account SET
                         provider_code = COALESCE(?, provider_code),
                         merchant_id = COALESCE(?, merchant_id),
+                        account_name = COALESCE(?, account_name),
                         account_mode = COALESCE(?, account_mode),
                         partner_provider_account_id = COALESCE(?, partner_provider_account_id),
                         environment = COALESCE(?, environment),
@@ -585,7 +591,8 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                       AND tenant_id = CAST(? AS TEXT)
                       AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
                       AND deleted_at IS NULL
-                    RETURNING id, account_no, provider_code, merchant_id, account_mode,
+                    RETURNING id, account_no, provider_code, merchant_id, account_name,
+                              account_name_i18n, account_mode,
                               partner_provider_account_id, environment, country_code, settlement_currency,
                               secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
                               status, created_at, updated_at
@@ -593,6 +600,7 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                 )
                 .bind(payload.provider_code.as_deref())
                 .bind(payload.merchant_id.as_deref())
+                .bind(payload.account_name.as_deref())
                 .bind(payload.account_mode.as_deref())
                 .bind(payload.partner_provider_account_id.as_deref())
                 .bind(payload.environment.as_deref())
@@ -615,14 +623,15 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                 sqlx::query(
                     r#"
                     INSERT INTO commerce_payment_provider_account
-                        (id, tenant_id, organization_id, account_no, provider_code, merchant_id, account_mode,
+                        (id, tenant_id, organization_id, account_no, provider_code, merchant_id, account_name, account_mode,
                          partner_provider_account_id, environment, country_code, settlement_currency, secret_ref,
                          webhook_secret_ref, certificate_ref, capabilities, metadata, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (tenant_id, COALESCE(organization_id, ''), account_no)
                     WHERE deleted_at IS NULL DO UPDATE SET
                         provider_code = EXCLUDED.provider_code,
                         merchant_id = EXCLUDED.merchant_id,
+                        account_name = EXCLUDED.account_name,
                         account_mode = EXCLUDED.account_mode,
                         partner_provider_account_id = EXCLUDED.partner_provider_account_id,
                         environment = EXCLUDED.environment,
@@ -636,7 +645,8 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                         status = EXCLUDED.status,
                         version = commerce_payment_provider_account.version + 1,
                         updated_at = EXCLUDED.updated_at
-                    RETURNING id, account_no, provider_code, merchant_id, account_mode,
+                    RETURNING id, account_no, provider_code, merchant_id, account_name,
+                              account_name_i18n, account_mode,
                               partner_provider_account_id, environment, country_code, settlement_currency,
                               secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
                               status, created_at, updated_at
@@ -648,6 +658,7 @@ impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
                 .bind(&payload.account_no)
                 .bind(payload.provider_code.as_deref())
                 .bind(payload.merchant_id.as_deref())
+                .bind(payload.account_name.as_deref())
                 .bind(payload.account_mode.as_deref())
                 .bind(payload.partner_provider_account_id.as_deref())
                 .bind(payload.environment.as_deref())
@@ -1280,7 +1291,8 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             let scope = query.scope;
             let rows = sqlx::query(
                 r#"
-                SELECT id, account_no, provider_code, merchant_id, account_mode,
+                SELECT id, account_no, provider_code, merchant_id, account_name,
+                       account_name_i18n, account_mode,
                        partner_provider_account_id, environment, country_code,
                        settlement_currency, secret_ref, webhook_secret_ref, certificate_ref,
                        capabilities, metadata, status,
@@ -1315,6 +1327,8 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                         "accountNo": pg_string(row, "account_no"),
                         "providerCode": pg_string(row, "provider_code"),
                         "merchantId": pg_string(row, "merchant_id"),
+                        "accountName": pg_optional_string(row, "account_name"),
+                        "accountNameI18n": pg_json(row, "account_name_i18n"),
                         "accountMode": pg_string(row, "account_mode"),
                         "partnerProviderAccountId": pg_optional_string(row, "partner_provider_account_id"),
                         "environment": pg_string(row, "environment"),
@@ -1357,24 +1371,26 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                     UPDATE commerce_payment_provider_account SET
                         provider_code = COALESCE($1, provider_code),
                         merchant_id = COALESCE($2, merchant_id),
-                        account_mode = COALESCE($3, account_mode),
-                        partner_provider_account_id = COALESCE($4, partner_provider_account_id),
-                        environment = COALESCE($5, environment),
-                        country_code = COALESCE($6, country_code),
-                        settlement_currency = COALESCE($7, settlement_currency),
-                        secret_ref = COALESCE($8, secret_ref),
-                        webhook_secret_ref = COALESCE($9, webhook_secret_ref),
-                        certificate_ref = COALESCE($10, certificate_ref),
-                        capabilities = COALESCE(CAST($11 AS JSONB), capabilities),
-                        metadata = COALESCE(CAST($12 AS JSONB), metadata),
-                        status = COALESCE($13, status),
+                        account_name = COALESCE($3, account_name),
+                        account_mode = COALESCE($4, account_mode),
+                        partner_provider_account_id = COALESCE($5, partner_provider_account_id),
+                        environment = COALESCE($6, environment),
+                        country_code = COALESCE($7, country_code),
+                        settlement_currency = COALESCE($8, settlement_currency),
+                        secret_ref = COALESCE($9, secret_ref),
+                        webhook_secret_ref = COALESCE($10, webhook_secret_ref),
+                        certificate_ref = COALESCE($11, certificate_ref),
+                        capabilities = COALESCE(CAST($12 AS JSONB), capabilities),
+                        metadata = COALESCE(CAST($13 AS JSONB), metadata),
+                        status = COALESCE($14, status),
                         version = version + 1,
-                        updated_at = CAST($14 AS TIMESTAMPTZ)
-                    WHERE id = CAST($15 AS TEXT)
-                      AND tenant_id = CAST($16 AS TEXT)
-                      AND ((organization_id = CAST($17 AS TEXT)) OR (organization_id IS NULL AND $17::text IS NULL))
+                        updated_at = CAST($15 AS TIMESTAMPTZ)
+                    WHERE id = CAST($16 AS TEXT)
+                      AND tenant_id = CAST($17 AS TEXT)
+                      AND ((organization_id = CAST($18 AS TEXT)) OR (organization_id IS NULL AND $18::text IS NULL))
                       AND deleted_at IS NULL
-                    RETURNING id, account_no, provider_code, merchant_id, account_mode,
+                    RETURNING id, account_no, provider_code, merchant_id, account_name,
+                              account_name_i18n, account_mode,
                               partner_provider_account_id, environment, country_code, settlement_currency,
                               secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
                               status, created_at, updated_at
@@ -1382,6 +1398,7 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                 )
                 .bind(payload.provider_code.as_deref())
                 .bind(payload.merchant_id.as_deref())
+                .bind(payload.account_name.as_deref())
                 .bind(payload.account_mode.as_deref())
                 .bind(payload.partner_provider_account_id.as_deref())
                 .bind(payload.environment.as_deref())
@@ -1403,14 +1420,15 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                 sqlx::query(
                     r#"
                     INSERT INTO commerce_payment_provider_account
-                        (id, tenant_id, organization_id, account_no, provider_code, merchant_id, account_mode,
+                        (id, tenant_id, organization_id, account_no, provider_code, merchant_id, account_name, account_mode,
                          partner_provider_account_id, environment, country_code, settlement_currency, secret_ref,
                          webhook_secret_ref, certificate_ref, capabilities, metadata, status, created_at, updated_at)
-                    VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CAST($15 AS JSONB), CAST($16 AS JSONB), $17, CAST($18 AS TIMESTAMPTZ), CAST($18 AS TIMESTAMPTZ))
+                    VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CAST($16 AS JSONB), CAST($17 AS JSONB), $18, CAST($19 AS TIMESTAMPTZ), CAST($19 AS TIMESTAMPTZ))
                     ON CONFLICT (tenant_id, (COALESCE(organization_id, '')), account_no)
                     WHERE deleted_at IS NULL DO UPDATE SET
                         provider_code = EXCLUDED.provider_code,
                         merchant_id = EXCLUDED.merchant_id,
+                        account_name = EXCLUDED.account_name,
                         account_mode = EXCLUDED.account_mode,
                         partner_provider_account_id = EXCLUDED.partner_provider_account_id,
                         environment = EXCLUDED.environment,
@@ -1424,7 +1442,8 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                         status = EXCLUDED.status,
                         version = commerce_payment_provider_account.version + 1,
                         updated_at = EXCLUDED.updated_at
-                    RETURNING id, account_no, provider_code, merchant_id, account_mode,
+                    RETURNING id, account_no, provider_code, merchant_id, account_name,
+                              account_name_i18n, account_mode,
                               partner_provider_account_id, environment, country_code, settlement_currency,
                               secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
                               status, created_at, updated_at
@@ -1436,6 +1455,7 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                 .bind(&payload.account_no)
                 .bind(payload.provider_code.as_deref())
                 .bind(payload.merchant_id.as_deref())
+                .bind(payload.account_name.as_deref())
                 .bind(payload.account_mode.as_deref())
                 .bind(payload.partner_provider_account_id.as_deref())
                 .bind(payload.environment.as_deref())
@@ -2266,6 +2286,7 @@ async fn upsert_provider_account_inner(
         let is_status_only_patch = body.account_no.is_none()
             && body.provider_code.is_none()
             && body.merchant_id.is_none()
+            && body.account_name.is_none()
             && body.environment.is_none()
             && body.country_code.is_none()
             && body.settlement_currency.is_none()
@@ -2342,6 +2363,16 @@ async fn upsert_provider_account_inner(
         Ok(value) => value,
         Err(response) => return response,
     };
+    let account_name = body
+        .account_name
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    if account_name
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > 128)
+    {
+        return validation(ctx, "accountName must be at most 128 characters");
+    }
     let environment = match required_for_create(body.environment, "environment") {
         Ok(value) => value,
         Err(response) => return response,
@@ -2439,6 +2470,7 @@ async fn upsert_provider_account_inner(
         account_no,
         provider_code,
         merchant_id,
+        account_name,
         environment,
         country_code,
         settlement_currency,
@@ -3174,6 +3206,8 @@ fn sqlite_provider_account_value(row: &SqliteRow) -> Value {
         "accountNo": sqlite_string(row, "account_no"),
         "providerCode": sqlite_string(row, "provider_code"),
         "merchantId": sqlite_string(row, "merchant_id"),
+        "accountName": sqlite_optional_string(row, "account_name"),
+        "accountNameI18n": sqlite_json(row, "account_name_i18n"),
         "accountMode": sqlite_string(row, "account_mode"),
         "partnerProviderAccountId": sqlite_optional_string(row, "partner_provider_account_id"),
         "environment": sqlite_string(row, "environment"),
@@ -3224,6 +3258,8 @@ fn pg_provider_account_value(row: &PgRow) -> Value {
         "accountNo": pg_string(row, "account_no"),
         "providerCode": pg_string(row, "provider_code"),
         "merchantId": pg_string(row, "merchant_id"),
+        "accountName": pg_optional_string(row, "account_name"),
+        "accountNameI18n": pg_json(row, "account_name_i18n"),
         "accountMode": pg_string(row, "account_mode"),
         "partnerProviderAccountId": pg_optional_string(row, "partner_provider_account_id"),
         "environment": pg_string(row, "environment"),
@@ -3284,6 +3320,8 @@ mod tests {
                 account_no TEXT NOT NULL,
                 provider_code TEXT NOT NULL,
                 merchant_id TEXT,
+                account_name TEXT,
+                account_name_i18n TEXT NOT NULL DEFAULT '{}',
                 account_mode TEXT NOT NULL DEFAULT 'direct',
                 partner_provider_account_id TEXT,
                 environment TEXT NOT NULL,
@@ -3329,6 +3367,7 @@ mod tests {
             account_no: "wechat-live-primary".to_owned(),
             provider_code: Some("wechat_pay".to_owned()),
             merchant_id: Some("1900000109".to_owned()),
+            account_name: Some("WeChat Pay Live Primary".to_owned()),
             environment: Some("production".to_owned()),
             country_code: Some("CN".to_owned()),
             settlement_currency: Some("CNY".to_owned()),
@@ -3355,6 +3394,8 @@ mod tests {
             .expect("upsert provider account");
         assert_eq!(saved["metadata"]["appId"], "wx-live-app-id");
         assert_eq!(saved["capabilities"]["refund"], true);
+        assert_eq!(saved["accountName"], "WeChat Pay Live Primary");
+        assert_eq!(saved["accountNameI18n"], serde_json::json!({}));
         assert_eq!(saved["hasPrimarySecret"], false);
         assert_eq!(saved["credentialStorage"], "legacy_reference");
         store
@@ -3370,6 +3411,7 @@ mod tests {
                 account_no: "wechat-live-primary".to_owned(),
                 provider_code: None,
                 merchant_id: None,
+                account_name: None,
                 environment: None,
                 country_code: None,
                 settlement_currency: None,
@@ -3435,7 +3477,7 @@ mod tests {
             .await
             .expect("activation readiness"));
         sqlx::query(
-            "INSERT INTO commerce_payment_provider_account SELECT 'provider-account-duplicate', tenant_id, organization_id, 'wechat-live-secondary', provider_code, merchant_id, account_mode, partner_provider_account_id, environment, country_code, settlement_currency, secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata, 'active', certificate_expires_at, last_tested_at, last_test_status, version, created_at, updated_at, deleted_at FROM commerce_payment_provider_account WHERE id = ?",
+            "INSERT INTO commerce_payment_provider_account SELECT 'provider-account-duplicate', tenant_id, organization_id, 'wechat-live-secondary', provider_code, merchant_id, account_name, account_name_i18n, account_mode, partner_provider_account_id, environment, country_code, settlement_currency, secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata, 'active', certificate_expires_at, last_tested_at, last_test_status, version, created_at, updated_at, deleted_at FROM commerce_payment_provider_account WHERE id = ?",
         )
         .bind(saved["id"].as_str())
         .execute(&store.pool)
@@ -3483,7 +3525,7 @@ mod tests {
             .await
             .expect("sqlite pool");
         for statement in [
-            "CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, account_no TEXT NOT NULL, provider_code TEXT NOT NULL, merchant_id TEXT, account_mode TEXT NOT NULL DEFAULT 'direct', partner_provider_account_id TEXT, environment TEXT NOT NULL, country_code TEXT, settlement_currency TEXT NOT NULL, secret_ref TEXT NOT NULL, webhook_secret_ref TEXT, certificate_ref TEXT, capabilities TEXT NOT NULL DEFAULT '{}', metadata TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, certificate_expires_at TEXT, last_tested_at TEXT, last_test_status TEXT, version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
+            "CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, account_no TEXT NOT NULL, provider_code TEXT NOT NULL, merchant_id TEXT, account_name TEXT, account_name_i18n TEXT NOT NULL DEFAULT '{}', account_mode TEXT NOT NULL DEFAULT 'direct', partner_provider_account_id TEXT, environment TEXT NOT NULL, country_code TEXT, settlement_currency TEXT NOT NULL, secret_ref TEXT NOT NULL, webhook_secret_ref TEXT, certificate_ref TEXT, capabilities TEXT NOT NULL DEFAULT '{}', metadata TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, certificate_expires_at TEXT, last_tested_at TEXT, last_test_status TEXT, version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
             "CREATE TABLE commerce_payment_channel (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT, method_id TEXT, provider_code TEXT NOT NULL, scene_code TEXT NOT NULL DEFAULT 'api', currency_code TEXT NOT NULL DEFAULT 'CNY', status TEXT NOT NULL DEFAULT 'active', priority INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, deleted_at TEXT)",
             "CREATE TABLE commerce_payment_sub_merchant (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, external_sub_merchant_id TEXT NOT NULL, sub_appid TEXT, sub_mch_id TEXT, display_name TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
             "CREATE TABLE commerce_payment_provider_credential (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, credential_kind TEXT NOT NULL, ciphertext TEXT NOT NULL, encryption_key_id TEXT NOT NULL, encryption_algorithm TEXT NOT NULL, fingerprint_sha256 TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, rotated_at TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT)",

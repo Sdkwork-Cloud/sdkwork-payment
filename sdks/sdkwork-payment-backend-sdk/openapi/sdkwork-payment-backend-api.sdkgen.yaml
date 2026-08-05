@@ -6170,6 +6170,17 @@
           "merchantId": {
             "type": "string"
           },
+          "accountName": {
+            "type": "string",
+            "description": "Operator-facing account name. Seeded bootstrap accounts carry readable names; operators may edit it through update."
+          },
+          "accountNameI18n": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Locale display map for accountName, e.g. { \"zh-CN\": \"Stripe 生产账户\" }. Filled idempotently by locale seeds."
+          },
           "accountMode": {
             "type": "string",
             "enum": [
@@ -6294,6 +6305,12 @@
             "minLength": 1,
             "maxLength": 128
           },
+          "accountName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Operator-facing account name shown in admin surfaces. Optional; defaults to the account no when absent."
+          },
           "accountMode": {
             "type": "string",
             "enum": [
@@ -6370,6 +6387,12 @@
         "properties": {
           "merchantId": {
             "type": "string"
+          },
+          "accountName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Operator-facing account name. Omit to preserve the current value."
           },
           "accountMode": {
             "type": "string",

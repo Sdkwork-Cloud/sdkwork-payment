@@ -21,6 +21,33 @@
       "lock": "access-exclusive",
       "lock_timeout": "2s",
       "statement_timeout": "30s"
+    },
+    "0004_localized_display_names.up.sql": {
+      "engine": "postgres",
+      "reversible": "false",
+      "rollback": "forward-fix",
+      "transactional": "true",
+      "lock": "access-exclusive",
+      "lock_timeout": "2s",
+      "statement_timeout": "30s"
+    },
+    "0005_webhook_delivery_table.up.sql": {
+      "engine": "postgres",
+      "reversible": "false",
+      "rollback": "forward-fix",
+      "transactional": "true",
+      "lock": "access-exclusive",
+      "lock_timeout": "2s",
+      "statement_timeout": "30s"
+    },
+    "0006_provider_account_localized_names.up.sql": {
+      "engine": "postgres",
+      "reversible": "false",
+      "rollback": "forward-fix",
+      "transactional": "true",
+      "lock": "access-exclusive",
+      "lock_timeout": "2s",
+      "statement_timeout": "30s"
     }
   }
 }

@@ -103,6 +103,11 @@ export {
 } from "./components/CopyButton";
 
 export {
+  PemFilePicker,
+  type PemFilePickerProps,
+} from "./components/PemFilePicker";
+
+export {
   ADMIN_PROVIDER_CODES,
   ADMIN_PROVIDER_LABEL,
   ADMIN_PROVIDER_FORM_OPTIONS,

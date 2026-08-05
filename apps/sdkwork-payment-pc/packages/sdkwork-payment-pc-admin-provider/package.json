@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sdkwork/i18n-pc-react": "workspace:*",
     "@sdkwork/payment-pc-admin-core": "workspace:*",
     "@sdkwork/payment-service": "workspace:*",
     "@sdkwork/payment-contracts": "workspace:*",

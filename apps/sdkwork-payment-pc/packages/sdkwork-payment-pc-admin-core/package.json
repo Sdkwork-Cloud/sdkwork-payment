@@ -41,6 +41,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sdkwork/appbase-pc-react": "workspace:*",
     "@sdkwork/i18n-pc-react": "workspace:*",
     "@sdkwork/payment-contracts": "workspace:*",
     "@sdkwork/payment-sdk-ports": "workspace:*",

@@ -32,12 +32,14 @@ import {
   SelectTrigger,
   SelectValue,
   Switch,
+  Textarea,
 } from "@sdkwork/ui-pc-react";
 import {
   AdminFieldLabel,
   ADMIN_PROVIDER_FORM_OPTIONS,
   BaseDataSelectField,
   PaymentProviderIcon,
+  PemFilePicker,
 } from "@sdkwork/payment-pc-admin-core";
 import type {
   PaymentBaseDataOption,
@@ -70,6 +72,11 @@ const STATUS_OPTIONS: readonly { label: string; value: PaymentProviderAccountSta
 
 const CAPABILITY_KEYS = ["pay", "refund", "close", "query", "reconcile", "download"] as const;
 
+// Backend credential length limits (maxLength) for uploaded files:
+// 32768 bytes for secret keys, 65536 bytes for certificates.
+const MAX_SECRET_FILE_BYTES = 32768;
+const MAX_CERTIFICATE_FILE_BYTES = 65536;
+
 export interface ProviderAccountFormProps {
   initial?: Partial<PaymentProviderAccountView>;
   mode: "create" | "update";
@@ -91,6 +98,7 @@ interface FormState {
   accountNo: string;
   providerCode: PaymentProviderCode;
   merchantId: string;
+  accountName: string;
   accountMode: PaymentProviderAccountMode;
   partnerProviderAccountId: string;
   environment: PaymentProviderEnvironment;
@@ -116,6 +124,7 @@ function deriveInitialState(
     accountNo: initial?.accountNo ?? "",
     providerCode: initial?.providerCode ?? "stripe",
     merchantId: initial?.merchantId ?? "",
+    accountName: initial?.accountName ?? "",
     accountMode: initial?.accountMode ?? "direct",
     partnerProviderAccountId: initial?.partnerProviderAccountId ?? "",
     environment: initial?.environment ?? "sandbox",
@@ -213,6 +222,7 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
           accountNo: state.accountNo.trim(),
           providerCode: state.providerCode,
           merchantId: state.merchantId.trim(),
+          accountName: state.accountName.trim() || undefined,
           accountMode: state.accountMode,
           ...(state.partnerProviderAccountId.trim()
             ? { partnerProviderAccountId: state.partnerProviderAccountId.trim() }
@@ -231,6 +241,7 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
       } else {
         const draft: PaymentProviderAccountUpdateDraft = {
           merchantId: state.merchantId.trim(),
+          ...(state.accountName.trim() ? { accountName: state.accountName.trim() } : {}),
           accountMode: state.accountMode,
           ...(state.partnerProviderAccountId.trim()
             ? { partnerProviderAccountId: state.partnerProviderAccountId.trim() }
@@ -275,6 +286,15 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
             disabled={!isCreate}
             placeholder="e.g., stripe-live-primary"
             required
+          />
+        </AdminFieldLabel>
+        <AdminFieldLabel label="Account Name" htmlFor="provider-account-name">
+          <Input
+            id="provider-account-name"
+            value={state.accountName}
+            onChange={(event) => update("accountName", event.target.value)}
+            placeholder="e.g., Stripe Production Account"
+            maxLength={128}
           />
         </AdminFieldLabel>
         <AdminFieldLabel label="Provider" htmlFor="provider-code" required>
@@ -427,42 +447,42 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
             label={primarySecretLabel(state.providerCode)}
             htmlFor="provider-primary-secret"
             required={isCreate}
+            className="sm:col-span-2"
           >
-            {showAlipayFields || showWeChatFields ? (
-              <textarea
-                id="provider-primary-secret"
-                value={state.primarySecret}
-                onChange={(event) => update("primarySecret", event.target.value)}
-                placeholder={credentialPlaceholder(isCreate, props.initial?.hasPrimarySecret)}
-                required={isCreate}
-                rows={5}
-                className="w-full resize-y rounded-md border border-[var(--sdk-color-border)] bg-[var(--sdk-color-bg-surface)] px-3 py-2 font-mono text-sm text-[var(--sdk-color-text-primary)]"
-                autoComplete="new-password"
-              />
-            ) : (
-              <Input
-                id="provider-primary-secret"
-                type="password"
-                value={state.primarySecret}
-                onChange={(event) => update("primarySecret", event.target.value)}
-                placeholder={credentialPlaceholder(isCreate, props.initial?.hasPrimarySecret)}
-                required={isCreate}
-                autoComplete="new-password"
-              />
-            )}
+            <Textarea
+              id="provider-primary-secret"
+              value={state.primarySecret}
+              onChange={(event) => update("primarySecret", event.target.value)}
+              placeholder={credentialPlaceholder(isCreate, props.initial?.hasPrimarySecret)}
+              required={isCreate}
+              rows={showAlipayFields || showWeChatFields ? 5 : 3}
+              className="resize-y font-mono"
+              autoComplete="new-password"
+            />
+            <PemFilePicker
+              maxBytes={MAX_SECRET_FILE_BYTES}
+              disabled={submitting}
+              onContent={(content) => update("primarySecret", content)}
+            />
           </AdminFieldLabel>
           {showStripeFields || showWeChatFields ? (
             <AdminFieldLabel
               label={webhookSecretLabel(state.providerCode)}
               htmlFor="provider-webhook-secret"
             >
-              <Input
+              <Textarea
                 id="provider-webhook-secret"
-                type="password"
                 value={state.webhookSecret}
                 onChange={(event) => update("webhookSecret", event.target.value)}
                 placeholder={credentialPlaceholder(isCreate, props.initial?.hasWebhookSecret)}
+                rows={2}
+                className="resize-y font-mono"
                 autoComplete="new-password"
+              />
+              <PemFilePicker
+                maxBytes={MAX_SECRET_FILE_BYTES}
+                disabled={submitting}
+                onContent={(content) => update("webhookSecret", content)}
               />
             </AdminFieldLabel>
           ) : null}
@@ -471,14 +491,19 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
               label={certificateLabel(state.providerCode)}
               htmlFor="provider-certificate"
             >
-              <textarea
+              <Textarea
                 id="provider-certificate"
                 value={state.certificate}
                 onChange={(event) => update("certificate", event.target.value)}
                 placeholder={credentialPlaceholder(isCreate, props.initial?.hasCertificate)}
                 rows={5}
-                className="w-full resize-y rounded-md border border-[var(--sdk-color-border)] bg-[var(--sdk-color-bg-surface)] px-3 py-2 font-mono text-sm text-[var(--sdk-color-text-primary)]"
+                className="resize-y font-mono"
                 autoComplete="new-password"
+              />
+              <PemFilePicker
+                maxBytes={MAX_CERTIFICATE_FILE_BYTES}
+                disabled={submitting}
+                onContent={(content) => update("certificate", content)}
               />
             </AdminFieldLabel>
           ) : null}
@@ -607,7 +632,7 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
   );
 }
 
-function primarySecretLabel(providerCode: PaymentProviderCode): string {
+export function primarySecretLabel(providerCode: PaymentProviderCode): string {
   if (providerCode === "stripe") return "Stripe Secret Key";
   if (providerCode === "alipay") return "Alipay Merchant Private Key";
   if (providerCode === "wechat_pay") return "WeChat Merchant Private Key";
@@ -619,13 +644,13 @@ function credentialPlaceholder(isCreate: boolean, configured?: boolean): string 
   return "Enter credential value";
 }
 
-function webhookSecretLabel(providerCode: PaymentProviderCode): string {
+export function webhookSecretLabel(providerCode: PaymentProviderCode): string {
   if (providerCode === "stripe") return "Stripe Webhook Signing Secret";
   if (providerCode === "wechat_pay") return "WeChat API v3 Key";
   return "Webhook Secret";
 }
 
-function certificateLabel(providerCode: PaymentProviderCode): string {
+export function certificateLabel(providerCode: PaymentProviderCode): string {
   if (providerCode === "alipay") return "Alipay Public Key";
   if (providerCode === "wechat_pay") return "WeChat Platform Certificate";
   return "Certificate";

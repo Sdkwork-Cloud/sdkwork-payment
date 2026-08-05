@@ -4,7 +4,14 @@
   "defaultLocale": "zh-CN",
   "profiles": {
     "standard": {
-      "locales": {},
+      "locales": {
+        "zh-CN": [
+          "001_localized_names.sql"
+        ],
+        "en-US": [
+          "001_localized_names.sql"
+        ]
+      },
       "common": [
         "001_payment_method_catalog.sql",
         "002_production_templates.sql",
@@ -14,7 +21,14 @@
       ]
     },
     "production": {
-      "locales": {},
+      "locales": {
+        "zh-CN": [
+          "001_localized_names.sql"
+        ],
+        "en-US": [
+          "001_localized_names.sql"
+        ]
+      },
       "common": [
         "001_payment_method_catalog.sql",
         "002_production_templates.sql",
@@ -24,7 +38,14 @@
       ]
     },
     "development": {
-      "locales": {},
+      "locales": {
+        "zh-CN": [
+          "001_localized_names.sql"
+        ],
+        "en-US": [
+          "001_localized_names.sql"
+        ]
+      },
       "common": [
         "001_payment_method_catalog.sql",
         "002_production_templates.sql",
@@ -35,7 +56,14 @@
       ]
     },
     "test": {
-      "locales": {},
+      "locales": {
+        "zh-CN": [
+          "001_localized_names.sql"
+        ],
+        "en-US": [
+          "001_localized_names.sql"
+        ]
+      },
       "common": [
         "001_payment_method_catalog.sql",
         "002_production_templates.sql",
@@ -46,7 +74,7 @@
     }
   },
   "kind": "sdkwork.database.seed",
-  "i18nVersion": "1.0.0",
+  "i18nVersion": "1.1.0",
   "fallbackLocale": "zh-CN",
   "supportedLocales": [
     "zh-CN",
@@ -58,14 +86,25 @@
     "ko-KR"
   ],
   "activeLocales": [
-    "zh-CN"
+    "zh-CN",
+    "en-US"
   ],
   "localeSets": {
     "zh-CN": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "required": true,
-      "checksum": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-      "files": []
+      "checksum": "sha256:fe7192eb096c946bffc50c696fa3f5282e987322806de66f631ddaceadaae3ce",
+      "files": [
+        "001_localized_names.sql"
+      ]
+    },
+    "en-US": {
+      "version": "1.1.0",
+      "required": true,
+      "checksum": "sha256:147e1153d198341d5f2cb2292d2a67edd2ee015d2170d54b639b2a163737ff78",
+      "files": [
+        "001_localized_names.sql"
+      ]
     }
   }
 }

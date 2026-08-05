@@ -82,6 +82,11 @@ function mapProviderAccount(value: unknown): PaymentProviderAccountView | undefi
     accountNo: asRequiredString(record.accountNo, id),
     providerCode: asStatus(record.providerCode, PROVIDER_CODES, "sandbox"),
     merchantId: asString(record.merchantId),
+    accountName: asString(record.accountName ?? record.account_name),
+    accountNameI18n: asRecord(record.accountNameI18n ?? record.account_name_i18n) as Record<
+      string,
+      string
+    >,
     accountMode: asStatus(record.accountMode, ACCOUNT_MODES, "direct"),
     partnerProviderAccountId: asString(record.partnerProviderAccountId),
     environment: asStatus(record.environment, ENVIRONMENTS, "production"),

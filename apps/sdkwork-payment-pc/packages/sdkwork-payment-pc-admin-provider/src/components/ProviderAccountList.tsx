@@ -4,6 +4,7 @@
  */
 
 import { Badge, Button } from "@sdkwork/ui-pc-react";
+import { useSdkworkI18n } from "@sdkwork/i18n-pc-react";
 import {
   SdkworkPaymentListPaginationControls,
   ADMIN_PROVIDER_LABEL,
@@ -14,6 +15,7 @@ import type {
   PaymentProviderAccountView,
   PaymentLastTestStatus,
 } from "../types/provider-admin-types";
+import { resolveProviderAccountName } from "../types/provider-admin-types";
 
 export interface ProviderAccountListProps {
   accounts: readonly PaymentProviderAccountView[];
@@ -65,6 +67,7 @@ const TEST_STATUS_LABEL: Record<PaymentLastTestStatus, string> = {
 };
 
 export function ProviderAccountList(props: ProviderAccountListProps) {
+  const i18n = useSdkworkI18n();
   return (
     <div className="space-y-3" data-slot="provider-account-list">
       {props.accounts.length === 0 ? (
@@ -123,7 +126,7 @@ export function ProviderAccountList(props: ProviderAccountListProps) {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-[var(--sdk-color-text-primary)]">
-                        {account.accountNo}
+                        {resolveProviderAccountName(account, i18n?.localeTag)}
                       </span>
                       <Badge variant="outline">{ADMIN_PROVIDER_LABEL[account.providerCode]}</Badge>
                       <Badge variant="secondary">

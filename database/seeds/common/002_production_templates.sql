@@ -14,7 +14,8 @@ VALUES
     ('bootstrap-provider-wechat-pay', '100001', '0', 'wechat_pay', 'WeChat Pay', 'wallet', '["CN","HK","SG","US"]', '["CNY","USD","HKD","SGD"]', 'active', 300, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
     ('bootstrap-provider-paypal', '100001', '0', 'paypal', 'PayPal', 'wallet', '["US","GB","DE","FR","CA","AU"]', '["USD","EUR","GBP","CAD","AUD"]', 'inactive', 400, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
     ('bootstrap-provider-apple-pay', '100001', '0', 'apple_pay', 'Apple Pay', 'wallet', '["US","GB","CA","AU","JP","CN"]', '["USD","CNY","GBP","CAD","AUD","JPY"]', 'inactive', 500, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-    ('bootstrap-provider-google-pay', '100001', '0', 'google_pay', 'Google Pay', 'wallet', '["US","GB","CA","AU","JP"]', '["USD","GBP","CAD","AUD","JPY"]', 'inactive', 600, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ('bootstrap-provider-google-pay', '100001', '0', 'google_pay', 'Google Pay', 'wallet', '["US","GB","CA","AU","JP"]', '["USD","GBP","CAD","AUD","JPY"]', 'inactive', 600, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('bootstrap-provider-sandbox', '100001', '0', 'sandbox', 'Sandbox', 'sandbox', '["CN"]', '["CNY"]', 'active', 900, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;
 
 -- External PSP accounts are intentionally inactive until an operator attaches
@@ -26,13 +27,13 @@ ON CONFLICT DO NOTHING;
 -- and then activate the account, methods, and channels.
 INSERT INTO commerce_payment_provider_account (
     id, tenant_id, organization_id, account_no, provider_code, merchant_id,
-    environment, settlement_currency, secret_ref, webhook_secret_ref,
+    account_name, environment, settlement_currency, secret_ref, webhook_secret_ref,
     certificate_ref, capabilities, status, metadata, created_at, updated_at
 )
 VALUES
-    ('bootstrap-payment-provider-stripe', '100001', '0', 'bootstrap-stripe-default', 'stripe', 'mock-stripe-account', 'production', 'CNY', 'database:primary_secret', 'database:webhook_secret', NULL, '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive', '{"bootstrap":true,"configurationState":"mock","configureBeforeActivation":true}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-    ('bootstrap-payment-provider-alipay', '100001', '0', 'bootstrap-alipay-default', 'alipay', 'mock-alipay-app-id', 'production', 'CNY', 'database:primary_secret', NULL, 'database:certificate', '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive', '{"bootstrap":true,"configurationState":"mock","appId":"mock-alipay-app-id","configureBeforeActivation":true}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-    ('bootstrap-payment-provider-wechat-pay', '100001', '0', 'bootstrap-wechat-pay-default', 'wechat_pay', 'mock-wechat-mch-id', 'production', 'CNY', 'database:primary_secret', 'database:webhook_secret', 'database:certificate', '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive', '{"bootstrap":true,"configurationState":"mock","appId":"mock-wechat-app-id","merchantSerialNo":"mock-wechat-merchant-serial-no","notifyUrl":"https://mock-payment.example.com/app/v3/api/orders/payments/webhooks/wechat_pay","configureBeforeActivation":true}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ('bootstrap-payment-provider-stripe', '100001', '0', 'bootstrap-stripe-default', 'stripe', 'mock-stripe-account', 'Stripe Production Account', 'production', 'CNY', 'database:primary_secret', 'database:webhook_secret', NULL, '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive', '{"bootstrap":true,"configurationState":"mock","configureBeforeActivation":true}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('bootstrap-payment-provider-alipay', '100001', '0', 'bootstrap-alipay-default', 'alipay', 'mock-alipay-app-id', 'Alipay Production Account', 'production', 'CNY', 'database:primary_secret', NULL, 'database:certificate', '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive', '{"bootstrap":true,"configurationState":"mock","appId":"mock-alipay-app-id","configureBeforeActivation":true}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('bootstrap-payment-provider-wechat-pay', '100001', '0', 'bootstrap-wechat-pay-default', 'wechat_pay', 'mock-wechat-mch-id', 'WeChat Pay Production Account', 'production', 'CNY', 'database:primary_secret', 'database:webhook_secret', 'database:certificate', '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive', '{"bootstrap":true,"configurationState":"mock","appId":"mock-wechat-app-id","merchantSerialNo":"mock-wechat-merchant-serial-no","notifyUrl":"https://mock-payment.example.com/app/v3/api/orders/payments/webhooks/wechat_pay","configureBeforeActivation":true}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO commerce_payment_channel (

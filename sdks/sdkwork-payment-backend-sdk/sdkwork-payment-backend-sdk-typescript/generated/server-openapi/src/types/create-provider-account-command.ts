@@ -2,6 +2,8 @@ export interface CreateProviderAccountCommand {
   accountNo: string;
   providerCode: 'stripe' | 'alipay' | 'wechat_pay' | 'sandbox';
   merchantId: string;
+  /** Operator-facing account name shown in admin surfaces. Optional; defaults to the account no when absent. */
+  accountName?: string;
   accountMode?: 'direct' | 'partner';
   partnerProviderAccountId?: string;
   environment: 'development' | 'sandbox' | 'production';

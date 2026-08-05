@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_method (
     organization_id TEXT,
     method_key      TEXT NOT NULL,
     display_name    TEXT NOT NULL,
+    display_name_i18n JSONB NOT NULL DEFAULT '{}'::jsonb,
     provider_code   TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active', 'inactive', 'deprecated')),
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_method (
 -- (e.g. sdkwork-cloudrouter commerce_bootstrap). Idempotent table creation is a
 -- no-op on existing tables, so ALTER TABLE ensures the payment schema is complete.
 ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS provider_code TEXT;
+ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS display_name_i18n JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'tenant';
 ALTER TABLE commerce_payment_method ADD COLUMN IF NOT EXISTS currency_code TEXT NOT NULL DEFAULT 'CNY';
@@ -258,6 +260,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_channel (
     organization_id    TEXT,
     channel_no          TEXT NOT NULL,
     channel_name        TEXT,
+    channel_name_i18n   JSONB NOT NULL DEFAULT '{}'::jsonb,
     provider_account_id TEXT,
     method_id           TEXT,
     provider_code       TEXT NOT NULL,
@@ -278,6 +281,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_channel (
 
 -- Self-heal: back-fill columns when the table was pre-created by another module.
 ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS channel_name TEXT;
+ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS channel_name_i18n JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS provider_code TEXT;
 ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE commerce_payment_channel ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
@@ -311,6 +315,8 @@ CREATE TABLE IF NOT EXISTS commerce_payment_provider_account (
     account_no                  TEXT NOT NULL,
     provider_code               TEXT NOT NULL,
     merchant_id                 TEXT,
+    account_name                TEXT,
+    account_name_i18n           JSONB NOT NULL DEFAULT '{}'::jsonb,
     account_mode                TEXT NOT NULL DEFAULT 'direct'
                                 CHECK (account_mode IN ('direct', 'partner')),
     partner_provider_account_id TEXT,
@@ -338,6 +344,8 @@ CREATE TABLE IF NOT EXISTS commerce_payment_provider_account (
 -- Self-heal: back-fill columns when the table was pre-created by another module.
 -- The Cloud Router commerce_bootstrap creates a simpler commerce_payment_provider_account
 -- without account_mode, capabilities, metadata, version, deleted_at, etc.
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS account_name TEXT;
+ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS account_name_i18n JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS account_mode TEXT NOT NULL DEFAULT 'direct';
 ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS partner_provider_account_id TEXT;
 ALTER TABLE commerce_payment_provider_account ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL DEFAULT '{}'::jsonb;
@@ -563,7 +571,48 @@ CREATE INDEX IF NOT EXISTS idx_commerce_payment_webhook_event_status
     WHERE status IN ('queued', 'processing', 'failed');
 
 -- =============================================================================
--- 10. commerce_payment_reconciliation_run
+-- 10. commerce_payment_webhook_delivery
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS commerce_payment_webhook_delivery (
+    id                   TEXT PRIMARY KEY,
+    tenant_id            TEXT NOT NULL,
+    organization_id      TEXT,
+    delivery_no          TEXT NOT NULL,
+    provider_code        TEXT NOT NULL,
+    provider_account_id  TEXT,
+    event_id             TEXT NOT NULL,
+    nonce                TEXT,
+    request_timestamp    TEXT,
+    signature            TEXT,
+    signature_algorithm  TEXT,
+    headers_json         TEXT,
+    payload_digest       TEXT,
+    payload_ref          TEXT,
+    source_ip            TEXT,
+    user_agent           TEXT,
+    verification_status  TEXT NOT NULL DEFAULT 'PENDING'
+                         CHECK (verification_status IN ('PENDING', 'VERIFIED', 'FAILED')),
+    delivery_status      TEXT NOT NULL DEFAULT 'RECEIVED'
+                         CHECK (delivery_status IN ('RECEIVED', 'SUCCESS', 'FAILED', 'SKIPPED')),
+    failure_code         TEXT,
+    failure_message      TEXT,
+    received_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    verified_at          TIMESTAMPTZ NULL,
+    normalized_event_id  TEXT,
+    processed_at         TIMESTAMPTZ NULL,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_webhook_delivery_event
+    ON commerce_payment_webhook_delivery (tenant_id, provider_code, event_id);
+
+CREATE INDEX IF NOT EXISTS idx_commerce_payment_webhook_delivery_nonce
+    ON commerce_payment_webhook_delivery (tenant_id, provider_code, nonce)
+    WHERE nonce IS NOT NULL;
+
+-- =============================================================================
+-- 11. commerce_payment_reconciliation_run
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS commerce_payment_reconciliation_run (
     id                      TEXT PRIMARY KEY,
@@ -622,6 +671,7 @@ CREATE TABLE IF NOT EXISTS commerce_payment_provider (
     organization_id      TEXT,
     provider_code        TEXT NOT NULL,
     display_name         TEXT NOT NULL,
+    display_name_i18n    JSONB NOT NULL DEFAULT '{}'::jsonb,
     provider_type        TEXT NOT NULL,
     supported_countries  JSONB NOT NULL DEFAULT '[]'::jsonb,
     supported_currencies JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -633,6 +683,12 @@ CREATE TABLE IF NOT EXISTS commerce_payment_provider (
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at           TIMESTAMPTZ NULL
 );
+
+-- Self-heal: back-fill columns when the table was pre-created by another module
+-- (e.g. sdkwork-cloudrouter commerce_bootstrap).
+ALTER TABLE commerce_payment_provider ADD COLUMN IF NOT EXISTS display_name_i18n JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE commerce_payment_provider ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE commerce_payment_provider ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_provider_tenant_org_code
     ON commerce_payment_provider (tenant_id, COALESCE(organization_id, ''), provider_code)

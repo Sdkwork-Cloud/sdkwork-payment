@@ -123,6 +123,9 @@ importers:
 
   ../sdkwork-appbase/packages/pc-react/foundation/sdkwork-appbase-pc-react:
     dependencies:
+      '@sdkwork/base-data-backend-sdk':
+        specifier: workspace:*
+        version: link:../../../../sdks/sdkwork-base-data-backend-sdk/sdkwork-base-data-backend-sdk-typescript
       '@sdkwork/runtime-bootstrap':
         specifier: workspace:*
         version: link:../../../common/foundation/sdkwork-runtime-bootstrap
@@ -163,6 +166,12 @@ importers:
       react-i18next:
         specifier: ^17.0.7
         version: 17.0.8(i18next@26.3.2(typescript@6.0.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.3)
+
+  ../sdkwork-appbase/sdks/sdkwork-base-data-backend-sdk/sdkwork-base-data-backend-sdk-typescript:
+    dependencies:
+      '@sdkwork/sdk-common':
+        specifier: workspace:*
+        version: link:../../../../sdkwork-sdk-commons/sdkwork-sdk-common-typescript
 
   ../sdkwork-core/sdkwork-core-pc-react:
     dependencies:
@@ -722,6 +731,9 @@ importers:
 
   apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-admin-core:
     dependencies:
+      '@sdkwork/appbase-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/pc-react/foundation/sdkwork-appbase-pc-react
       '@sdkwork/i18n-pc-react':
         specifier: workspace:*
         version: link:../../../../../sdkwork-appbase/packages/pc-react/foundation/sdkwork-i18n-pc-react
@@ -830,6 +842,9 @@ importers:
 
   apps/sdkwork-payment-pc/packages/sdkwork-payment-pc-admin-provider:
     dependencies:
+      '@sdkwork/i18n-pc-react':
+        specifier: workspace:*
+        version: link:../../../../../sdkwork-appbase/packages/pc-react/foundation/sdkwork-i18n-pc-react
       '@sdkwork/payment-contracts':
         specifier: workspace:*
         version: link:../../../sdkwork-payment-common/packages/sdkwork-payment-contracts

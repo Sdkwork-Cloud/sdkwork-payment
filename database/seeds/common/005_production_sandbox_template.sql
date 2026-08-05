@@ -11,11 +11,11 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO commerce_payment_provider_account (
     id, tenant_id, organization_id, account_no, provider_code, merchant_id,
-    environment, settlement_currency, secret_ref, webhook_secret_ref,
+    account_name, environment, settlement_currency, secret_ref, webhook_secret_ref,
     certificate_ref, capabilities, status, metadata, created_at, updated_at
 )
 VALUES
-    ('bootstrap-payment-provider-sandbox', '100001', '0', 'bootstrap-sandbox-default', 'sandbox', NULL, 'development', 'CNY', 'database:primary_secret', NULL, NULL, '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive', '{"bootstrap":true,"configureBeforeActivation":true}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ('bootstrap-payment-provider-sandbox', '100001', '0', 'bootstrap-sandbox-default', 'sandbox', NULL, 'Sandbox Development Account', 'development', 'CNY', 'database:primary_secret', NULL, NULL, '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive', '{"bootstrap":true,"configureBeforeActivation":true}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO commerce_payment_channel (

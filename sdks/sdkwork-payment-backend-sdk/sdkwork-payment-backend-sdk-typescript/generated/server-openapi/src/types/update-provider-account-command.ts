@@ -1,5 +1,7 @@
 export interface UpdateProviderAccountCommand {
   merchantId?: string;
+  /** Operator-facing account name. Omit to preserve the current value. */
+  accountName?: string;
   accountMode?: 'direct' | 'partner';
   partnerProviderAccountId?: string;
   environment?: 'development' | 'sandbox' | 'production';

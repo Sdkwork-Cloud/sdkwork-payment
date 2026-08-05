@@ -64,6 +64,8 @@ export interface PaymentProviderAccountView {
   readonly accountNo: string;
   readonly providerCode: PaymentProviderCode;
   readonly merchantId?: string;
+  readonly accountName?: string;
+  readonly accountNameI18n?: Record<string, string>;
   readonly accountMode: PaymentProviderAccountMode;
   readonly partnerProviderAccountId?: string;
   readonly environment: PaymentProviderEnvironment;
@@ -81,6 +83,23 @@ export interface PaymentProviderAccountView {
   readonly lastTestStatus?: PaymentLastTestStatus;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+/**
+ * Resolve the operator-facing account name for display: the locale map wins
+ * when it has an entry for the current locale, otherwise the canonical
+ * account name, otherwise the machine account no. Seeded and operator-edited
+ * names both flow through this path so every surface shows the same label.
+ */
+export function resolveProviderAccountName(
+  account: Pick<PaymentProviderAccountView, "accountNo" | "accountName" | "accountNameI18n">,
+  localeTag?: string | null,
+): string {
+  if (localeTag) {
+    const localized = account.accountNameI18n?.[localeTag];
+    if (localized) return localized;
+  }
+  return account.accountName || account.accountNo;
 }
 
 export interface PaymentSubMerchantView {
@@ -121,6 +140,7 @@ export interface PaymentProviderAccountDraft {
   readonly accountNo: string;
   readonly providerCode: PaymentProviderCode;
   readonly merchantId: string;
+  readonly accountName?: string;
   readonly accountMode: PaymentProviderAccountMode;
   readonly partnerProviderAccountId?: string;
   readonly environment: PaymentProviderEnvironment;
@@ -136,6 +156,7 @@ export interface PaymentProviderAccountDraft {
 
 export interface PaymentProviderAccountUpdateDraft {
   readonly merchantId?: string;
+  readonly accountName?: string;
   readonly accountMode?: PaymentProviderAccountMode;
   readonly partnerProviderAccountId?: string;
   readonly environment?: PaymentProviderEnvironment;

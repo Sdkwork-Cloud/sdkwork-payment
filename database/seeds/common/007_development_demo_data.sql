@@ -4,14 +4,14 @@
 
 INSERT INTO commerce_payment_provider_account (
     id, tenant_id, organization_id, account_no, provider_code, merchant_id,
-    account_mode, environment, country_code, settlement_currency, secret_ref,
+    account_mode, account_name, environment, country_code, settlement_currency, secret_ref,
     capabilities, status, metadata, last_tested_at, last_test_status,
     created_at, updated_at
 )
 VALUES (
     'bootstrap-payment-provider-sandbox-partner', '100001', '100002',
     'bootstrap-sandbox-partner', 'sandbox', 'demo-partner-merchant', 'partner',
-    'development', 'CN', 'CNY', 'bootstrap:development-placeholder',
+    'Sandbox Partner Demo Account', 'development', 'CN', 'CNY', 'bootstrap:development-placeholder',
     '{"pay":true,"refund":true,"close":true,"query":true}', 'inactive',
     '{"bootstrap":true,"developmentDemo":true,"credentialState":"not_configured"}',
     '2026-07-20T01:00:00Z', 'unknown', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP

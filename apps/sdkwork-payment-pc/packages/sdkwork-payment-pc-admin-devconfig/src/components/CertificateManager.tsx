@@ -30,12 +30,14 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Textarea,
 } from "@sdkwork/ui-pc-react";
 import {
   ADMIN_PROVIDER_FORM_OPTIONS,
   AdminFieldLabel,
   ConfirmDialog,
   formatAdminTimestamp,
+  PemFilePicker,
   SdkworkPaymentListPaginationControls,
 } from "@sdkwork/payment-pc-admin-core";
 import type { SdkWorkPageInfo } from "@sdkwork/payment-contracts";
@@ -84,6 +86,9 @@ const STATUS_LABEL: Record<PaymentCertificateView["status"], string> = {
 };
 
 const EXPIRY_WARNING_DAYS = 30;
+
+// Backend certificate length limit (maxLength) for uploaded files.
+const MAX_CERTIFICATE_FILE_BYTES = 65536;
 
 export function CertificateManager(props: CertificateManagerProps) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -356,14 +361,19 @@ function CertificateForm(props: CertificateFormProps) {
         </AdminFieldLabel>
       </div>
       <AdminFieldLabel label="PEM Content" htmlFor="cert-pem-content" required>
-        <textarea
+        <Textarea
           id="cert-pem-content"
-          className="min-h-[8rem] w-full rounded-md border border-[var(--sdk-color-border-default)] bg-[var(--sdk-color-surface-panel)] px-3 py-2 font-mono text-sm shadow-[var(--sdk-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--sdk-color-border-focus)]"
+          className="min-h-32 resize-y font-mono"
           value={state.certificate}
           onChange={(event) => update("certificate", event.target.value)}
           placeholder="Paste PEM content"
           required
           autoComplete="new-password"
+        />
+        <PemFilePicker
+          maxBytes={MAX_CERTIFICATE_FILE_BYTES}
+          disabled={props.submitting}
+          onContent={(content) => update("certificate", content)}
         />
       </AdminFieldLabel>
       {formError ? (

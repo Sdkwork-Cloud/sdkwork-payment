@@ -3,6 +3,10 @@ export interface ProviderAccount {
   accountNo: string;
   providerCode: 'stripe' | 'alipay' | 'wechat_pay' | 'sandbox';
   merchantId?: string;
+  /** Operator-facing account name. Seeded bootstrap accounts carry readable names; operators may edit it through update. */
+  accountName?: string;
+  /** Locale display map for accountName, e.g. { "zh-CN": "Stripe 生产账户" }. Filled idempotently by locale seeds. */
+  accountNameI18n?: Record<string, string>;
   /** direct = merchant self-connection; partner = ISV/service provider mode with sub-merchants */
   accountMode: 'direct' | 'partner';
   /** Parent partner account id when accountMode=partner; null when direct */

@@ -1,3 +1,3 @@
 # en-US seed locale
 
-Reserved for payment database seeds.
+Active payment database seed locale: localized display names in 001_localized_names.sql.

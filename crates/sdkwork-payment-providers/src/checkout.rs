@@ -135,13 +135,25 @@ fn payment_params_from_provider(
             params.insert("nextAction".to_owned(), "stripe_confirm".to_owned());
         }
         "alipay" => {
-            if let Some(qr) = outcome.payload.get("qr_code").and_then(Value::as_str) {
+            // WAP redirect is preferred in-app/browser: the cashier jumps to
+            // the Alipay H5 cashier page instead of showing a scan QR code.
+            if let Some(redirect) = outcome.payload.get("redirect_url").and_then(Value::as_str) {
+                params.insert("payUrl".to_owned(), redirect.to_owned());
+                params.insert("nextAction".to_owned(), "redirect".to_owned());
+            } else if let Some(qr) = outcome.payload.get("qr_code").and_then(Value::as_str) {
                 params.insert("qrCodeUrl".to_owned(), qr.to_owned());
                 params.insert("nextAction".to_owned(), "qr_code".to_owned());
             }
         }
         "wechat_pay" => {
-            if let Some(qr) = outcome.payload.get("code_url").and_then(Value::as_str) {
+            // JSAPI invocation params take priority inside the WeChat app;
+            // the native code_url remains as the scan/press-and-hold fallback.
+            if let Some(sdk_params) = outcome.payload.get("sdk_invoke_params") {
+                if let Ok(serialized) = serde_json::to_string(sdk_params) {
+                    params.insert("jsapiPayload".to_owned(), serialized);
+                    params.insert("nextAction".to_owned(), "jsapi".to_owned());
+                }
+            } else if let Some(qr) = outcome.payload.get("code_url").and_then(Value::as_str) {
                 params.insert("qrCodeUrl".to_owned(), qr.to_owned());
                 params.insert("nextAction".to_owned(), "qr_code".to_owned());
             }
@@ -178,9 +190,14 @@ fn cashier_url_from_provider(
 
 #[cfg(test)]
 mod tests {
-    use super::{provider_checkout_idempotency_key, provider_request_context, CheckoutContext};
+    use super::{
+        payment_params_from_provider, provider_checkout_idempotency_key, provider_request_context,
+        CheckoutContext,
+    };
+    use crate::adapter::PaymentProviderOperationOutcome;
     use sdkwork_contract_service::CommerceMoney;
     use sdkwork_payment_service::PayOwnerOrderOutcome;
+    use serde_json::json;
 
     #[test]
     fn provider_request_uses_method_key_and_preserves_payer_metadata() {
@@ -217,5 +234,88 @@ mod tests {
             .as_str()
             .expect("provider idempotency key")
             .is_ascii());
+    }
+
+    #[test]
+    fn alipay_wap_redirect_is_surfaced_as_pay_url() {
+        let outcome = PaymentProviderOperationOutcome {
+            provider_code: "alipay".to_owned(),
+            native_id: Some("trade-1".to_owned()),
+            raw_status: Some("pending".to_owned()),
+            payload: json!({
+                "qr_code": "https://qr.alipay.com/example",
+                "redirect_url": "https://cashier.alipay.com/example?biz=1",
+            }),
+        };
+        let params = payment_params_from_provider("alipay", &outcome);
+        assert_eq!(
+            params.get("payUrl").map(String::as_str),
+            Some("https://cashier.alipay.com/example?biz=1")
+        );
+        assert_eq!(params.get("nextAction").map(String::as_str), Some("redirect"));
+        assert!(!params.contains_key("qrCodeUrl"));
+    }
+
+    #[test]
+    fn alipay_precreate_falls_back_to_qr_code() {
+        let outcome = PaymentProviderOperationOutcome {
+            provider_code: "alipay".to_owned(),
+            native_id: Some("trade-1".to_owned()),
+            raw_status: None,
+            payload: json!({ "qr_code": "https://qr.alipay.com/example" }),
+        };
+        let params = payment_params_from_provider("alipay", &outcome);
+        assert_eq!(
+            params.get("qrCodeUrl").map(String::as_str),
+            Some("https://qr.alipay.com/example")
+        );
+        assert_eq!(params.get("nextAction").map(String::as_str), Some("qr_code"));
+        assert!(!params.contains_key("payUrl"));
+    }
+
+    #[test]
+    fn wechat_jsapi_sdk_params_are_surfaced_as_jsapi_payload() {
+        let outcome = PaymentProviderOperationOutcome {
+            provider_code: "wechat_pay".to_owned(),
+            native_id: Some("prepay-1".to_owned()),
+            raw_status: None,
+            payload: json!({
+                "code_url": "weixin://wxpay/bizpayurl?pr=abc",
+                "sdk_invoke_params": {
+                    "appId": "wxappid",
+                    "timeStamp": "1720000000",
+                    "nonceStr": "n",
+                    "package": "prepay_id=prepay-1",
+                    "signType": "RSA",
+                    "paySign": "sig",
+                },
+            }),
+        };
+        let params = payment_params_from_provider("wechat_pay", &outcome);
+        assert_eq!(params.get("nextAction").map(String::as_str), Some("jsapi"));
+        let parsed = params
+            .get("jsapiPayload")
+            .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+            .expect("jsapi payload must be serialized json");
+        assert_eq!(parsed["appId"], "wxappid");
+        assert_eq!(parsed["package"], "prepay_id=prepay-1");
+        assert!(!params.contains_key("qrCodeUrl"));
+    }
+
+    #[test]
+    fn wechat_native_falls_back_to_qr_code() {
+        let outcome = PaymentProviderOperationOutcome {
+            provider_code: "wechat_pay".to_owned(),
+            native_id: Some("out-trade-1".to_owned()),
+            raw_status: None,
+            payload: json!({ "code_url": "weixin://wxpay/bizpayurl?pr=abc" }),
+        };
+        let params = payment_params_from_provider("wechat_pay", &outcome);
+        assert_eq!(
+            params.get("qrCodeUrl").map(String::as_str),
+            Some("weixin://wxpay/bizpayurl?pr=abc")
+        );
+        assert_eq!(params.get("nextAction").map(String::as_str), Some("qr_code"));
+        assert!(!params.contains_key("jsapiPayload"));
     }
 }

@@ -16,12 +16,12 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  Input,
   Switch,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  Textarea,
 } from "@sdkwork/ui-pc-react";
 import {
   AdminFieldLabel,
@@ -31,10 +31,17 @@ import {
   PaymentAdminTabsList,
   PaymentAdminTabsTrigger,
   PaymentAdminWorkspace,
+  PemFilePicker,
 } from "@sdkwork/payment-pc-admin-core";
-import { ProviderAccountForm } from "../components/ProviderAccountForm";
+import {
+  ProviderAccountForm,
+  certificateLabel,
+  primarySecretLabel,
+  webhookSecretLabel,
+} from "../components/ProviderAccountForm";
 import { ProviderAccountList } from "../components/ProviderAccountList";
 import { SubMerchantManager } from "../components/SubMerchantManager";
+import { useSdkworkI18n } from "@sdkwork/i18n-pc-react";
 import type {
   PaymentBaseDataOption,
   PaymentCredentialRotateDraft,
@@ -45,6 +52,7 @@ import type {
   PaymentProviderAdminState,
   PaymentProviderAccountView,
 } from "../types/provider-admin-types";
+import { resolveProviderAccountName } from "../types/provider-admin-types";
 
 export interface PaymentProviderAdminWorkspaceProps {
   controller: PaymentProviderAdminController;
@@ -88,6 +96,7 @@ export function PaymentProviderAdminWorkspace(
   props: PaymentProviderAdminWorkspaceProps,
 ) {
   const { controller } = props;
+  const i18n = useSdkworkI18n();
   const [state, setState] = React.useState<PaymentProviderAdminState>(() => controller.getState());
   const [tab, setTab] = React.useState<PaymentProviderAdminSection>("accounts");
   const activeSection = props.section ?? tab;
@@ -298,7 +307,7 @@ export function PaymentProviderAdminWorkspace(
                   >
                     {partnerAccounts.map((account) => (
                       <option key={account.id} value={account.id}>
-                        {account.accountNo} ({account.providerCode})
+                        {resolveProviderAccountName(account, i18n?.localeTag)} ({account.providerCode})
                       </option>
                     ))}
                   </select>
@@ -369,7 +378,7 @@ export function PaymentProviderAdminWorkspace(
             <div className="space-y-3">
               <p className="text-sm text-[var(--sdk-color-text-secondary)]">
                 Validate the saved credentials and provider adapter for{" "}
-                <strong>{dialog.account.accountNo}</strong> ({dialog.account.providerCode} /{" "}
+                <strong>{resolveProviderAccountName(dialog.account, i18n?.localeTag)}</strong> ({dialog.account.providerCode} /{" "}
                 {dialog.account.environment}). The result updates the provider account's
                 <code className="mx-1 rounded bg-[var(--sdk-color-bg-subtle)] px-1 text-xs">
                   last_tested_at
@@ -406,7 +415,7 @@ export function PaymentProviderAdminWorkspace(
         title="Delete provider account?"
         description={
           dialog.kind === "delete"
-            ? `Delete provider account ${dialog.account.accountNo} (${dialog.account.providerCode} / ${dialog.account.environment})? The account is soft-deleted and no longer listed. Accounts still referenced by payment channels or sub-merchants cannot be deleted.`
+            ? `Delete provider account ${resolveProviderAccountName(dialog.account, i18n?.localeTag)} (${dialog.account.providerCode} / ${dialog.account.environment})? The account is soft-deleted and no longer listed. Accounts still referenced by payment channels or sub-merchants cannot be deleted.`
             : ""
         }
         confirmLabel="Delete"
@@ -456,6 +465,11 @@ interface RotateCredentialsDialogProps {
   onSubmit(draft: PaymentCredentialRotateDraft): Promise<void> | void;
 }
 
+// Backend credential length limits (maxLength) for uploaded files:
+// 32768 bytes for secret keys, 65536 bytes for certificates.
+const MAX_SECRET_FILE_BYTES = 32768;
+const MAX_CERTIFICATE_FILE_BYTES = 65536;
+
 interface RotateFormState {
   primarySecret: string;
   webhookSecret: string;
@@ -472,6 +486,9 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
   }));
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | undefined>();
+
+  const showPemFields =
+    props.account.providerCode === "alipay" || props.account.providerCode === "wechat_pay";
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -507,8 +524,13 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
         are superseded after this operation succeeds.
       </p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <AdminFieldLabel label="Primary Credential" htmlFor="rotate-primary-secret" required>
-          <textarea
+        <AdminFieldLabel
+          label={primarySecretLabel(props.account.providerCode)}
+          htmlFor="rotate-primary-secret"
+          required
+          className="sm:col-span-2"
+        >
+          <Textarea
             id="rotate-primary-secret"
             value={state.primarySecret}
             onChange={(event) =>
@@ -516,31 +538,46 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
             }
             placeholder="Enter new credential value"
             required
-            rows={5}
+            rows={showPemFields ? 5 : 3}
+            className="resize-y font-mono"
             autoComplete="new-password"
-            className="w-full resize-y rounded-md border border-[var(--sdk-color-border)] bg-[var(--sdk-color-bg-surface)] px-3 py-2 font-mono text-sm text-[var(--sdk-color-text-primary)]"
+          />
+          <PemFilePicker
+            maxBytes={MAX_SECRET_FILE_BYTES}
+            disabled={submitting || props.busy}
+            onContent={(content) =>
+              setState((prev) => ({ ...prev, primarySecret: content }))
+            }
           />
         </AdminFieldLabel>
         <AdminFieldLabel
-          label="Webhook / API v3 Secret"
+          label={webhookSecretLabel(props.account.providerCode)}
           htmlFor="rotate-webhook-secret"
         >
-          <Input
+          <Textarea
             id="rotate-webhook-secret"
-            type="password"
             value={state.webhookSecret}
             onChange={(event) =>
               setState((prev) => ({ ...prev, webhookSecret: event.target.value }))
             }
             placeholder="Enter new secret value"
+            rows={2}
+            className="resize-y font-mono"
             autoComplete="new-password"
+          />
+          <PemFilePicker
+            maxBytes={MAX_SECRET_FILE_BYTES}
+            disabled={submitting || props.busy}
+            onContent={(content) =>
+              setState((prev) => ({ ...prev, webhookSecret: content }))
+            }
           />
         </AdminFieldLabel>
         <AdminFieldLabel
-          label="Certificate / Provider Public Key"
+          label={certificateLabel(props.account.providerCode)}
           htmlFor="rotate-certificate"
         >
-          <textarea
+          <Textarea
             id="rotate-certificate"
             value={state.certificate}
             onChange={(event) =>
@@ -548,8 +585,15 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
             }
             placeholder="Enter new PEM value"
             rows={5}
+            className="resize-y font-mono"
             autoComplete="new-password"
-            className="w-full resize-y rounded-md border border-[var(--sdk-color-border)] bg-[var(--sdk-color-bg-surface)] px-3 py-2 font-mono text-sm text-[var(--sdk-color-text-primary)]"
+          />
+          <PemFilePicker
+            maxBytes={MAX_CERTIFICATE_FILE_BYTES}
+            disabled={submitting || props.busy}
+            onContent={(content) =>
+              setState((prev) => ({ ...prev, certificate: content }))
+            }
           />
         </AdminFieldLabel>
         <AdminFieldLabel
