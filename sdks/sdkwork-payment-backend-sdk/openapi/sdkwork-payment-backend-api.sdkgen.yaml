@@ -4946,6 +4946,158 @@
         "x-sdkwork-idempotent": true
       }
     },
+    "/backend/v3/api/payments/dev/test_payments": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "summary": "Create a test payment (dev config).",
+        "description": "Dev config: creates a 0.01 (one-cent) test payment against a QR-code-capable payment method (wechat_pay, alipay, or sandbox) without requiring an existing order. The method must be active. The backend creates an internal test order and drives the provider checkout, returning the scan-to-pay QR code URL. Combine with dev.sandboxTrigger to simulate a success callback in development/sandbox environments.",
+        "operationId": "dev.testPayments",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Client retry key for the test payment creation command. The server scopes the key by tenant, principal, and path.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTestPaymentCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestPaymentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable entity",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AuthToken": [],
+            "AccessToken": []
+          }
+        ],
+        "x-sdkwork-auth-mode": "dual-token",
+        "x-sdkwork-forbid-credential-headers": false,
+        "x-sdkwork-owner": "sdkwork-payment",
+        "x-sdkwork-api-authority": "sdkwork-payment-backend-api",
+        "x-sdkwork-domain": "commerce",
+        "x-sdkwork-resource": "devTestPayments",
+        "x-sdkwork-request-context": "WebRequestContext",
+        "x-sdkwork-api-surface": "backend-api",
+        "x-sdkwork-server-request-id": true,
+        "x-sdkwork-permission": "commerce.payments.dev.test_payments",
+        "x-sdkwork-idempotent": true
+      }
+    },
     "/backend/v3/api/payments/dev/webhook_signature_test": {
       "post": {
         "tags": [
@@ -5100,11 +5252,11 @@
       "IdempotencyKey": {
         "name": "Idempotency-Key",
         "in": "header",
-        "required": false,
+        "required": true,
         "description": "Client retry key for retriable payment create, update, command, or async operations. The server scopes the key by tenant, principal, method, and path.",
         "schema": {
           "type": "string",
-          "minLength": 8,
+          "minLength": 1,
           "maxLength": 128,
           "pattern": "^[A-Za-z0-9._:-]+$"
         }
@@ -5751,7 +5903,8 @@
           },
           "amount": {
             "type": "string",
-            "pattern": "^[0-9]+(\\.[0-9]{1,2})?$"
+            "pattern": "^[0-9]+$",
+            "description": "Refund amount as an integer in the currency's smallest unit (minor units, e.g. cents)."
           },
           "currencyCode": {
             "type": "string",
@@ -5814,7 +5967,8 @@
           },
           "amount": {
             "type": "string",
-            "pattern": "^[0-9]+(\\.[0-9]{1,2})?$"
+            "pattern": "^[0-9]+$",
+            "description": "Refund amount as an integer in the currency's smallest unit (minor units, e.g. cents). Omitted for a full refund."
           },
           "reasonCode": {
             "type": "string",
@@ -7859,6 +8013,118 @@
             "properties": {
               "data": {
                 "$ref": "#/components/schemas/SdkWorkAsyncData"
+              }
+            }
+          }
+        ]
+      },
+      "CreateTestPaymentCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "methodKey"
+        ],
+        "properties": {
+          "methodKey": {
+            "type": "string",
+            "description": "Payment method key (e.g., wechat_native, alipay_qr, sandbox_test); must reference an active QR-code-capable method"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]{1,2})?$",
+            "default": "0.01",
+            "description": "Test amount (defaults to 0.01)"
+          },
+          "currencyCode": {
+            "type": "string",
+            "default": "CNY",
+            "description": "Test currency (defaults to CNY)"
+          }
+        }
+      },
+      "TestPayment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "paymentId",
+          "paymentIntentId",
+          "attemptId",
+          "outTradeNo",
+          "methodKey",
+          "providerCode",
+          "amount",
+          "currencyCode",
+          "status",
+          "createdAt"
+        ],
+        "properties": {
+          "paymentId": {
+            "type": "string"
+          },
+          "paymentIntentId": {
+            "type": "string"
+          },
+          "paymentIntentNo": {
+            "type": "string"
+          },
+          "attemptId": {
+            "type": "string"
+          },
+          "outTradeNo": {
+            "type": "string"
+          },
+          "methodKey": {
+            "type": "string"
+          },
+          "providerCode": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "currencyCode": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "Payment attempt status (pending, succeeded, failed, ...)"
+          },
+          "qrCodeUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Scan-to-pay QR code payload (e.g., WeChat native code_url) when the provider returned one"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TestPaymentResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SdkWorkApiResponse"
+          },
+          {
+            "type": "object",
+            "required": [
+              "data"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "required": [
+                  "item"
+                ],
+                "properties": {
+                  "item": {
+                    "$ref": "#/components/schemas/TestPayment"
+                  }
+                }
               }
             }
           }

@@ -272,6 +272,13 @@ const HTTP_ROUTES: &[HttpRoute] = &[
     .with_idempotent(true),
     HttpRoute::dual_token(
         HttpMethod::Post,
+        "/backend/v3/api/payments/dev/test_payments",
+        "payments",
+        "dev.testPayments",
+    )
+    .with_idempotent(true),
+    HttpRoute::dual_token(
+        HttpMethod::Post,
         "/backend/v3/api/payments/dev/webhook_signature_test",
         "payments",
         "dev.webhookSignatureTest",

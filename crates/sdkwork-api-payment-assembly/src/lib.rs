@@ -18,6 +18,17 @@ pub async fn assemble_api_router_from_env() -> Result<ApiAssembly, String> {
     assemble_api_router(host).await
 }
 
+/// Assemble the payment router against a caller-provided database pool so the
+/// platform cloud gateway can share its process-wide PostgreSQL pool.
+pub async fn assemble_api_router_with_pool(
+    pool: sdkwork_database_sqlx::DatabasePool,
+) -> Result<ApiAssembly, String> {
+    let host = std::sync::Arc::new(
+        sdkwork_payment_service_host::PaymentServiceHost::from_pool(pool).await?,
+    );
+    assemble_api_router(host).await
+}
+
 pub async fn assemble_app_api_contribution_from_env() -> Result<ApiAssembly, String> {
     let host =
         std::sync::Arc::new(sdkwork_payment_service_host::PaymentServiceHost::from_env().await?);

@@ -39,6 +39,10 @@ import {
   primarySecretLabel,
   webhookSecretLabel,
 } from "../components/ProviderAccountForm";
+import {
+  ProviderAccountFillInGuide,
+  ProviderAccountFillInGuideLink,
+} from "../components/ProviderAccountFillInGuide";
 import { ProviderAccountList } from "../components/ProviderAccountList";
 import { SubMerchantManager } from "../components/SubMerchantManager";
 import { useSdkworkI18n } from "@sdkwork/i18n-pc-react";
@@ -101,6 +105,7 @@ export function PaymentProviderAdminWorkspace(
   const [tab, setTab] = React.useState<PaymentProviderAdminSection>("accounts");
   const activeSection = props.section ?? tab;
   const [dialog, setDialog] = React.useState<DialogState>({ kind: "closed" });
+  const [guideOpen, setGuideOpen] = React.useState(false);
 
   React.useEffect(() => {
     return controller.subscribe(() => {
@@ -212,6 +217,7 @@ export function PaymentProviderAdminWorkspace(
   return (
     <PaymentAdminI18nBoundary>
       <PaymentAdminWorkspace
+        className="flex h-full min-h-0 flex-col"
         data-slot="payment-provider-admin-workspace"
         description={props.description}
         error={state.lastError}
@@ -242,6 +248,7 @@ export function PaymentProviderAdminWorkspace(
         ) : null}
 
         <Tabs
+          className="flex min-h-0 flex-1 flex-col"
           value={activeSection}
           onValueChange={(value) => {
             if (!props.section) {
@@ -258,7 +265,7 @@ export function PaymentProviderAdminWorkspace(
               {props.tabActions ?? null}
             </div>
           ) : null}
-          <PaymentAdminTabsContent value="accounts">
+          <PaymentAdminTabsContent className="min-h-0 flex-1 overflow-y-auto" value="accounts">
             <ProviderAccountList
               accounts={state.providerAccounts}
               pageInfo={state.listPageInfo?.providerAccounts}
@@ -278,7 +285,7 @@ export function PaymentProviderAdminWorkspace(
               onCreate={() => setDialog({ kind: "create" })}
             />
           </PaymentAdminTabsContent>
-          <PaymentAdminTabsContent value="submerchants">
+          <PaymentAdminTabsContent className="min-h-0 flex-1 overflow-y-auto" value="submerchants">
             <div className="space-y-4">
               {partnerAccounts.length > 0 ? (
                 <div className="flex flex-col gap-2 sm:max-w-sm">
@@ -335,14 +342,21 @@ export function PaymentProviderAdminWorkspace(
         onOpenChange={(open) => {
           if (!open) {
             setDialog({ kind: "closed" });
+            setGuideOpen(false);
           }
         }}
       >
-        <DialogContent>
+        <DialogContent
+          className="max-h-[calc(100dvh-3rem)] overflow-y-auto"
+          style={{ width: "60vw" }}
+        >
           <DialogHeader>
-            <DialogTitle>
-              {dialog.kind === "create" ? "Create provider account" : "Edit provider account"}
-            </DialogTitle>
+            <div className="flex items-center justify-between gap-2">
+              <DialogTitle>
+                {dialog.kind === "create" ? "Create provider account" : "Edit provider account"}
+              </DialogTitle>
+              <ProviderAccountFillInGuideLink onClick={() => setGuideOpen(true)} />
+            </div>
           </DialogHeader>
           {dialog.kind === "create" || dialog.kind === "edit" ? (
             <ProviderAccountForm
@@ -361,6 +375,8 @@ export function PaymentProviderAdminWorkspace(
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <ProviderAccountFillInGuide open={guideOpen} onOpenChange={setGuideOpen} />
 
       <Dialog
         open={dialog.kind === "test"}
@@ -553,6 +569,7 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
         <AdminFieldLabel
           label={webhookSecretLabel(props.account.providerCode)}
           htmlFor="rotate-webhook-secret"
+          className="sm:col-span-2"
         >
           <Textarea
             id="rotate-webhook-secret"
@@ -576,6 +593,7 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
         <AdminFieldLabel
           label={certificateLabel(props.account.providerCode)}
           htmlFor="rotate-certificate"
+          className="sm:col-span-2"
         >
           <Textarea
             id="rotate-certificate"
@@ -599,6 +617,7 @@ function RotateCredentialsDialog(props: RotateCredentialsDialogProps) {
         <AdminFieldLabel
           label="Invalidate previous credentials"
           htmlFor="rotate-invalidate-previous"
+          className="sm:col-span-2"
         >
           <Switch
             id="rotate-invalidate-previous"

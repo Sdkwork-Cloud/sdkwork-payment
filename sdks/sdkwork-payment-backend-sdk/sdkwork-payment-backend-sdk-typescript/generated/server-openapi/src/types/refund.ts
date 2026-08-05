@@ -6,6 +6,7 @@ export interface Refund {
   paymentAttemptId: string;
   providerCode: 'stripe' | 'alipay' | 'wechat_pay' | 'sandbox';
   providerAccountId?: string;
+  /** Refund amount as an integer in the currency's smallest unit (minor units, e.g. cents). */
   amount: string;
   currencyCode: string;
   status: 'submitted' | 'processing' | 'succeeded' | 'failed' | 'closed';

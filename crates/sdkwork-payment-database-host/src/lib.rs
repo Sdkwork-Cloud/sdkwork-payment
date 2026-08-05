@@ -60,7 +60,7 @@ pub async fn bootstrap_payment_database_from_env() -> Result<PaymentDatabaseHost
     bootstrap_payment_database(pool).await
 }
 
-async fn bootstrap_payment_database(pool: DatabasePool) -> Result<PaymentDatabaseHost, String> {
+pub async fn bootstrap_payment_database(pool: DatabasePool) -> Result<PaymentDatabaseHost, String> {
     let module = Arc::new(
         database_module()
             .map_err(|error| format!("load payment database module failed: {error}"))?,

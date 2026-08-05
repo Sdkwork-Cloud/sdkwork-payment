@@ -38,7 +38,7 @@ deployment configuration explicitly opts in.
 
 | Runtime | Profile | Initial state |
 | --- | --- | --- |
-| Development | `development` | Complete catalog, an active local sandbox method/channel, and credential-free demo data for every Payment admin workflow; external PSP templates remain inactive. |
+| Development | `development` | Complete catalog and an active local sandbox method/channel; external PSP templates remain inactive. Transaction monitoring tables (`commerce_payment_intent`, `commerce_payment_attempt`, `commerce_payment_webhook_event`, `commerce_payment_reconciliation_run`) are never seeded with fabricated rows — they only show transactions produced by real payment flows through the sandbox account. |
 | Test/CI | `test` | Complete catalog and an active isolated test sandbox method/channel; external PSP templates remain inactive. |
 | Production | `production` or `standard` | Complete catalog and channels are pre-wired; provider accounts are inactive and act as the routing gate. |
 

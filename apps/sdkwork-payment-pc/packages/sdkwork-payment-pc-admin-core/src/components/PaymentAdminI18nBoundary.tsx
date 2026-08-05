@@ -137,5 +137,13 @@ export function PaymentAdminI18nBoundary({ children }: PropsWithChildren) {
     observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [catalogCopy, i18n?.localeTag]);
-  return <div ref={rootRef}>{children}</div>;
+  // The boundary root participates in the host height chain (h-full) so
+  // workspaces that fill the available viewport height (flex layouts with
+  // internal scrolling) keep working; in flow contexts the height classes are
+  // no-ops and the root sizes to content.
+  return (
+    <div className="flex h-full min-h-0 flex-col" ref={rootRef}>
+      {children}
+    </div>
+  );
 }

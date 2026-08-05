@@ -277,6 +277,9 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
       onSubmit={handleSubmit}
       aria-label="Provider account form"
     >
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Left column: account basics, partner config, provider metadata */}
+        <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <AdminFieldLabel label="Account No" htmlFor="provider-account-no" required>
           <Input
@@ -438,83 +441,6 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
         </div>
       ) : null}
 
-      <div className="rounded-md border border-[var(--sdk-color-border-subtle)] p-4">
-        <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--sdk-color-text-muted)]">
-          Database Credentials
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <AdminFieldLabel
-            label={primarySecretLabel(state.providerCode)}
-            htmlFor="provider-primary-secret"
-            required={isCreate}
-            className="sm:col-span-2"
-          >
-            <Textarea
-              id="provider-primary-secret"
-              value={state.primarySecret}
-              onChange={(event) => update("primarySecret", event.target.value)}
-              placeholder={credentialPlaceholder(isCreate, props.initial?.hasPrimarySecret)}
-              required={isCreate}
-              rows={showAlipayFields || showWeChatFields ? 5 : 3}
-              className="resize-y font-mono"
-              autoComplete="new-password"
-            />
-            <PemFilePicker
-              maxBytes={MAX_SECRET_FILE_BYTES}
-              disabled={submitting}
-              onContent={(content) => update("primarySecret", content)}
-            />
-          </AdminFieldLabel>
-          {showStripeFields || showWeChatFields ? (
-            <AdminFieldLabel
-              label={webhookSecretLabel(state.providerCode)}
-              htmlFor="provider-webhook-secret"
-            >
-              <Textarea
-                id="provider-webhook-secret"
-                value={state.webhookSecret}
-                onChange={(event) => update("webhookSecret", event.target.value)}
-                placeholder={credentialPlaceholder(isCreate, props.initial?.hasWebhookSecret)}
-                rows={2}
-                className="resize-y font-mono"
-                autoComplete="new-password"
-              />
-              <PemFilePicker
-                maxBytes={MAX_SECRET_FILE_BYTES}
-                disabled={submitting}
-                onContent={(content) => update("webhookSecret", content)}
-              />
-            </AdminFieldLabel>
-          ) : null}
-          {showAlipayFields || showWeChatFields ? (
-            <AdminFieldLabel
-              label={certificateLabel(state.providerCode)}
-              htmlFor="provider-certificate"
-            >
-              <Textarea
-                id="provider-certificate"
-                value={state.certificate}
-                onChange={(event) => update("certificate", event.target.value)}
-                placeholder={credentialPlaceholder(isCreate, props.initial?.hasCertificate)}
-                rows={5}
-                className="resize-y font-mono"
-                autoComplete="new-password"
-              />
-              <PemFilePicker
-                maxBytes={MAX_CERTIFICATE_FILE_BYTES}
-                disabled={submitting}
-                onContent={(content) => update("certificate", content)}
-              />
-            </AdminFieldLabel>
-          ) : null}
-        </div>
-        <p className="mt-3 text-xs text-[var(--sdk-color-text-secondary)]">
-          {props.initial?.credentialStorage === "legacy_reference"
-            ? "Legacy credential reference detected. Saving a replacement migrates it to encrypted database storage."
-            : "Credential values are write-only and encrypted before database persistence."}
-        </p>
-      </div>
-
       {showAlipayFields || showWeChatFields ? (
         <div className="rounded-md border border-[var(--sdk-color-border-subtle)] p-4">
           <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--sdk-color-text-muted)]">
@@ -583,6 +509,88 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
           Sandbox provider requires only the primary credential.
         </p>
       ) : null}
+        </div>
+        {/* Right column: credentials, capabilities */}
+        <div className="space-y-4">
+
+      <div className="rounded-md border border-[var(--sdk-color-border-subtle)] p-4">
+        <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--sdk-color-text-muted)]">
+          Database Credentials
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <AdminFieldLabel
+            label={primarySecretLabel(state.providerCode)}
+            htmlFor="provider-primary-secret"
+            required={isCreate}
+            className="sm:col-span-2"
+          >
+            <Textarea
+              id="provider-primary-secret"
+              value={state.primarySecret}
+              onChange={(event) => update("primarySecret", event.target.value)}
+              placeholder={credentialPlaceholder(isCreate, props.initial?.hasPrimarySecret)}
+              required={isCreate}
+              rows={showAlipayFields || showWeChatFields ? 4 : 3}
+              className="resize-y font-mono"
+              autoComplete="new-password"
+            />
+            <PemFilePicker
+              maxBytes={MAX_SECRET_FILE_BYTES}
+              disabled={submitting}
+              onContent={(content) => update("primarySecret", content)}
+            />
+          </AdminFieldLabel>
+          {showStripeFields || showWeChatFields ? (
+            <AdminFieldLabel
+              label={webhookSecretLabel(state.providerCode)}
+              htmlFor="provider-webhook-secret"
+              className="sm:col-span-2"
+            >
+              <Textarea
+                id="provider-webhook-secret"
+                value={state.webhookSecret}
+                onChange={(event) => update("webhookSecret", event.target.value)}
+                placeholder={credentialPlaceholder(isCreate, props.initial?.hasWebhookSecret)}
+                rows={2}
+                className="resize-y font-mono"
+                autoComplete="new-password"
+              />
+              <PemFilePicker
+                maxBytes={MAX_SECRET_FILE_BYTES}
+                disabled={submitting}
+                onContent={(content) => update("webhookSecret", content)}
+              />
+            </AdminFieldLabel>
+          ) : null}
+          {showAlipayFields || showWeChatFields ? (
+            <AdminFieldLabel
+              label={certificateLabel(state.providerCode)}
+              htmlFor="provider-certificate"
+              className="sm:col-span-2"
+            >
+              <Textarea
+                id="provider-certificate"
+                value={state.certificate}
+                onChange={(event) => update("certificate", event.target.value)}
+                placeholder={credentialPlaceholder(isCreate, props.initial?.hasCertificate)}
+                rows={4}
+                className="resize-y font-mono"
+                autoComplete="new-password"
+              />
+              <PemFilePicker
+                maxBytes={MAX_CERTIFICATE_FILE_BYTES}
+                disabled={submitting}
+                onContent={(content) => update("certificate", content)}
+              />
+            </AdminFieldLabel>
+          ) : null}
+        </div>
+        <p className="mt-3 text-xs text-[var(--sdk-color-text-secondary)]">
+          {props.initial?.credentialStorage === "legacy_reference"
+            ? "Legacy credential reference detected. Saving a replacement migrates it to encrypted database storage."
+            : "Credential values are write-only and encrypted before database persistence."}
+        </p>
+      </div>
 
       <div className="rounded-md border border-[var(--sdk-color-border-subtle)] p-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--sdk-color-text-muted)]">
@@ -608,6 +616,8 @@ export function ProviderAccountForm(props: ProviderAccountFormProps) {
               <span className="capitalize">{key}</span>
             </label>
           ))}
+        </div>
+      </div>
         </div>
       </div>
 

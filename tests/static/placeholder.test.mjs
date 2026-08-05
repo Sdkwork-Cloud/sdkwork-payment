@@ -27,7 +27,6 @@ test("payment seed profiles select a complete and safe environment template", as
     "002_production_templates.sql",
     "006_upgrade_bootstrap_templates.sql",
     "003_development_templates.sql",
-    "007_development_demo_data.sql",
     "008_development_recharge_checkout_wechat_pay.sql",
   ]);
   assert.deepEqual(manifest.profiles.test.common, [

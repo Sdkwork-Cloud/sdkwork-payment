@@ -33,6 +33,14 @@ impl PaymentServiceHost {
         Ok(Self { database })
     }
 
+    /// Build the payment service host against a caller-provided database pool so
+    /// the platform cloud gateway can share its process-wide PostgreSQL pool.
+    pub async fn from_pool(pool: DatabasePool) -> Result<Self, String> {
+        ensure_payment_credential_cipher_from_env()?;
+        let database = sdkwork_payment_database_host::bootstrap_payment_database(pool).await?;
+        Ok(Self { database })
+    }
+
     pub fn database_pool(&self) -> &DatabasePool {
         self.database.pool()
     }

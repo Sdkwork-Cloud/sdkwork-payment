@@ -14,6 +14,7 @@ axum.workspace = true
 tokio.workspace = true
 sdkwork-web-bootstrap.workspace = true
 sdkwork_payment_service_host.workspace = true
+sdkwork-database-sqlx.workspace = true
 sdkwork-web-core.workspace = true
 sdkwork-routes-payment-app-api = { path = "../sdkwork-routes-payment-app-api" }
 sdkwork-routes-payment-backend-api = { path = "../sdkwork-routes-payment-backend-api" }

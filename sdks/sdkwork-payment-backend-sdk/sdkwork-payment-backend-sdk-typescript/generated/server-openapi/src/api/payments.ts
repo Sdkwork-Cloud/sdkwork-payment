@@ -1,15 +1,19 @@
 import { backendApiPath } from './paths';
 import type { ApiRequestOptions, HttpClient } from '../http/client';
 
-import type { Certificate, CreateCertificateCommand, CreatePaymentChannelCommand, CreatePaymentMethodCommand, CreateProviderAccountCommand, CreateReconciliationRunCommand, CreateRefundCommand, CreateRouteRuleCommand, CreateSubMerchantCommand, CredentialRotateCommand, PageInfo, PaymentAttempt, PaymentChannel, PaymentIntent, PaymentMethod, ProviderAccount, ProviderAccountTestCommand, ProviderAccountTestResult, ReconciliationRun, Refund, RetryRefundCommand, RouteRule, SandboxTriggerCommand, SdkWorkAsyncData, SdkWorkCommandData, SubMerchant, UpdatePaymentMethodCommand, UpdateProviderAccountCommand, UpdateRouteRuleCommand, UpdateSubMerchantCommand, WebhookEvent, WebhookEventsReplayRequest, WebhookSignatureTestCommand, WebhookSignatureTestResult } from '../types';
+import type { Certificate, CreateCertificateCommand, CreatePaymentChannelCommand, CreatePaymentMethodCommand, CreateProviderAccountCommand, CreateReconciliationRunCommand, CreateRefundCommand, CreateRouteRuleCommand, CreateSubMerchantCommand, CreateTestPaymentCommand, CredentialRotateCommand, PageInfo, PaymentAttempt, PaymentChannel, PaymentIntent, PaymentMethod, ProviderAccount, ProviderAccountTestCommand, ProviderAccountTestResult, ReconciliationRun, Refund, RetryRefundCommand, RouteRule, SandboxTriggerCommand, SdkWorkAsyncData, SdkWorkCommandData, SubMerchant, TestPayment, UpdatePaymentMethodCommand, UpdateProviderAccountCommand, UpdateRouteRuleCommand, UpdateSubMerchantCommand, WebhookEvent, WebhookEventsReplayRequest, WebhookSignatureTestCommand, WebhookSignatureTestResult } from '../types';
 
 
 export interface PaymentsDevSandboxTriggerParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
+}
+
+export interface PaymentsDevTestPaymentsParams {
+  idempotencyKey: string;
 }
 
 export interface PaymentsDevWebhookSignatureTestParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsDevApi {
@@ -21,21 +25,32 @@ export class PaymentsDevApi {
 
 
 /** Sandbox event trigger (dev config). */
-  async sandboxTrigger(body: SandboxTriggerCommand, params?: PaymentsDevSandboxTriggerParams, requestOptions?: ApiRequestOptions): Promise<SdkWorkAsyncData> {
+  async sandboxTrigger(body: SandboxTriggerCommand, params: PaymentsDevSandboxTriggerParams, requestOptions?: ApiRequestOptions): Promise<SdkWorkAsyncData> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
     return this.client.request<SdkWorkAsyncData>(backendApiPath(`/payments/dev/sandbox_trigger`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'command' });
   }
 
-/** Webhook signature verification test (dev config). */
-  async webhookSignatureTest(body: WebhookSignatureTestCommand, params?: PaymentsDevWebhookSignatureTestParams, requestOptions?: ApiRequestOptions): Promise<WebhookSignatureTestResult> {
+/** Create a test payment (dev config). */
+  async testPayments(body: CreateTestPaymentCommand, params: PaymentsDevTestPaymentsParams, requestOptions?: ApiRequestOptions): Promise<TestPayment> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
+      },
+      {}
+    );
+    return this.client.request<TestPayment>(backendApiPath(`/payments/dev/test_payments`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', sdkworkUnwrapKind: 'item' });
+  }
+
+/** Webhook signature verification test (dev config). */
+  async webhookSignatureTest(body: WebhookSignatureTestCommand, params: PaymentsDevWebhookSignatureTestParams, requestOptions?: ApiRequestOptions): Promise<WebhookSignatureTestResult> {
+    const requestHeaders = buildRequestHeaders(
+      {
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -54,7 +69,7 @@ export interface PaymentsReconciliationRunsListParams {
 }
 
 export interface PaymentsReconciliationRunsCreateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsReconciliationRunsApi {
@@ -80,10 +95,10 @@ export class PaymentsReconciliationRunsApi {
   }
 
 /** Reconciliation run create. */
-  async create(body: CreateReconciliationRunCommand, params?: PaymentsReconciliationRunsCreateParams, requestOptions?: ApiRequestOptions): Promise<ReconciliationRun> {
+  async create(body: CreateReconciliationRunCommand, params: PaymentsReconciliationRunsCreateParams, requestOptions?: ApiRequestOptions): Promise<ReconciliationRun> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -173,7 +188,7 @@ export interface PaymentsCertificatesListParams {
 }
 
 export interface PaymentsCertificatesCreateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsCertificatesApi {
@@ -199,10 +214,10 @@ export class PaymentsCertificatesApi {
   }
 
 /** Certificate create (upload/register PEM). */
-  async create(body: CreateCertificateCommand, params?: PaymentsCertificatesCreateParams, requestOptions?: ApiRequestOptions): Promise<Certificate> {
+  async create(body: CreateCertificateCommand, params: PaymentsCertificatesCreateParams, requestOptions?: ApiRequestOptions): Promise<Certificate> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -231,11 +246,11 @@ export interface PaymentsSubMerchantsListParams {
 }
 
 export interface PaymentsSubMerchantsCreateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export interface PaymentsSubMerchantsUpdateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsSubMerchantsApi {
@@ -261,10 +276,10 @@ export class PaymentsSubMerchantsApi {
   }
 
 /** Sub-merchant create (ISV/partner mode only). */
-  async create(body: CreateSubMerchantCommand, params?: PaymentsSubMerchantsCreateParams, requestOptions?: ApiRequestOptions): Promise<SubMerchant> {
+  async create(body: CreateSubMerchantCommand, params: PaymentsSubMerchantsCreateParams, requestOptions?: ApiRequestOptions): Promise<SubMerchant> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -277,10 +292,10 @@ export class PaymentsSubMerchantsApi {
   }
 
 /** Sub-merchant update. */
-  async update(subMerchantId: string, body: UpdateSubMerchantCommand, params?: PaymentsSubMerchantsUpdateParams, requestOptions?: ApiRequestOptions): Promise<SubMerchant> {
+  async update(subMerchantId: string, body: UpdateSubMerchantCommand, params: PaymentsSubMerchantsUpdateParams, requestOptions?: ApiRequestOptions): Promise<SubMerchant> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -303,11 +318,11 @@ export interface PaymentsRouteRulesListParams {
 }
 
 export interface PaymentsRouteRulesCreateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export interface PaymentsRouteRulesUpdateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsRouteRulesApi {
@@ -332,10 +347,10 @@ export class PaymentsRouteRulesApi {
   }
 
 /** Route rule create. */
-  async create(body: CreateRouteRuleCommand, params?: PaymentsRouteRulesCreateParams, requestOptions?: ApiRequestOptions): Promise<RouteRule> {
+  async create(body: CreateRouteRuleCommand, params: PaymentsRouteRulesCreateParams, requestOptions?: ApiRequestOptions): Promise<RouteRule> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -343,10 +358,10 @@ export class PaymentsRouteRulesApi {
   }
 
 /** Route rule update. */
-  async update(routeRuleId: string, body: UpdateRouteRuleCommand, params?: PaymentsRouteRulesUpdateParams, requestOptions?: ApiRequestOptions): Promise<RouteRule> {
+  async update(routeRuleId: string, body: UpdateRouteRuleCommand, params: PaymentsRouteRulesUpdateParams, requestOptions?: ApiRequestOptions): Promise<RouteRule> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -370,7 +385,7 @@ export interface PaymentsChannelsListParams {
 }
 
 export interface PaymentsChannelsCreateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsChannelsApi {
@@ -396,10 +411,10 @@ export class PaymentsChannelsApi {
   }
 
 /** Payment channel create. */
-  async create(body: CreatePaymentChannelCommand, params?: PaymentsChannelsCreateParams, requestOptions?: ApiRequestOptions): Promise<PaymentChannel> {
+  async create(body: CreatePaymentChannelCommand, params: PaymentsChannelsCreateParams, requestOptions?: ApiRequestOptions): Promise<PaymentChannel> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -408,7 +423,7 @@ export class PaymentsChannelsApi {
 }
 
 export interface PaymentsProviderAccountsCredentialsRotateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsProviderAccountsCredentialsApi {
@@ -420,10 +435,10 @@ export class PaymentsProviderAccountsCredentialsApi {
 
 
 /** Provider account credential rotation. */
-  async rotate(providerAccountId: string, body: CredentialRotateCommand, params?: PaymentsProviderAccountsCredentialsRotateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
+  async rotate(providerAccountId: string, body: CredentialRotateCommand, params: PaymentsProviderAccountsCredentialsRotateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -443,15 +458,15 @@ export interface PaymentsProviderAccountsListParams {
 }
 
 export interface PaymentsProviderAccountsCreateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export interface PaymentsProviderAccountsUpdateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export interface PaymentsProviderAccountsTestParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsProviderAccountsApi {
@@ -480,10 +495,10 @@ export class PaymentsProviderAccountsApi {
   }
 
 /** Provider account create. */
-  async create(body: CreateProviderAccountCommand, params?: PaymentsProviderAccountsCreateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
+  async create(body: CreateProviderAccountCommand, params: PaymentsProviderAccountsCreateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -491,10 +506,10 @@ export class PaymentsProviderAccountsApi {
   }
 
 /** Provider account update. */
-  async update(providerAccountId: string, body: UpdateProviderAccountCommand, params?: PaymentsProviderAccountsUpdateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
+  async update(providerAccountId: string, body: UpdateProviderAccountCommand, params: PaymentsProviderAccountsUpdateParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccount> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -507,10 +522,10 @@ export class PaymentsProviderAccountsApi {
   }
 
 /** Provider account credential connectivity test. */
-  async test(providerAccountId: string, body?: ProviderAccountTestCommand, params?: PaymentsProviderAccountsTestParams, requestOptions?: ApiRequestOptions): Promise<ProviderAccountTestResult> {
+  async test(providerAccountId: string, params: PaymentsProviderAccountsTestParams, body?: ProviderAccountTestCommand, requestOptions?: ApiRequestOptions): Promise<ProviderAccountTestResult> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -527,11 +542,11 @@ export interface PaymentsMethodsListParams {
 }
 
 export interface PaymentsMethodsCreateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export interface PaymentsMethodsUpdateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsMethodsApi {
@@ -555,10 +570,10 @@ export class PaymentsMethodsApi {
   }
 
 /** Payment method create. */
-  async create(body: CreatePaymentMethodCommand, params?: PaymentsMethodsCreateParams, requestOptions?: ApiRequestOptions): Promise<PaymentMethod> {
+  async create(body: CreatePaymentMethodCommand, params: PaymentsMethodsCreateParams, requestOptions?: ApiRequestOptions): Promise<PaymentMethod> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -566,10 +581,10 @@ export class PaymentsMethodsApi {
   }
 
 /** Payment method update. */
-  async update(methodKey: string, body: UpdatePaymentMethodCommand, params?: PaymentsMethodsUpdateParams, requestOptions?: ApiRequestOptions): Promise<PaymentMethod> {
+  async update(methodKey: string, body: UpdatePaymentMethodCommand, params: PaymentsMethodsUpdateParams, requestOptions?: ApiRequestOptions): Promise<PaymentMethod> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -587,11 +602,11 @@ export interface PaymentsRefundsListParams {
 }
 
 export interface PaymentsRefundsCreateParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export interface PaymentsRefundsRetryParams {
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }
 
 export class PaymentsRefundsApi {
@@ -616,10 +631,10 @@ export class PaymentsRefundsApi {
   }
 
 /** Refund create. */
-  async create(body: CreateRefundCommand, params?: PaymentsRefundsCreateParams, requestOptions?: ApiRequestOptions): Promise<Refund> {
+  async create(body: CreateRefundCommand, params: PaymentsRefundsCreateParams, requestOptions?: ApiRequestOptions): Promise<Refund> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );
@@ -632,10 +647,10 @@ export class PaymentsRefundsApi {
   }
 
 /** Refund provider submission retry. */
-  async retry(refundId: string, body: RetryRefundCommand, params?: PaymentsRefundsRetryParams, requestOptions?: ApiRequestOptions): Promise<SdkWorkCommandData> {
+  async retry(refundId: string, body: RetryRefundCommand, params: PaymentsRefundsRetryParams, requestOptions?: ApiRequestOptions): Promise<SdkWorkCommandData> {
     const requestHeaders = buildRequestHeaders(
       {
-        'Idempotency-Key': { value: params?.idempotencyKey, style: 'simple', explode: false },
+        'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false },
       },
       {}
     );

@@ -279,7 +279,7 @@ WHERE tenant_id = '100001'
 
 -- Provider account names. The sandbox bootstrap row is shared by the
 -- development and test profiles, so the localized name follows the row's
--- environment; the partner demo row lives under the demo organization.
+-- environment.
 UPDATE commerce_payment_provider_account
 SET account_name_i18n = jsonb_set(account_name_i18n, '{en-US}', '"Stripe Production Account"'::jsonb, true)
 WHERE tenant_id = '100001'
@@ -310,10 +310,4 @@ SET account_name_i18n = jsonb_set(
     )
 WHERE tenant_id = '100001'
   AND id = 'bootstrap-payment-provider-sandbox'
-  AND deleted_at IS NULL;
-
-UPDATE commerce_payment_provider_account
-SET account_name_i18n = jsonb_set(account_name_i18n, '{en-US}', '"Sandbox Partner Demo Account"'::jsonb, true)
-WHERE tenant_id = '100001'
-  AND id = 'bootstrap-payment-provider-sandbox-partner'
   AND deleted_at IS NULL;

@@ -10,7 +10,17 @@ use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{
     payment_credential_cipher, provider_registry_for_account, resolve_secret_ref,
     CredentialCipherScope, EncryptedPaymentCredential, EnvPaymentCredentialResolver,
-    PaymentVerifyWebhookRequest, ProviderAccountBinding, ProviderCredentialBundle,
+    PaymentProviderRegistry, PaymentVerifyWebhookRequest, ProviderAccountBinding,
+    ProviderCredentialBundle,
+};
+use sdkwork_payment_repository_sqlx::{
+    enrich_owner_payment_attempt_postgres, enrich_owner_payment_attempt_sqlite,
+    OwnerOrderPaymentEnrichmentContext, PostgresCommercePaymentIntentStore,
+    SqliteCommercePaymentIntentStore,
+};
+use sdkwork_payment_service::{
+    CreateOwnerPaymentAttemptCommand, CreateOwnerPaymentAttemptOutcome,
+    CreateOwnerPaymentIntentCommand, PaymentIntentView,
 };
 use sdkwork_payment_service_host::PaymentServiceHost;
 use sdkwork_utils_rust::OffsetListPageParams;
@@ -159,6 +169,32 @@ struct SandboxTriggerBody {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct CreateTestPaymentBody {
+    method_key: String,
+    amount: Option<String>,
+    currency_code: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TestPaymentResult {
+    payment_id: String,
+    payment_intent_id: String,
+    payment_intent_no: String,
+    attempt_id: String,
+    out_trade_no: String,
+    method_key: String,
+    provider_code: String,
+    amount: String,
+    currency_code: String,
+    status: String,
+    qr_code_url: Option<String>,
+    expires_at: Option<String>,
+    created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct WebhookSignatureTestBody {
     provider_account_id: String,
     payload: String,
@@ -220,6 +256,10 @@ fn build_router(state: IntegrationState) -> Router {
         .route(
             "/backend/v3/api/payments/dev/sandbox_trigger",
             post(trigger_sandbox_event),
+        )
+        .route(
+            "/backend/v3/api/payments/dev/test_payments",
+            post(create_test_payment),
         )
         .route(
             "/backend/v3/api/payments/dev/webhook_signature_test",
@@ -753,6 +793,422 @@ async fn trigger_sandbox_event(
         Ok(()) => accepted_async_command(ctx, operation_id, "pending", None),
         Err(error) => map_service_error(ctx, error),
     }
+}
+
+// ===========================================================================
+// One-cent test payment (dev config)
+// ===========================================================================
+
+/// QR-code-capable provider codes that support one-cent scan-to-pay testing.
+const QR_TEST_PROVIDER_CODES: [&str; 3] = ["wechat_pay", "alipay", "sandbox"];
+const TEST_PAYMENT_ORDER_SUBJECT: &str = "One-cent test payment";
+
+struct TestPaymentMethodRecord {
+    provider_code: String,
+    status: String,
+}
+
+/// Provider-enriched intent store for the test payment flow. Mirrors the
+/// app-api `ProviderEnriched*PaymentIntents` wrappers so the attempt checkout
+/// drives the real provider adapter (WeChat native code_url, Alipay QR, ...).
+struct SqliteTestPaymentStore {
+    inner: Arc<SqliteCommercePaymentIntentStore>,
+    pool: SqlitePool,
+    registry: Arc<PaymentProviderRegistry>,
+    credentials: ProviderCredentialBundle,
+}
+
+impl SqliteTestPaymentStore {
+    async fn create_owner_payment_intent(
+        &self,
+        command: CreateOwnerPaymentIntentCommand,
+    ) -> Result<PaymentIntentView, sdkwork_contract_service::CommerceServiceError> {
+        self.inner.create_owner_payment_intent(command).await
+    }
+
+    async fn create_owner_payment_attempt(
+        &self,
+        command: CreateOwnerPaymentAttemptCommand,
+    ) -> Result<CreateOwnerPaymentAttemptOutcome, sdkwork_contract_service::CommerceServiceError> {
+        let registry = self.registry.clone();
+        let credentials = self.credentials.clone();
+        let pool = self.pool.clone();
+        let inner = self.inner.clone();
+        let tenant_id = command.tenant_id.clone();
+        let organization_id = command.organization_id.clone();
+        let outcome = inner.create_owner_payment_attempt(command).await?;
+        let order_id = outcome.order_id.clone();
+        enrich_owner_payment_attempt_sqlite(
+            &pool,
+            OwnerOrderPaymentEnrichmentContext {
+                deployment_registry: &registry,
+                credentials: &credentials,
+                tenant_id: &tenant_id,
+                organization_id: organization_id.as_deref(),
+                order_id: &order_id,
+                payment_scene: None,
+            },
+            outcome,
+        )
+        .await
+    }
+}
+
+struct PostgresTestPaymentStore {
+    inner: Arc<PostgresCommercePaymentIntentStore>,
+    pool: PgPool,
+    registry: Arc<PaymentProviderRegistry>,
+    credentials: ProviderCredentialBundle,
+}
+
+impl PostgresTestPaymentStore {
+    async fn create_owner_payment_intent(
+        &self,
+        command: CreateOwnerPaymentIntentCommand,
+    ) -> Result<PaymentIntentView, sdkwork_contract_service::CommerceServiceError> {
+        self.inner.create_owner_payment_intent(command).await
+    }
+
+    async fn create_owner_payment_attempt(
+        &self,
+        command: CreateOwnerPaymentAttemptCommand,
+    ) -> Result<CreateOwnerPaymentAttemptOutcome, sdkwork_contract_service::CommerceServiceError> {
+        let registry = self.registry.clone();
+        let credentials = self.credentials.clone();
+        let pool = self.pool.clone();
+        let inner = self.inner.clone();
+        let tenant_id = command.tenant_id.clone();
+        let organization_id = command.organization_id.clone();
+        let outcome = inner.create_owner_payment_attempt(command).await?;
+        let order_id = outcome.order_id.clone();
+        enrich_owner_payment_attempt_postgres(
+            &pool,
+            OwnerOrderPaymentEnrichmentContext {
+                deployment_registry: &registry,
+                credentials: &credentials,
+                tenant_id: &tenant_id,
+                organization_id: organization_id.as_deref(),
+                order_id: &order_id,
+                payment_scene: None,
+            },
+            outcome,
+        )
+        .await
+    }
+}
+
+async fn create_test_payment(
+    State(state): State<IntegrationState>,
+    runtime_context: Option<Extension<IamAppContext>>,
+    request_context: Option<Extension<WebRequestContext>>,
+    headers: HeaderMap,
+    Json(body): Json<CreateTestPaymentBody>,
+) -> Response {
+    let ctx = request_context.as_ref().map(|Extension(value)| value);
+    let subject = match require_subject(runtime_context, ctx) {
+        Ok(subject) => subject,
+        Err(response) => return response,
+    };
+    let write = match validate_command(ctx, &headers, "test-payment", &body) {
+        Ok(write) => write,
+        Err(response) => return response,
+    };
+    let method_key = match required_text(&body.method_key, "methodKey", ctx) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let amount = normalized(body.amount).unwrap_or_else(|| "0.01".to_owned());
+    if !is_money_amount(&amount) {
+        return validation(ctx, "amount must match ^[0-9]+(\\.[0-9]{1,2})?$");
+    }
+    let currency_code = normalized(body.currency_code).unwrap_or_else(|| "CNY".to_owned());
+    if currency_code.len() != 3 {
+        return validation(ctx, "currencyCode must be a 3-letter ISO currency code");
+    }
+
+    let method = match load_payment_method_for_test(&state.pool, &subject, &method_key).await {
+        Ok(Some(method)) => method,
+        Ok(None) => return not_found(ctx, "payment method was not found"),
+        Err(error) => return map_service_error(ctx, error),
+    };
+    if method.status != "active" {
+        return conflict(ctx, "payment method is not active");
+    }
+    if !QR_TEST_PROVIDER_CODES.contains(&method.provider_code.as_str()) {
+        return validation(
+            ctx,
+            "payment method does not support QR-code scan-to-pay testing",
+        );
+    }
+
+    // The test payment must hang off a payable order (the payment executor
+    // reads the amount from the order), so an internal test order is created
+    // first. `ON CONFLICT DO NOTHING` keeps idempotent retries stable.
+    let order_id = stable_id("test-payment-order", &write.idempotency_key);
+    let order_no = format!("TP-{}", &order_id[order_id.len().saturating_sub(24)..]);
+    let now = now_string();
+    if let Err(error) = insert_test_order(
+        &state.pool,
+        &subject,
+        &order_id,
+        &order_no,
+        &amount,
+        &currency_code,
+        &now,
+    )
+    .await
+    {
+        return map_service_error(ctx, error);
+    }
+
+    let checkout = match create_test_payment_checkout(
+        &state.pool,
+        &subject,
+        &order_id,
+        &method_key,
+        &write,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(error) => return map_service_error(ctx, error),
+    };
+    let (intent, attempt) = checkout;
+
+    let qr_code_url = attempt
+        .payment_params
+        .get("qrCodeUrl")
+        .cloned()
+        .or_else(|| attempt.payment_params.get("cashierUrl").cloned())
+        .or_else(|| attempt.payment_params.get("paymentUrl").cloned());
+    success_item(
+        ctx,
+        TestPaymentResult {
+            payment_id: attempt.attempt_id.clone(),
+            payment_intent_id: attempt.payment_intent_id.clone(),
+            payment_intent_no: intent.payment_intent_no,
+            attempt_id: attempt.attempt_id,
+            out_trade_no: attempt.out_trade_no,
+            method_key: attempt.payment_method,
+            provider_code: attempt.provider_code,
+            amount: attempt.amount.as_str().to_owned(),
+            currency_code,
+            status: attempt.status,
+            qr_code_url,
+            expires_at: attempt.payment_params.get("expiresAt").cloned(),
+            created_at: now,
+        },
+    )
+}
+
+async fn create_test_payment_checkout(
+    pool: &IntegrationPool,
+    subject: &AppRuntimeSubject,
+    order_id: &str,
+    method_key: &str,
+    write: &crate::command_headers::AppWriteCommandHeaders,
+) -> Result<
+    (PaymentIntentView, CreateOwnerPaymentAttemptOutcome),
+    sdkwork_contract_service::CommerceServiceError,
+> {
+    let credentials = ProviderCredentialBundle::from_env();
+    let registry = Arc::new(PaymentProviderRegistry::from_credentials(credentials.clone()));
+    let intent_command = CreateOwnerPaymentIntentCommand::new(
+        &subject.tenant_id,
+        subject.organization_id.as_deref(),
+        &subject.user_id,
+        order_id,
+        method_key,
+        &write.request_no,
+        &format!("test-payment-intent-{}", write.idempotency_key),
+    )?;
+    let build_attempt = |payment_intent_id: &str| {
+        CreateOwnerPaymentAttemptCommand::new(
+            &subject.tenant_id,
+            subject.organization_id.as_deref(),
+            &subject.user_id,
+            payment_intent_id,
+            &write.request_no,
+            &format!("test-payment-attempt-{}", write.idempotency_key),
+        )
+    };
+    match pool {
+        IntegrationPool::Sqlite(pool) => {
+            let store = SqliteTestPaymentStore {
+                inner: Arc::new(SqliteCommercePaymentIntentStore::new(pool.clone())),
+                pool: pool.clone(),
+                registry,
+                credentials,
+            };
+            let intent = store.create_owner_payment_intent(intent_command).await?;
+            let attempt = store
+                .create_owner_payment_attempt(build_attempt(&intent.payment_intent_id)?)
+                .await?;
+            Ok((intent, attempt))
+        }
+        IntegrationPool::Postgres(pool) => {
+            let store = PostgresTestPaymentStore {
+                inner: Arc::new(PostgresCommercePaymentIntentStore::new(pool.clone())),
+                pool: pool.clone(),
+                registry,
+                credentials,
+            };
+            let intent = store.create_owner_payment_intent(intent_command).await?;
+            let attempt = store
+                .create_owner_payment_attempt(build_attempt(&intent.payment_intent_id)?)
+                .await?;
+            Ok((intent, attempt))
+        }
+    }
+}
+
+async fn load_payment_method_for_test(
+    pool: &IntegrationPool,
+    subject: &AppRuntimeSubject,
+    method_key: &str,
+) -> Result<Option<TestPaymentMethodRecord>, sdkwork_contract_service::CommerceServiceError> {
+    match pool {
+        IntegrationPool::Sqlite(pool) => {
+            let row = sqlx::query(
+                "SELECT method_key, provider_code, status FROM commerce_payment_method WHERE tenant_id = CAST(? AS TEXT) AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL)) AND method_key = CAST(? AS TEXT) AND deleted_at IS NULL LIMIT 1",
+            )
+            .bind(&subject.tenant_id)
+            .bind(&subject.organization_id)
+            .bind(&subject.organization_id)
+            .bind(method_key)
+            .fetch_optional(pool)
+            .await
+            .map_err(storage)?;
+            Ok(row.map(|row| TestPaymentMethodRecord {
+                provider_code: row.try_get("provider_code").unwrap_or_default(),
+                status: row.try_get("status").unwrap_or_default(),
+            }))
+        }
+        IntegrationPool::Postgres(pool) => {
+            let row = sqlx::query(
+                "SELECT method_key, provider_code, status FROM commerce_payment_method WHERE tenant_id = CAST($1 AS TEXT) AND ((organization_id = CAST($2 AS TEXT)) OR (organization_id IS NULL AND $2::text IS NULL)) AND method_key = CAST($3 AS TEXT) AND deleted_at IS NULL LIMIT 1",
+            )
+            .bind(&subject.tenant_id)
+            .bind(&subject.organization_id)
+            .bind(method_key)
+            .fetch_optional(pool)
+            .await
+            .map_err(storage)?;
+            Ok(row.map(|row| TestPaymentMethodRecord {
+                provider_code: row.try_get("provider_code").unwrap_or_default(),
+                status: row.try_get("status").unwrap_or_default(),
+            }))
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_test_order(
+    pool: &IntegrationPool,
+    subject: &AppRuntimeSubject,
+    order_id: &str,
+    order_no: &str,
+    amount: &str,
+    currency_code: &str,
+    now: &str,
+) -> Result<(), sdkwork_contract_service::CommerceServiceError> {
+    let breakdown_id = stable_id("test-payment-breakdown", order_id);
+    match pool {
+        IntegrationPool::Sqlite(pool) => {
+            sqlx::query(
+                "INSERT OR IGNORE INTO commerce_order (id, tenant_id, organization_id, owner_user_id, order_no, status, subject, currency_code, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending_payment', ?, ?, ?, ?)",
+            )
+            .bind(order_id)
+            .bind(&subject.tenant_id)
+            .bind(&subject.organization_id)
+            .bind(&subject.user_id)
+            .bind(order_no)
+            .bind(TEST_PAYMENT_ORDER_SUBJECT)
+            .bind(currency_code)
+            .bind(now)
+            .bind(now)
+            .execute(pool)
+            .await
+            .map_err(storage)?;
+            sqlx::query(
+                "INSERT OR IGNORE INTO commerce_order_amount_breakdown (id, tenant_id, organization_id, order_id, allocation_type, original_amount, discount_amount, payable_amount, currency_code, created_at) VALUES (?, ?, ?, ?, 'order_total', ?, '0', ?, ?, ?)",
+            )
+            .bind(&breakdown_id)
+            .bind(&subject.tenant_id)
+            .bind(&subject.organization_id)
+            .bind(order_id)
+            .bind(amount)
+            .bind(amount)
+            .bind(currency_code)
+            .bind(now)
+            .execute(pool)
+            .await
+            .map_err(storage)?;
+            Ok(())
+        }
+        IntegrationPool::Postgres(pool) => {
+            sqlx::query(
+                "INSERT INTO commerce_order (id, tenant_id, organization_id, owner_user_id, order_no, status, subject, currency_code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 'pending_payment', $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING",
+            )
+            .bind(order_id)
+            .bind(&subject.tenant_id)
+            .bind(&subject.organization_id)
+            .bind(&subject.user_id)
+            .bind(order_no)
+            .bind(TEST_PAYMENT_ORDER_SUBJECT)
+            .bind(currency_code)
+            .bind(now)
+            .bind(now)
+            .execute(pool)
+            .await
+            .map_err(storage)?;
+            sqlx::query(
+                "INSERT INTO commerce_order_amount_breakdown (id, tenant_id, organization_id, order_id, allocation_type, original_amount, discount_amount, payable_amount, currency_code, created_at) VALUES ($1, $2, $3, $4, 'order_total', $5, '0', $6, $7, $8) ON CONFLICT (id) DO NOTHING",
+            )
+            .bind(&breakdown_id)
+            .bind(&subject.tenant_id)
+            .bind(&subject.organization_id)
+            .bind(order_id)
+            .bind(amount)
+            .bind(amount)
+            .bind(currency_code)
+            .bind(now)
+            .execute(pool)
+            .await
+            .map_err(storage)?;
+            Ok(())
+        }
+    }
+}
+
+/// Validates a money string against `^[0-9]+(\.[0-9]{1,2})?$` without regex.
+fn is_money_amount(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() || bytes.len() > 32 {
+        return false;
+    }
+    let mut index = 0;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    if index == 0 {
+        return false;
+    }
+    if index < bytes.len() {
+        if bytes[index] != b'.' {
+            return false;
+        }
+        index += 1;
+        let mut fraction_digits = 0;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            fraction_digits += 1;
+            index += 1;
+        }
+        if fraction_digits == 0 || fraction_digits > 2 || index != bytes.len() {
+            return false;
+        }
+    }
+    true
 }
 
 async fn test_webhook_signature(
@@ -1693,6 +2149,7 @@ mod tests {
                 "/backend/v3/api/payments/certificates/cert-1",
             ),
             (Method::POST, "/backend/v3/api/payments/dev/sandbox_trigger"),
+            (Method::POST, "/backend/v3/api/payments/dev/test_payments"),
             (
                 Method::POST,
                 "/backend/v3/api/payments/dev/webhook_signature_test",

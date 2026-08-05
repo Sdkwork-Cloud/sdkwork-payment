@@ -51,7 +51,6 @@
         "002_production_templates.sql",
         "006_upgrade_bootstrap_templates.sql",
         "003_development_templates.sql",
-        "007_development_demo_data.sql",
         "008_development_recharge_checkout_wechat_pay.sql"
       ]
     },
@@ -74,7 +73,7 @@
     }
   },
   "kind": "sdkwork.database.seed",
-  "i18nVersion": "1.1.0",
+  "i18nVersion": "1.1.1",
   "fallbackLocale": "zh-CN",
   "supportedLocales": [
     "zh-CN",
@@ -91,17 +90,17 @@
   ],
   "localeSets": {
     "zh-CN": {
-      "version": "1.1.0",
+      "version": "1.1.1",
       "required": true,
-      "checksum": "sha256:fe7192eb096c946bffc50c696fa3f5282e987322806de66f631ddaceadaae3ce",
+      "checksum": "sha256:570ae36e429afef83d0c90bd84a1395828a293af7c57d7b572c66aa2eef9a563",
       "files": [
         "001_localized_names.sql"
       ]
     },
     "en-US": {
-      "version": "1.1.0",
+      "version": "1.1.1",
       "required": true,
-      "checksum": "sha256:147e1153d198341d5f2cb2292d2a67edd2ee015d2170d54b639b2a163737ff78",
+      "checksum": "sha256:2dfe930c91955333ac31dcfb2b239aca310fd9ee494a19df36a416b9dcefcfcc",
       "files": [
         "001_localized_names.sql"
       ]
