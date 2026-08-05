@@ -43,7 +43,7 @@ function createBackendService() {
       hasMore: false,
     },
   }));
-  const subMerchantsList = vi.fn(async () => ({
+  const subMerchantsList = vi.fn(async (..._args: unknown[]) => ({
     items: [subMerchant],
     pageInfo: {
       mode: "offset",
@@ -54,17 +54,17 @@ function createBackendService() {
       hasMore: false,
     },
   }));
-  const providerAccountsCreate = vi.fn(async () => providerAccount);
-  const providerAccountsUpdate = vi.fn(async () => providerAccount);
-  const providerAccountsTest = vi.fn(async () => ({
+  const providerAccountsCreate = vi.fn(async (..._args: unknown[]) => providerAccount);
+  const providerAccountsUpdate = vi.fn(async (..._args: unknown[]) => providerAccount);
+  const providerAccountsTest = vi.fn(async (..._args: unknown[]) => ({
     ok: true,
     providerCode: "stripe",
     environment: "sandbox",
     testedAt: "2026-07-31T00:00:00.000Z",
   }));
-  const providerAccountsRotate = vi.fn(async () => providerAccount);
-  const subMerchantsCreate = vi.fn(async () => subMerchant);
-  const subMerchantsUpdate = vi.fn(async () => subMerchant);
+  const providerAccountsRotate = vi.fn(async (..._args: unknown[]) => providerAccount);
+  const subMerchantsCreate = vi.fn(async (..._args: unknown[]) => subMerchant);
+  const subMerchantsUpdate = vi.fn(async (..._args: unknown[]) => subMerchant);
 
   return {
     calls: {
@@ -161,13 +161,15 @@ describe("payment provider admin controller", () => {
     expect(calls.subMerchantsUpdate.mock.calls[0]?.[2]).toEqual({
       idempotencyKey: expect.stringMatching(/^sub-merchant-update-/),
     });
+    const idempotencyKeyOf = (value: unknown) =>
+      (value as { idempotencyKey?: string } | undefined)?.idempotencyKey;
     const idempotencyKeys = [
-      calls.providerAccountsCreate.mock.calls[0]?.[1]?.idempotencyKey,
-      calls.providerAccountsUpdate.mock.calls[0]?.[2]?.idempotencyKey,
-      calls.providerAccountsTest.mock.calls[0]?.[2]?.idempotencyKey,
-      calls.providerAccountsRotate.mock.calls[0]?.[2]?.idempotencyKey,
-      calls.subMerchantsCreate.mock.calls[0]?.[1]?.idempotencyKey,
-      calls.subMerchantsUpdate.mock.calls[0]?.[2]?.idempotencyKey,
+      idempotencyKeyOf(calls.providerAccountsCreate.mock.calls[0]?.[1]),
+      idempotencyKeyOf(calls.providerAccountsUpdate.mock.calls[0]?.[2]),
+      idempotencyKeyOf(calls.providerAccountsTest.mock.calls[0]?.[2]),
+      idempotencyKeyOf(calls.providerAccountsRotate.mock.calls[0]?.[2]),
+      idempotencyKeyOf(calls.subMerchantsCreate.mock.calls[0]?.[1]),
+      idempotencyKeyOf(calls.subMerchantsUpdate.mock.calls[0]?.[2]),
     ];
     expect(new Set(idempotencyKeys).size).toBe(idempotencyKeys.length);
     expect(calls.subMerchantsList.mock.calls).toHaveLength(3);
