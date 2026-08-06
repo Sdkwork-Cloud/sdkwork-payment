@@ -3,7 +3,6 @@
 //! These helpers are used across both PostgreSQL and SQLite repository
 //! implementations. Keeping them in a single module eliminates duplication
 //! and ensures consistent behavior.
-
 use chrono::{DateTime, SecondsFormat, Utc};
 use sdkwork_contract_service::{CommerceMoney, CommerceServiceError};
 use sdkwork_payment_service::{
@@ -13,16 +12,13 @@ use sdkwork_payment_service::{
     PayOwnerOrderOutcome, PaymentIntentView, RefundView,
 };
 use sqlx::postgres::PgRow;
-use sqlx::sqlite::SqliteRow;
-use sqlx::Row;
-
+use sqlx::{Postgres, Row};
 pub(crate) fn payment_attempt_is_terminal_success(status: &str) -> bool {
     matches!(
         status.trim().to_ascii_lowercase().as_str(),
         "succeeded" | "success" | "paid"
     )
 }
-
 pub(crate) fn required_persisted_paid_at(paid_at: &str) -> Result<String, CommerceServiceError> {
     let paid_at = paid_at.trim();
     if paid_at.is_empty() {
@@ -38,7 +34,6 @@ pub(crate) fn required_persisted_paid_at(paid_at: &str) -> Result<String, Commer
             )
         })
 }
-
 pub(crate) fn ensure_confirmation_intent_update(
     rows_affected: u64,
     persisted_status: Option<&str>,
@@ -64,7 +59,6 @@ pub(crate) fn ensure_confirmation_intent_update(
         ))),
     }
 }
-
 pub(crate) fn resolve_confirmation_attempt_replayed(
     rows_affected: u64,
     persisted_status: Option<&str>,
@@ -74,7 +68,6 @@ pub(crate) fn resolve_confirmation_attempt_replayed(
             "owner payment attempt disappeared during confirmation",
         ));
     };
-
     match rows_affected {
         1 if payment_attempt_is_terminal_success(status) => Ok(false),
         0 if payment_attempt_is_terminal_success(status) => Ok(true),
@@ -92,21 +85,18 @@ pub(crate) fn resolve_confirmation_attempt_replayed(
         ))),
     }
 }
-
 pub(crate) fn ensure_payment_status_transition(
     from: &str,
     to: &str,
 ) -> Result<(), CommerceServiceError> {
     validate_payment_wire_transition(from, to)
 }
-
 pub(crate) fn ensure_refund_status_transition(
     from: Option<&str>,
     to: &str,
 ) -> Result<(), CommerceServiceError> {
     validate_refund_wire_transition(from, to)
 }
-
 pub(crate) fn ensure_payment_intent_idempotency_replay_matches(
     command: &CreateOwnerPaymentIntentCommand,
     existing: &PaymentIntentView,
@@ -120,7 +110,6 @@ pub(crate) fn ensure_payment_intent_idempotency_replay_matches(
     }
     Ok(())
 }
-
 pub(crate) fn ensure_payment_attempt_idempotency_replay_matches(
     command: &CreateOwnerPaymentAttemptCommand,
     existing: &CreateOwnerPaymentAttemptOutcome,
@@ -130,7 +119,6 @@ pub(crate) fn ensure_payment_attempt_idempotency_replay_matches(
     }
     Ok(())
 }
-
 pub(crate) fn ensure_owner_payment_idempotency_replay_matches(
     command: &PayOwnerOrderCommand,
     existing: &PayOwnerOrderOutcome,
@@ -165,7 +153,6 @@ pub(crate) fn ensure_owner_payment_idempotency_replay_matches(
     }
     Ok(())
 }
-
 pub(crate) fn owner_payment_reuse_matches(
     command: &PayOwnerOrderCommand,
     callback_payload: &str,
@@ -184,7 +171,6 @@ pub(crate) fn owner_payment_reuse_matches(
     object.get("paymentScene") == Some(&requested_scene)
         && object.get("paymentMetadata") == Some(&command.payment_metadata)
 }
-
 fn snapshot_provider_account(
     object: &mut serde_json::Map<String, serde_json::Value>,
     provider_account_id: Option<&str>,
@@ -196,13 +182,11 @@ fn snapshot_provider_account(
         );
     }
 }
-
 pub(crate) fn payment_attempt_callback_payload(provider_account_id: Option<&str>) -> String {
     let mut object = serde_json::Map::new();
     snapshot_provider_account(&mut object, provider_account_id);
     serde_json::Value::Object(object).to_string()
 }
-
 pub(crate) fn owner_payment_callback_payload(
     command: &PayOwnerOrderCommand,
     provider_account_id: Option<&str>,
@@ -217,7 +201,6 @@ pub(crate) fn owner_payment_callback_payload(
     let Some(object) = payload.as_object_mut() else {
         return raw.to_owned();
     };
-
     object.insert(
         "paymentMetadata".to_owned(),
         command.payment_metadata.clone(),
@@ -233,7 +216,6 @@ pub(crate) fn owner_payment_callback_payload(
     snapshot_provider_account(object, provider_account_id);
     payload.to_string()
 }
-
 pub(crate) fn ensure_refund_idempotency_replay_matches(
     command: &CreateOwnerRefundCommand,
     existing: &RefundView,
@@ -251,7 +233,6 @@ pub(crate) fn ensure_refund_idempotency_replay_matches(
         .unwrap_or(true);
     let reason_matches = normalized_optional_text(command.reason_code.as_deref())
         == normalized_optional_text(existing.reason_code.as_deref());
-
     if existing.order_id != command.order_id
         || !existing
             .currency_code
@@ -264,7 +245,6 @@ pub(crate) fn ensure_refund_idempotency_replay_matches(
     }
     Ok(())
 }
-
 pub(crate) fn ensure_refund_requester_idempotency_replay_matches(
     command: &CreateOwnerRefundCommand,
     requested_by_type: &str,
@@ -277,17 +257,14 @@ pub(crate) fn ensure_refund_requester_idempotency_replay_matches(
     }
     Ok(())
 }
-
 fn normalized_optional_text(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
-
 fn idempotency_parameter_conflict(resource: &str) -> CommerceServiceError {
     CommerceServiceError::conflict(format!(
         "{resource} idempotency key was already used with different parameters"
     ))
 }
-
 /// Wrap a storage-layer error with a descriptive context message.
 ///
 /// Accepts any `Display` type so it works uniformly with `sqlx::Error`,
@@ -295,7 +272,6 @@ fn idempotency_parameter_conflict(resource: &str) -> CommerceServiceError {
 pub(crate) fn store_error(message: &str, error: impl std::fmt::Display) -> CommerceServiceError {
     CommerceServiceError::storage(format!("{message}: {error}"))
 }
-
 /// Produce a deterministic, filesystem-safe storage identifier from path parts.
 ///
 /// Each part is sanitized: non-alphanumeric characters (except `-`, `_`, `.`)
@@ -317,7 +293,6 @@ pub(crate) fn stable_storage_id(parts: &[&str]) -> String {
         .collect::<Vec<_>>()
         .join("-")
 }
-
 pub(crate) fn provider_out_trade_no(
     tenant_id: &str,
     order_id: &str,
@@ -335,12 +310,10 @@ pub(crate) fn provider_out_trade_no(
     let digest = sdkwork_utils_rust::crypto::sha256_hash(fingerprint.as_bytes());
     format!("SW{}", &digest[..30])
 }
-
 /// Return the current UTC timestamp in the wire/storage RFC3339 format.
 pub(crate) fn current_timestamp_string() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
-
 /// Parse a money string into integer smallest currency units.
 ///
 /// `CommerceMoney` is stored and exchanged as a non-negative integer string in
@@ -367,7 +340,6 @@ pub(crate) fn money_to_minor_units(value: &str) -> Result<i64, CommerceServiceEr
         .parse::<i64>()
         .map_err(|_| CommerceServiceError::validation("money amount overflows i64 minor units"))
 }
-
 /// Resolve the refund amount string from the command or default to the order total.
 pub(crate) fn resolve_refund_amount(
     command: &CreateOwnerRefundCommand,
@@ -378,7 +350,6 @@ pub(crate) fn resolve_refund_amount(
         .clone()
         .unwrap_or_else(|| total_amount.as_str().to_owned()))
 }
-
 /// Validate that the refund amount is positive and does not exceed the original payment.
 pub(crate) fn validate_refund_bounds(
     refund_minor: i64,
@@ -396,23 +367,12 @@ pub(crate) fn validate_refund_bounds(
     }
     Ok(())
 }
-
 pub(crate) fn string_cell<R: StringCellRow>(row: &R, column: &str) -> String {
     row.string_cell(column)
 }
-
 pub(crate) trait StringCellRow {
     fn string_cell(&self, column: &str) -> String;
 }
-
-impl StringCellRow for SqliteRow {
-    fn string_cell(&self, column: &str) -> String {
-        self.try_get::<String, _>(column)
-            .or_else(|_| self.try_get::<&str, _>(column).map(str::to_owned))
-            .unwrap_or_default()
-    }
-}
-
 impl StringCellRow for PgRow {
     fn string_cell(&self, column: &str) -> String {
         self.try_get::<Option<String>, _>(column)
@@ -421,7 +381,6 @@ impl StringCellRow for PgRow {
             .unwrap_or_default()
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -435,7 +394,6 @@ mod tests {
         CreateOwnerRefundCommand, PayOwnerOrderCommand, PayOwnerOrderCommandInput,
         PayOwnerOrderOutcome, RefundView,
     };
-
     #[test]
     fn confirmation_replay_requires_and_preserves_persisted_paid_at() {
         assert_eq!(
@@ -444,7 +402,6 @@ mod tests {
         );
         assert!(required_persisted_paid_at(" ").is_err());
     }
-
     #[test]
     fn confirmation_update_counts_distinguish_first_write_from_replay() {
         assert!(!resolve_confirmation_attempt_replayed(1, Some("succeeded"))
@@ -454,13 +411,11 @@ mod tests {
         );
         assert!(resolve_confirmation_attempt_replayed(0, Some("pending")).is_err());
         assert!(resolve_confirmation_attempt_replayed(2, Some("succeeded")).is_err());
-
         ensure_confirmation_intent_update(1, None).expect("updated intent");
         ensure_confirmation_intent_update(0, Some("succeeded")).expect("intent replay");
         assert!(ensure_confirmation_intent_update(0, Some("pending")).is_err());
         assert!(ensure_confirmation_intent_update(0, None).is_err());
     }
-
     #[test]
     fn refund_idempotency_replay_rejects_changed_financial_parameters() {
         let command = CreateOwnerRefundCommand::new_with_currency(
@@ -486,12 +441,10 @@ mod tests {
             refund_no: "RF-1".to_owned(),
             status: "submitted".to_owned(),
         };
-
         let error = ensure_refund_idempotency_replay_matches(&command, &existing)
             .expect_err("changed amount must conflict");
         assert_eq!(error.code(), "conflict");
     }
-
     #[test]
     fn owner_payment_callback_payload_preserves_domain_data_and_snapshots_provider_input() {
         let command = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
@@ -507,7 +460,6 @@ mod tests {
             idempotency_key: "idempotency-1".to_owned(),
         })
         .expect("owner payment command");
-
         let callback_payload = owner_payment_callback_payload(&command, Some("provider-account-1"));
         let payload: serde_json::Value =
             serde_json::from_str(&callback_payload).expect("canonical callback payload");
@@ -515,7 +467,6 @@ mod tests {
         assert_eq!(payload["paymentMetadata"]["openid"], "payer-1");
         assert_eq!(payload["paymentScene"], "mini_program");
         assert_eq!(payload["providerAccountId"], "provider-account-1");
-
         let changed_command = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
             tenant_id: "tenant-1".to_owned(),
             organization_id: Some("organization-1".to_owned()),
@@ -545,13 +496,11 @@ mod tests {
         )
         .expect_err("changed payer metadata must conflict");
         assert_eq!(error.code(), "conflict");
-
         assert!(owner_payment_reuse_matches(&command, &callback_payload));
         assert!(!owner_payment_reuse_matches(
             &changed_command,
             &callback_payload
         ));
-
         let changed_scene = PayOwnerOrderCommand::new(PayOwnerOrderCommandInput {
             tenant_id: "tenant-1".to_owned(),
             organization_id: Some("organization-1".to_owned()),
@@ -572,18 +521,15 @@ mod tests {
         assert!(!owner_payment_reuse_matches(&command, "{}"));
         assert!(!owner_payment_reuse_matches(&command, "not-json"));
     }
-
     #[test]
     fn two_step_attempt_callback_payload_snapshots_provider_account() {
         let payload: serde_json::Value = serde_json::from_str(&payment_attempt_callback_payload(
             Some("provider-account-2"),
         ))
         .expect("payment attempt callback payload");
-
         assert_eq!(payload["providerAccountId"], "provider-account-2");
         assert_eq!(payment_attempt_callback_payload(None), "{}");
     }
-
     #[test]
     fn provider_trade_number_is_fixed_width_ascii_and_unambiguous() {
         let trade = provider_out_trade_no("租户", "订单/一", "重复点击:支付");

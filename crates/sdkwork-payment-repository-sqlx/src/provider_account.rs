@@ -1,12 +1,10 @@
 use sdkwork_contract_service::CommerceServiceError;
 use serde_json::Value;
-use sqlx::{Pool, Postgres, Row, Sqlite};
-
+use sqlx::{Pool, Postgres, Row, };
 use crate::provider_credential::{
-    load_provider_credentials_postgres, load_provider_credentials_sqlite,
+    load_provider_credentials_postgres,
 };
 use crate::shared::{store_error, string_cell};
-
 #[derive(Clone, Eq, PartialEq)]
 pub struct PaymentProviderAccountRecord {
     pub id: String,
@@ -23,7 +21,6 @@ pub struct PaymentProviderAccountRecord {
     pub certificate: Option<String>,
     pub metadata: Value,
 }
-
 fn organization_scope_rank(requested: Option<&str>, actual: Option<&str>) -> u8 {
     if requested.is_some() && actual == requested {
         0
@@ -33,7 +30,6 @@ fn organization_scope_rank(requested: Option<&str>, actual: Option<&str>) -> u8 
         2
     }
 }
-
 impl std::fmt::Debug for PaymentProviderAccountRecord {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -50,7 +46,6 @@ impl std::fmt::Debug for PaymentProviderAccountRecord {
             .finish_non_exhaustive()
     }
 }
-
 pub fn ensure_provider_account_matches(
     account: Option<&PaymentProviderAccountRecord>,
     provider_code: &str,
@@ -62,124 +57,15 @@ pub fn ensure_provider_account_matches(
     }
     Ok(())
 }
-
-pub async fn load_active_provider_account_sqlite(
-    pool: &Pool<Sqlite>,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    provider_code: &str,
-) -> Result<Option<PaymentProviderAccountRecord>, CommerceServiceError> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, tenant_id, organization_id, provider_code, merchant_id, environment, secret_ref,
-               webhook_secret_ref, certificate_ref, metadata
-        FROM commerce_payment_provider_account
-        WHERE tenant_id = CAST(? AS TEXT)
-          AND (organization_id = CAST(? AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
-          AND LOWER(provider_code) = LOWER(CAST(? AS TEXT))
-          AND status = 'active'
-          AND deleted_at IS NULL
-        ORDER BY CASE
-                     WHEN organization_id = CAST(? AS TEXT) THEN 0
-                     WHEN organization_id = '0' THEN 1
-                     ELSE 2
-                 END,
-                 updated_at DESC,
-                 id DESC
-        LIMIT 2
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(organization_id)
-    .bind(provider_code)
-    .bind(organization_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| store_error("failed to load payment provider account", error))?;
-
-    match rows.as_slice() {
-        [] => Ok(None),
-        [row] => Ok(Some(
-            hydrate_sqlite(pool, map_provider_account_row_sqlite(row)).await?,
-        )),
-        [first, second, ..] => {
-            let first = map_provider_account_row_sqlite(first);
-            let second = map_provider_account_row_sqlite(second);
-            if organization_scope_rank(organization_id, first.organization_id.as_deref())
-                < organization_scope_rank(organization_id, second.organization_id.as_deref())
-            {
-                Ok(Some(hydrate_sqlite(pool, first).await?))
-            } else {
-                Err(CommerceServiceError::conflict(
-                    "multiple active payment provider accounts require deterministic channel routing",
-                ))
-            }
-        }
-    }
-}
-
 fn metadata_from_row(raw: Result<String, sqlx::Error>) -> Value {
     match raw {
         Ok(text) => serde_json::from_str(&text).unwrap_or(Value::Object(Default::default())),
         Err(_) => Value::Object(Default::default()),
     }
 }
-
 fn metadata_from_jsonb(raw: Result<Value, sqlx::Error>) -> Value {
     raw.unwrap_or(Value::Object(Default::default()))
 }
-fn map_provider_account_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> PaymentProviderAccountRecord {
-    let metadata = metadata_from_row(row.try_get("metadata"));
-    PaymentProviderAccountRecord {
-        id: string_cell(row, "id"),
-        tenant_id: string_cell(row, "tenant_id"),
-        organization_id: row.try_get("organization_id").ok().flatten(),
-        provider_code: string_cell(row, "provider_code"),
-        merchant_id: row.try_get("merchant_id").ok().flatten(),
-        environment: string_cell(row, "environment"),
-        secret_ref: string_cell(row, "secret_ref"),
-        webhook_secret_ref: row.try_get("webhook_secret_ref").ok().flatten(),
-        certificate_ref: row.try_get("certificate_ref").ok().flatten(),
-        primary_secret: None,
-        webhook_secret: None,
-        certificate: None,
-        metadata,
-    }
-}
-
-pub async fn load_active_provider_account_by_id_sqlite(
-    pool: &Pool<Sqlite>,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    provider_account_id: &str,
-) -> Result<Option<PaymentProviderAccountRecord>, CommerceServiceError> {
-    let row = sqlx::query(
-        r#"
-        SELECT id, tenant_id, organization_id, provider_code, merchant_id, environment, secret_ref,
-               webhook_secret_ref, certificate_ref, metadata
-        FROM commerce_payment_provider_account
-        WHERE id = CAST(? AS TEXT)
-          AND tenant_id = CAST(? AS TEXT)
-          AND (organization_id = CAST(? AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
-          AND status = 'active'
-          AND deleted_at IS NULL
-        LIMIT 1
-        "#,
-    )
-    .bind(provider_account_id)
-    .bind(tenant_id)
-    .bind(organization_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| store_error("failed to load payment provider account by id", error))?;
-    match row {
-        Some(row) => Ok(Some(
-            hydrate_sqlite(pool, map_provider_account_row_sqlite(&row)).await?,
-        )),
-        None => Ok(None),
-    }
-}
-
 pub async fn load_active_provider_account_postgres(
     pool: &Pool<Postgres>,
     tenant_id: &str,
@@ -212,7 +98,6 @@ pub async fn load_active_provider_account_postgres(
     .fetch_all(pool)
     .await
     .map_err(|error| store_error("failed to load payment provider account", error))?;
-
     match rows.as_slice() {
         [] => Ok(None),
         [row] => Ok(Some(
@@ -233,7 +118,6 @@ pub async fn load_active_provider_account_postgres(
         }
     }
 }
-
 pub async fn load_active_provider_account_by_id_postgres(
     pool: &Pool<Postgres>,
     tenant_id: &str,
@@ -266,40 +150,6 @@ pub async fn load_active_provider_account_by_id_postgres(
         None => Ok(None),
     }
 }
-
-pub async fn load_provider_account_for_existing_payment_sqlite(
-    pool: &Pool<Sqlite>,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    provider_account_id: &str,
-) -> Result<Option<PaymentProviderAccountRecord>, CommerceServiceError> {
-    let row = sqlx::query(
-        r#"
-        SELECT id, tenant_id, organization_id, provider_code, merchant_id, environment, secret_ref,
-               webhook_secret_ref, certificate_ref, metadata
-        FROM commerce_payment_provider_account
-        WHERE id = CAST(? AS TEXT)
-          AND tenant_id = CAST(? AS TEXT)
-          AND (organization_id = CAST(? AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
-          AND status IN ('active', 'inactive', 'deprecated')
-          AND deleted_at IS NULL
-        LIMIT 1
-        "#,
-    )
-    .bind(provider_account_id)
-    .bind(tenant_id)
-    .bind(organization_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| store_error("failed to load historical payment provider account", error))?;
-    match row {
-        Some(row) => Ok(Some(
-            hydrate_sqlite(pool, map_provider_account_row_sqlite(&row)).await?,
-        )),
-        None => Ok(None),
-    }
-}
-
 pub async fn load_provider_account_for_existing_payment_postgres(
     pool: &Pool<Postgres>,
     tenant_id: &str,
@@ -332,52 +182,6 @@ pub async fn load_provider_account_for_existing_payment_postgres(
         None => Ok(None),
     }
 }
-
-pub async fn load_active_provider_account_for_channel_sqlite(
-    pool: &Pool<Sqlite>,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    channel_id: &str,
-    provider_code: &str,
-) -> Result<Option<PaymentProviderAccountRecord>, CommerceServiceError> {
-    let row = sqlx::query(
-        r#"
-        SELECT provider_account_id
-        FROM commerce_payment_channel
-        WHERE id = CAST(? AS TEXT)
-          AND tenant_id = CAST(? AS TEXT)
-          AND (organization_id = CAST(? AS TEXT) OR organization_id = '0' OR organization_id IS NULL)
-          AND LOWER(provider_code) = LOWER(CAST(? AS TEXT))
-          AND status = 'active'
-          AND deleted_at IS NULL
-        LIMIT 1
-        "#,
-    )
-    .bind(channel_id)
-    .bind(tenant_id)
-    .bind(organization_id)
-    .bind(provider_code)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| store_error("failed to load payment channel account binding", error))?
-    .ok_or_else(|| CommerceServiceError::conflict("payment channel is no longer active"))?;
-    let provider_account_id: Option<String> = row.try_get("provider_account_id").ok().flatten();
-    let Some(provider_account_id) = provider_account_id else {
-        return Ok(None);
-    };
-    load_active_provider_account_by_id_sqlite(
-        pool,
-        tenant_id,
-        organization_id,
-        &provider_account_id,
-    )
-    .await?
-    .map(Some)
-    .ok_or_else(|| {
-        CommerceServiceError::conflict("payment channel provider account is no longer active")
-    })
-}
-
 pub async fn load_active_provider_account_for_channel_postgres(
     pool: &Pool<Postgres>,
     tenant_id: &str,
@@ -422,42 +226,6 @@ pub async fn load_active_provider_account_for_channel_postgres(
         CommerceServiceError::conflict("payment channel provider account is no longer active")
     })
 }
-
-pub async fn load_active_provider_account_by_merchant_id_sqlite(
-    pool: &Pool<Sqlite>,
-    provider_code: &str,
-    merchant_id: &str,
-) -> Result<Option<PaymentProviderAccountRecord>, CommerceServiceError> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, tenant_id, organization_id, provider_code, merchant_id, environment, secret_ref,
-               webhook_secret_ref, certificate_ref, metadata
-        FROM commerce_payment_provider_account
-        WHERE LOWER(provider_code) = LOWER(CAST(? AS TEXT))
-          AND merchant_id = CAST(? AS TEXT)
-          AND status = 'active'
-          AND deleted_at IS NULL
-        ORDER BY updated_at DESC, id DESC
-        LIMIT 2
-        "#,
-    )
-    .bind(provider_code)
-    .bind(merchant_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| store_error("failed to load payment provider account by merchant", error))?;
-
-    match rows.as_slice() {
-        [] => Ok(None),
-        [row] => Ok(Some(
-            hydrate_sqlite(pool, map_provider_account_row_sqlite(row)).await?,
-        )),
-        _ => Err(CommerceServiceError::conflict(
-            "multiple active payment provider accounts match merchant identity",
-        )),
-    }
-}
-
 pub async fn load_active_provider_account_by_merchant_id_postgres(
     pool: &Pool<Postgres>,
     provider_code: &str,
@@ -481,7 +249,6 @@ pub async fn load_active_provider_account_by_merchant_id_postgres(
     .fetch_all(pool)
     .await
     .map_err(|error| store_error("failed to load payment provider account by merchant", error))?;
-
     match rows.as_slice() {
         [] => Ok(None),
         [row] => Ok(Some(
@@ -492,7 +259,6 @@ pub async fn load_active_provider_account_by_merchant_id_postgres(
         )),
     }
 }
-
 fn map_provider_account_row_postgres(row: &sqlx::postgres::PgRow) -> PaymentProviderAccountRecord {
     let metadata = metadata_from_jsonb(row.try_get("metadata"));
     PaymentProviderAccountRecord {
@@ -511,7 +277,6 @@ fn map_provider_account_row_postgres(row: &sqlx::postgres::PgRow) -> PaymentProv
         metadata,
     }
 }
-
 fn uses_database_credentials(record: &PaymentProviderAccountRecord) -> bool {
     record.secret_ref.starts_with("database:")
         || record
@@ -523,26 +288,6 @@ fn uses_database_credentials(record: &PaymentProviderAccountRecord) -> bool {
             .as_deref()
             .is_some_and(|value| value.starts_with("database:"))
 }
-
-async fn hydrate_sqlite(
-    pool: &Pool<Sqlite>,
-    mut record: PaymentProviderAccountRecord,
-) -> Result<PaymentProviderAccountRecord, CommerceServiceError> {
-    if uses_database_credentials(&record) {
-        let credentials = load_provider_credentials_sqlite(
-            pool,
-            &record.tenant_id,
-            record.organization_id.as_deref(),
-            &record.id,
-        )
-        .await?;
-        record.primary_secret = credentials.primary_secret;
-        record.webhook_secret = credentials.webhook_secret;
-        record.certificate = credentials.certificate;
-    }
-    Ok(record)
-}
-
 async fn hydrate_postgres(
     pool: &Pool<Postgres>,
     mut record: PaymentProviderAccountRecord,
@@ -560,174 +305,4 @@ async fn hydrate_postgres(
         record.certificate = credentials.certificate;
     }
     Ok(record)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        ensure_provider_account_matches, load_active_provider_account_by_id_sqlite,
-        load_active_provider_account_by_merchant_id_sqlite, load_active_provider_account_sqlite,
-        load_provider_account_for_existing_payment_sqlite,
-    };
-
-    #[tokio::test]
-    async fn merchant_lookup_returns_scope_and_rejects_ambiguous_accounts() {
-        let pool = provider_account_test_pool().await;
-        insert_provider_account(
-            &pool,
-            "account-a",
-            "tenant-a",
-            Some("org-a"),
-            "merchant-shared",
-        )
-        .await;
-
-        let account =
-            load_active_provider_account_by_merchant_id_sqlite(&pool, "stripe", "merchant-shared")
-                .await
-                .expect("merchant lookup")
-                .expect("provider account");
-        assert_eq!(account.tenant_id, "tenant-a");
-        assert_eq!(account.organization_id.as_deref(), Some("org-a"));
-
-        insert_provider_account(
-            &pool,
-            "account-b",
-            "tenant-b",
-            Some("org-b"),
-            "merchant-shared",
-        )
-        .await;
-        let error =
-            load_active_provider_account_by_merchant_id_sqlite(&pool, "stripe", "merchant-shared")
-                .await
-                .expect_err("ambiguous merchant identity must fail closed");
-        assert_eq!(error.code(), "conflict");
-
-        insert_provider_account(
-            &pool,
-            "account-c",
-            "tenant-a",
-            Some("org-a"),
-            "merchant-other",
-        )
-        .await;
-        let error = load_active_provider_account_sqlite(&pool, "tenant-a", Some("org-a"), "stripe")
-            .await
-            .expect_err("ambiguous active provider accounts must fail closed");
-        assert_eq!(error.code(), "conflict");
-
-        sqlx::query("UPDATE commerce_payment_provider_account SET status = 'inactive' WHERE id = 'account-a'")
-            .execute(&pool)
-            .await
-            .expect("deactivate historical account");
-        let historical = load_provider_account_for_existing_payment_sqlite(
-            &pool,
-            "tenant-a",
-            Some("org-a"),
-            "account-a",
-        )
-        .await
-        .expect("historical account lookup")
-        .expect("inactive account remains usable for historical operations");
-        assert_eq!(historical.id, "account-a");
-    }
-
-    #[tokio::test]
-    async fn default_organization_account_is_visible_but_specific_account_wins() {
-        let pool = provider_account_test_pool().await;
-        insert_provider_account(
-            &pool,
-            "account-default",
-            "tenant-a",
-            Some("0"),
-            "merchant-default",
-        )
-        .await;
-
-        let inherited = load_active_provider_account_by_id_sqlite(
-            &pool,
-            "tenant-a",
-            Some("org-a"),
-            "account-default",
-        )
-        .await
-        .expect("default account lookup")
-        .expect("default account");
-        assert_eq!(inherited.organization_id.as_deref(), Some("0"));
-
-        insert_provider_account(
-            &pool,
-            "account-specific",
-            "tenant-a",
-            Some("org-a"),
-            "merchant-specific",
-        )
-        .await;
-        let selected =
-            load_active_provider_account_sqlite(&pool, "tenant-a", Some("org-a"), "stripe")
-                .await
-                .expect("scoped account selection")
-                .expect("specific account");
-        assert_eq!(selected.id, "account-specific");
-        ensure_provider_account_matches(Some(&selected), "stripe")
-            .expect("matching provider account");
-        assert!(ensure_provider_account_matches(Some(&selected), "wechat_pay").is_err());
-    }
-
-    async fn provider_account_test_pool() -> sqlx::SqlitePool {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("sqlite memory pool");
-        sqlx::query(
-            r#"
-            CREATE TABLE commerce_payment_provider_account (
-                id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                organization_id TEXT,
-                account_no TEXT NOT NULL,
-                provider_code TEXT NOT NULL,
-                merchant_id TEXT,
-                environment TEXT NOT NULL,
-                secret_ref TEXT NOT NULL,
-                webhook_secret_ref TEXT,
-                certificate_ref TEXT,
-                status TEXT NOT NULL,
-                metadata TEXT NOT NULL DEFAULT '{}',
-                updated_at TEXT NOT NULL DEFAULT '2026-07-12T00:00:00Z',
-                deleted_at TEXT
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .expect("create provider account test table");
-        pool
-    }
-
-    async fn insert_provider_account(
-        pool: &sqlx::SqlitePool,
-        id: &str,
-        tenant_id: &str,
-        organization_id: Option<&str>,
-        merchant_id: &str,
-    ) {
-        sqlx::query(
-            r#"
-            INSERT INTO commerce_payment_provider_account
-                (id, tenant_id, organization_id, account_no, provider_code, merchant_id,
-                 environment, secret_ref, status)
-            VALUES (?, ?, ?, ?, 'stripe', ?, 'production', ?, 'active')
-            "#,
-        )
-        .bind(id)
-        .bind(tenant_id)
-        .bind(organization_id)
-        .bind(format!("NO-{id}"))
-        .bind(merchant_id)
-        .bind(format!("secret://{id}"))
-        .execute(pool)
-        .await
-        .expect("insert provider account");
-    }
 }

@@ -1,7 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -14,16 +13,14 @@ use sdkwork_payment_providers::{
     ProviderCredentialBundle,
 };
 use sdkwork_payment_repository_sqlx::{
-    enrich_owner_order_payment_postgres, enrich_owner_order_payment_sqlite,
-    enrich_payment_record_checkout_postgres, enrich_payment_record_checkout_sqlite,
-    load_active_provider_account_postgres, load_active_provider_account_sqlite,
-    load_payment_attempt_provider_context_postgres, load_payment_attempt_provider_context_sqlite,
+    enrich_owner_order_payment_postgres, 
+    enrich_payment_record_checkout_postgres, 
+    load_active_provider_account_postgres, 
+    load_payment_attempt_provider_context_postgres, 
     load_provider_account_for_existing_payment_postgres,
-    load_provider_account_for_existing_payment_sqlite, provider_account_binding,
+    provider_account_binding,
     OwnerOrderPaymentEnrichmentContext, PostgresCommerceOwnerOrderPaymentStore,
     PostgresCommercePaymentMethodStore, PostgresCommercePaymentRecordStore,
-    SqliteCommerceOwnerOrderPaymentStore, SqliteCommercePaymentMethodStore,
-    SqliteCommercePaymentRecordStore,
 };
 use sdkwork_payment_service::{
     scene_code_filter_from_client_type, ClosePaymentRecordCommand, PayOwnerOrderCommand,
@@ -35,80 +32,62 @@ use sdkwork_payment_service::{
 use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, SqlitePool};
-
+use sqlx::PgPool;
 use crate::api_response::{
     map_service_error, not_found, success_command_accepted, success_created_item, success_item,
     success_list, unauthorized, validation,
 };
 use crate::command_headers::{validate_app_write_payload, write_payload_with_route_param};
 use crate::subject::app_runtime_subject_from_extension;
-
 pub type CommercePaymentFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CommerceServiceError>> + Send + 'a>>;
-
 pub trait CommercePaymentStore: Send + Sync {
     fn list_payment_methods<'a>(
         &'a self,
         query: PaymentMethodListQuery,
     ) -> CommercePaymentFuture<'a, PaymentMethodListPage>;
-
     fn list_payment_records<'a>(
         &'a self,
         query: PaymentRecordListQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordListPage>;
-
     fn retrieve_payment_record<'a>(
         &'a self,
         query: PaymentRecordDetailQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordItem>;
-
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage>;
-
     fn retrieve_payment_record_by_out_trade_no<'a>(
         &'a self,
         query: PaymentRecordOutTradeNoQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordItem>;
-
     fn fetch_payment_statistics<'a>(
         &'a self,
         query: PaymentRecordStatisticsQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordStatistics>;
-
     fn close_payment_record<'a>(
         &'a self,
         command: ClosePaymentRecordCommand,
     ) -> CommercePaymentFuture<'a, ()>;
-
     fn pay_owner_order<'a>(
         &'a self,
         command: PayOwnerOrderCommand,
     ) -> CommercePaymentFuture<'a, PayOwnerOrderOutcome>;
 }
-
 #[derive(Clone)]
 pub(crate) enum PaymentCheckoutDeps {
-    Sqlite {
-        pool: SqlitePool,
-        registry: Arc<PaymentProviderRegistry>,
-        credentials: ProviderCredentialBundle,
-    },
     Postgres {
         pool: PgPool,
         registry: Arc<PaymentProviderRegistry>,
         credentials: ProviderCredentialBundle,
     },
 }
-
 #[derive(Clone)]
 pub(crate) struct AppPaymentState {
     store: Arc<dyn CommercePaymentStore>,
     checkout: Option<PaymentCheckoutDeps>,
 }
-
 #[derive(Debug, Deserialize)]
 struct PaymentRecordsQueryParams {
     page: Option<i64>,
@@ -116,7 +95,6 @@ struct PaymentRecordsQueryParams {
     #[serde(alias = "orderId")]
     order_id: Option<String>,
 }
-
 #[derive(Debug, Deserialize)]
 struct PaymentMethodsQueryParams {
     page: Option<i64>,
@@ -124,7 +102,6 @@ struct PaymentMethodsQueryParams {
     #[serde(rename = "clientType", alias = "client_type")]
     client_type: Option<String>,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PaymentRecordResponse {
@@ -137,7 +114,6 @@ struct PaymentRecordResponse {
     status: String,
     status_name: String,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PaymentMethodResponse {
@@ -148,7 +124,6 @@ struct PaymentMethodResponse {
     sort: i64,
     product_types: Vec<PaymentMethodProductTypeResponse>,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PaymentMethodProductTypeResponse {
@@ -156,7 +131,6 @@ struct PaymentMethodProductTypeResponse {
     name: String,
     available: bool,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppCommercePaymentAttemptRecordResponse {
@@ -167,7 +141,6 @@ struct AppCommercePaymentAttemptRecordResponse {
     date: String,
     status: String,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PaymentStatisticsResponse {
@@ -178,7 +151,6 @@ struct PaymentStatisticsResponse {
     timeout_payments: i64,
     closed_payments: i64,
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReconcilePaymentRequest {
@@ -188,7 +160,6 @@ struct ReconcilePaymentRequest {
     #[serde(rename = "reconcileType", alias = "reconcile_type")]
     reconcile_type: Option<String>,
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreatePaymentRequest {
@@ -211,7 +182,6 @@ struct CreatePaymentRequest {
     #[serde(rename = "productType", alias = "product_type")]
     product_type: Option<String>,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreatePaymentResponse {
@@ -227,37 +197,6 @@ struct CreatePaymentResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     payment_url: Option<String>,
 }
-
-pub fn app_payment_router_with_sqlite_pool(
-    pool: SqlitePool,
-    registry: Arc<PaymentProviderRegistry>,
-    credentials: ProviderCredentialBundle,
-) -> Router {
-    let method_store = Arc::new(SqliteCommercePaymentMethodStore::new(pool.clone()));
-    let store = Arc::new(CompositeCommercePaymentStore {
-        methods: method_store,
-        payments: Arc::new(ProviderEnrichedSqlitePayments {
-            inner: Arc::new(SqliteCommerceOwnerOrderPaymentStore::new(pool.clone())),
-            pool: pool.clone(),
-            registry: registry.clone(),
-            credentials: credentials.clone(),
-        }),
-        records: Arc::new(ProviderEnrichedSqlitePaymentRecords {
-            inner: Arc::new(SqliteCommercePaymentRecordStore::new(pool.clone())),
-            pool: pool.clone(),
-            credentials: credentials.clone(),
-        }),
-    });
-    build_app_payment_router_with_state(AppPaymentState {
-        store,
-        checkout: Some(PaymentCheckoutDeps::Sqlite {
-            pool,
-            registry,
-            credentials,
-        }),
-    })
-}
-
 pub fn app_payment_router_with_postgres_pool(
     pool: PgPool,
     registry: Arc<PaymentProviderRegistry>,
@@ -287,8 +226,7 @@ pub fn app_payment_router_with_postgres_pool(
         }),
     })
 }
-
-/// Store-only router without PSP checkout enrichment. Prefer [`app_payment_router_with_sqlite_pool`]
+/// Store-only router without PSP checkout enrichment. Prefer [`app_payment_router_with_postgres_pool`]
 /// or [`app_payment_router_with_postgres_pool`] in production gateways.
 pub fn build_app_payment_router(store: Arc<dyn CommercePaymentStore>) -> Router {
     build_app_payment_router_with_state(AppPaymentState {
@@ -296,7 +234,6 @@ pub fn build_app_payment_router(store: Arc<dyn CommercePaymentStore>) -> Router 
         checkout: None,
     })
 }
-
 fn build_app_payment_router_with_state(state: AppPaymentState) -> Router {
     Router::new()
         .route("/app/v3/api/payments/methods", get(list_payment_methods))
@@ -333,70 +270,22 @@ fn build_app_payment_router_with_state(state: AppPaymentState) -> Router {
         )
         .with_state(state)
 }
-
 struct CompositeCommercePaymentStore {
     methods: Arc<dyn PaymentMethodSource>,
     payments: Arc<dyn OwnerOrderPaymentSource>,
     records: Arc<dyn PaymentRecordSource>,
 }
-
-struct ProviderEnrichedSqlitePayments {
-    inner: Arc<SqliteCommerceOwnerOrderPaymentStore>,
-    pool: SqlitePool,
-    registry: Arc<PaymentProviderRegistry>,
-    credentials: ProviderCredentialBundle,
-}
-
 struct ProviderEnrichedPostgresPayments {
     inner: Arc<PostgresCommerceOwnerOrderPaymentStore>,
     pool: PgPool,
     registry: Arc<PaymentProviderRegistry>,
     credentials: ProviderCredentialBundle,
 }
-
-struct ProviderEnrichedSqlitePaymentRecords {
-    inner: Arc<SqliteCommercePaymentRecordStore>,
-    pool: SqlitePool,
-    credentials: ProviderCredentialBundle,
-}
-
 struct ProviderEnrichedPostgresPaymentRecords {
     inner: Arc<PostgresCommercePaymentRecordStore>,
     pool: PgPool,
     credentials: ProviderCredentialBundle,
 }
-
-impl OwnerOrderPaymentSource for ProviderEnrichedSqlitePayments {
-    fn pay_owner_order<'a>(
-        &'a self,
-        command: PayOwnerOrderCommand,
-    ) -> CommercePaymentFuture<'a, PayOwnerOrderOutcome> {
-        let registry = self.registry.clone();
-        let credentials = self.credentials.clone();
-        let pool = self.pool.clone();
-        Box::pin(async move {
-            let tenant_id = command.tenant_id.clone();
-            let organization_id = command.organization_id.clone();
-            let order_id = command.order_id.clone();
-            let payment_scene = command.payment_scene.clone();
-            let outcome = self.inner.pay_owner_order(command).await?;
-            enrich_owner_order_payment_sqlite(
-                &pool,
-                OwnerOrderPaymentEnrichmentContext {
-                    deployment_registry: &registry,
-                    credentials: &credentials,
-                    tenant_id: &tenant_id,
-                    organization_id: organization_id.as_deref(),
-                    order_id: &order_id,
-                    payment_scene: payment_scene.as_deref(),
-                },
-                outcome,
-            )
-            .await
-        })
-    }
-}
-
 impl OwnerOrderPaymentSource for ProviderEnrichedPostgresPayments {
     fn pay_owner_order<'a>(
         &'a self,
@@ -427,71 +316,44 @@ impl OwnerOrderPaymentSource for ProviderEnrichedPostgresPayments {
         })
     }
 }
-
 trait PaymentMethodSource: Send + Sync {
     fn list_payment_methods<'a>(
         &'a self,
         query: PaymentMethodListQuery,
     ) -> CommercePaymentFuture<'a, PaymentMethodListPage>;
 }
-
 trait OwnerOrderPaymentSource: Send + Sync {
     fn pay_owner_order<'a>(
         &'a self,
         command: PayOwnerOrderCommand,
     ) -> CommercePaymentFuture<'a, PayOwnerOrderOutcome>;
 }
-
 trait PaymentRecordSource: Send + Sync {
     fn list_payment_records<'a>(
         &'a self,
         query: PaymentRecordListQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordListPage>;
-
     fn retrieve_payment_record<'a>(
         &'a self,
         query: PaymentRecordDetailQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordItem>;
-
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage>;
-
     fn retrieve_payment_record_by_out_trade_no<'a>(
         &'a self,
         query: PaymentRecordOutTradeNoQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordItem>;
-
     fn fetch_payment_statistics<'a>(
         &'a self,
         query: PaymentRecordStatisticsQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordStatistics>;
-
     fn close_payment_record<'a>(
         &'a self,
         command: ClosePaymentRecordCommand,
     ) -> CommercePaymentFuture<'a, ()>;
 }
-
-impl PaymentMethodSource for SqliteCommercePaymentMethodStore {
-    fn list_payment_methods<'a>(
-        &'a self,
-        query: PaymentMethodListQuery,
-    ) -> CommercePaymentFuture<'a, PaymentMethodListPage> {
-        Box::pin(async move { self.list_payment_methods(query).await })
-    }
-}
-
-impl OwnerOrderPaymentSource for SqliteCommerceOwnerOrderPaymentStore {
-    fn pay_owner_order<'a>(
-        &'a self,
-        command: PayOwnerOrderCommand,
-    ) -> CommercePaymentFuture<'a, PayOwnerOrderOutcome> {
-        Box::pin(async move { self.pay_owner_order(command).await })
-    }
-}
-
 impl PaymentMethodSource for PostgresCommercePaymentMethodStore {
     fn list_payment_methods<'a>(
         &'a self,
@@ -500,7 +362,6 @@ impl PaymentMethodSource for PostgresCommercePaymentMethodStore {
         Box::pin(async move { self.list_payment_methods(query).await })
     }
 }
-
 impl OwnerOrderPaymentSource for PostgresCommerceOwnerOrderPaymentStore {
     fn pay_owner_order<'a>(
         &'a self,
@@ -509,51 +370,6 @@ impl OwnerOrderPaymentSource for PostgresCommerceOwnerOrderPaymentStore {
         Box::pin(async move { self.pay_owner_order(command).await })
     }
 }
-
-impl PaymentRecordSource for SqliteCommercePaymentRecordStore {
-    fn list_payment_records<'a>(
-        &'a self,
-        query: PaymentRecordListQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
-        Box::pin(async move { self.list_payment_records(query).await })
-    }
-
-    fn retrieve_payment_record<'a>(
-        &'a self,
-        query: PaymentRecordDetailQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
-        Box::pin(async move { self.retrieve_payment_record(query).await })
-    }
-
-    fn list_payment_records_by_order<'a>(
-        &'a self,
-        query: PaymentRecordOrderListQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
-        Box::pin(async move { self.list_payment_records_by_order(query).await })
-    }
-
-    fn retrieve_payment_record_by_out_trade_no<'a>(
-        &'a self,
-        query: PaymentRecordOutTradeNoQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
-        Box::pin(async move { self.retrieve_payment_record_by_out_trade_no(query).await })
-    }
-
-    fn fetch_payment_statistics<'a>(
-        &'a self,
-        query: PaymentRecordStatisticsQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
-        Box::pin(async move { self.fetch_payment_statistics(query).await })
-    }
-
-    fn close_payment_record<'a>(
-        &'a self,
-        command: ClosePaymentRecordCommand,
-    ) -> CommercePaymentFuture<'a, ()> {
-        Box::pin(async move { self.close_payment_record(command).await })
-    }
-}
-
 impl PaymentRecordSource for PostgresCommercePaymentRecordStore {
     fn list_payment_records<'a>(
         &'a self,
@@ -561,35 +377,30 @@ impl PaymentRecordSource for PostgresCommercePaymentRecordStore {
     ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
         Box::pin(async move { self.list_payment_records(query).await })
     }
-
     fn retrieve_payment_record<'a>(
         &'a self,
         query: PaymentRecordDetailQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
         Box::pin(async move { self.retrieve_payment_record(query).await })
     }
-
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
         Box::pin(async move { self.list_payment_records_by_order(query).await })
     }
-
     fn retrieve_payment_record_by_out_trade_no<'a>(
         &'a self,
         query: PaymentRecordOutTradeNoQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
         Box::pin(async move { self.retrieve_payment_record_by_out_trade_no(query).await })
     }
-
     fn fetch_payment_statistics<'a>(
         &'a self,
         query: PaymentRecordStatisticsQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
         Box::pin(async move { self.fetch_payment_statistics(query).await })
     }
-
     fn close_payment_record<'a>(
         &'a self,
         command: ClosePaymentRecordCommand,
@@ -597,110 +408,6 @@ impl PaymentRecordSource for PostgresCommercePaymentRecordStore {
         Box::pin(async move { self.close_payment_record(command).await })
     }
 }
-
-impl PaymentRecordSource for ProviderEnrichedSqlitePaymentRecords {
-    fn list_payment_records<'a>(
-        &'a self,
-        query: PaymentRecordListQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.list_payment_records(query).await })
-    }
-
-    fn retrieve_payment_record<'a>(
-        &'a self,
-        query: PaymentRecordDetailQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.retrieve_payment_record(query).await })
-    }
-
-    fn list_payment_records_by_order<'a>(
-        &'a self,
-        query: PaymentRecordOrderListQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.list_payment_records_by_order(query).await })
-    }
-
-    fn retrieve_payment_record_by_out_trade_no<'a>(
-        &'a self,
-        query: PaymentRecordOutTradeNoQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.retrieve_payment_record_by_out_trade_no(query).await })
-    }
-
-    fn fetch_payment_statistics<'a>(
-        &'a self,
-        query: PaymentRecordStatisticsQuery,
-    ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.fetch_payment_statistics(query).await })
-    }
-
-    fn close_payment_record<'a>(
-        &'a self,
-        command: ClosePaymentRecordCommand,
-    ) -> CommercePaymentFuture<'a, ()> {
-        let pool = self.pool.clone();
-        let credentials = self.credentials.clone();
-        let inner = self.inner.clone();
-        Box::pin(async move {
-            let tenant_id = command.tenant_id.clone();
-            let organization_id = command.organization_id.clone();
-            let provider_ctx = load_payment_attempt_provider_context_sqlite(
-                &pool,
-                &tenant_id,
-                &command.owner_user_id,
-                &command.payment_id,
-            )
-            .await?;
-            if let Some(ctx) = provider_ctx {
-                let account = match ctx.provider_account_id.as_deref() {
-                    Some(provider_account_id) => Some(
-                        load_provider_account_for_existing_payment_sqlite(
-                            &pool,
-                            &tenant_id,
-                            organization_id.as_deref(),
-                            provider_account_id,
-                        )
-                        .await?
-                        .ok_or_else(|| {
-                            CommerceServiceError::conflict(
-                                "original payment provider account is unavailable for close",
-                            )
-                        })?,
-                    ),
-                    None if ctx.channel_id.is_some() => None,
-                    None => {
-                        load_active_provider_account_sqlite(
-                            &pool,
-                            &tenant_id,
-                            organization_id.as_deref(),
-                            &ctx.provider_code,
-                        )
-                        .await?
-                    }
-                };
-                let registry = provider_registry_for_account(
-                    &credentials,
-                    account.map(|record| provider_account_binding(&record)),
-                );
-                cancel_provider_payment(
-                    &registry,
-                    &ctx.provider_code,
-                    &ctx.out_trade_no,
-                    ctx.provider_transaction_id.as_deref(),
-                )
-                .await?;
-            }
-            inner.close_payment_record(command).await?;
-            Ok(())
-        })
-    }
-}
-
 impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
     fn list_payment_records<'a>(
         &'a self,
@@ -709,7 +416,6 @@ impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
         let inner = self.inner.clone();
         Box::pin(async move { inner.list_payment_records(query).await })
     }
-
     fn retrieve_payment_record<'a>(
         &'a self,
         query: PaymentRecordDetailQuery,
@@ -717,7 +423,6 @@ impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
         let inner = self.inner.clone();
         Box::pin(async move { inner.retrieve_payment_record(query).await })
     }
-
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
@@ -725,7 +430,6 @@ impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
         let inner = self.inner.clone();
         Box::pin(async move { inner.list_payment_records_by_order(query).await })
     }
-
     fn retrieve_payment_record_by_out_trade_no<'a>(
         &'a self,
         query: PaymentRecordOutTradeNoQuery,
@@ -733,7 +437,6 @@ impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
         let inner = self.inner.clone();
         Box::pin(async move { inner.retrieve_payment_record_by_out_trade_no(query).await })
     }
-
     fn fetch_payment_statistics<'a>(
         &'a self,
         query: PaymentRecordStatisticsQuery,
@@ -741,7 +444,6 @@ impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
         let inner = self.inner.clone();
         Box::pin(async move { inner.fetch_payment_statistics(query).await })
     }
-
     fn close_payment_record<'a>(
         &'a self,
         command: ClosePaymentRecordCommand,
@@ -803,7 +505,6 @@ impl PaymentRecordSource for ProviderEnrichedPostgresPaymentRecords {
         })
     }
 }
-
 impl CommercePaymentStore for CompositeCommercePaymentStore {
     fn list_payment_methods<'a>(
         &'a self,
@@ -811,49 +512,42 @@ impl CommercePaymentStore for CompositeCommercePaymentStore {
     ) -> CommercePaymentFuture<'a, PaymentMethodListPage> {
         self.methods.list_payment_methods(query)
     }
-
     fn list_payment_records<'a>(
         &'a self,
         query: PaymentRecordListQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordListPage> {
         self.records.list_payment_records(query)
     }
-
     fn retrieve_payment_record<'a>(
         &'a self,
         query: PaymentRecordDetailQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
         self.records.retrieve_payment_record(query)
     }
-
     fn list_payment_records_by_order<'a>(
         &'a self,
         query: PaymentRecordOrderListQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordOrderListPage> {
         self.records.list_payment_records_by_order(query)
     }
-
     fn retrieve_payment_record_by_out_trade_no<'a>(
         &'a self,
         query: PaymentRecordOutTradeNoQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordItem> {
         self.records.retrieve_payment_record_by_out_trade_no(query)
     }
-
     fn fetch_payment_statistics<'a>(
         &'a self,
         query: PaymentRecordStatisticsQuery,
     ) -> CommercePaymentFuture<'a, PaymentRecordStatistics> {
         self.records.fetch_payment_statistics(query)
     }
-
     fn close_payment_record<'a>(
         &'a self,
         command: ClosePaymentRecordCommand,
     ) -> CommercePaymentFuture<'a, ()> {
         self.records.close_payment_record(command)
     }
-
     fn pay_owner_order<'a>(
         &'a self,
         command: PayOwnerOrderCommand,
@@ -861,7 +555,6 @@ impl CommercePaymentStore for CompositeCommercePaymentStore {
         self.payments.pay_owner_order(command)
     }
 }
-
 async fn list_payment_methods(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -882,7 +575,6 @@ async fn list_payment_methods(
                 .with_scene_code_filter(scene_filter),
             Err(error) => return validation(ctx, error.message()),
         };
-
     match state.store.list_payment_methods(query).await {
         Ok(page) => {
             let items = page
@@ -897,7 +589,6 @@ async fn list_payment_methods(
         }
     }
 }
-
 async fn list_payment_records(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -942,7 +633,6 @@ async fn list_payment_records(
             .await
             .map(|page| (page.items, page.total_items))
     };
-
     match page {
         Ok((page_items, total_items)) => {
             // Phase 1.3：store 已在 SQL 层完成 LIMIT/OFFSET 并返回真实 total_items，
@@ -955,7 +645,6 @@ async fn list_payment_records(
         }
     }
 }
-
 async fn retrieve_payment_record(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -968,7 +657,6 @@ async fn retrieve_payment_record(
         Err(response) => response,
     }
 }
-
 async fn retrieve_payment_attempt(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -981,7 +669,6 @@ async fn retrieve_payment_attempt(
         Err(response) => response,
     }
 }
-
 async fn retrieve_payment_checkout(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1022,22 +709,6 @@ async fn retrieve_payment_checkout(
         );
     };
     let enriched = match checkout {
-        PaymentCheckoutDeps::Sqlite {
-            pool,
-            registry,
-            credentials,
-        } => {
-            enrich_payment_record_checkout_sqlite(
-                pool,
-                registry,
-                credentials,
-                &subject.tenant_id,
-                subject.organization_id.as_deref(),
-                &subject.user_id,
-                record,
-            )
-            .await
-        }
         PaymentCheckoutDeps::Postgres {
             pool,
             registry,
@@ -1060,7 +731,6 @@ async fn retrieve_payment_checkout(
         Err(error) => payment_system_response(ctx, "payment checkout enrichment failed", error),
     }
 }
-
 async fn retrieve_payment_status(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1073,7 +743,6 @@ async fn retrieve_payment_status(
         Err(response) => response,
     }
 }
-
 async fn retrieve_payment_status_by_out_trade_no(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1094,7 +763,6 @@ async fn retrieve_payment_status_by_out_trade_no(
         Ok(query) => query,
         Err(error) => return validation(ctx, error.message()),
     };
-
     match state
         .store
         .retrieve_payment_record_by_out_trade_no(query)
@@ -1106,7 +774,6 @@ async fn retrieve_payment_status_by_out_trade_no(
         }
     }
 }
-
 async fn fetch_payment_statistics(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1125,7 +792,6 @@ async fn fetch_payment_statistics(
         Ok(query) => query,
         Err(error) => return validation(ctx, error.message()),
     };
-
     match state.store.fetch_payment_statistics(query).await {
         Ok(statistics) => success_item(ctx, map_payment_statistics(statistics)),
         Err(error) => {
@@ -1133,7 +799,6 @@ async fn fetch_payment_statistics(
         }
     }
 }
-
 async fn load_payment_record(
     state: AppPaymentState,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1153,7 +818,6 @@ async fn load_payment_record(
         Ok(query) => query,
         Err(error) => return Err(validation(ctx, error.message())),
     };
-
     state
         .store
         .retrieve_payment_record(query)
@@ -1162,7 +826,6 @@ async fn load_payment_record(
             payment_system_response(ctx, "payment record read model is unavailable", error)
         })
 }
-
 async fn reconcile_payment(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1206,7 +869,6 @@ async fn reconcile_payment(
                 "OUT_TRADE_NO"
             }
         });
-
     let record_result = if reconcile_type.eq_ignore_ascii_case("ORDER_ID") {
         let Some(order_id) = order_id else {
             return validation(ctx, "orderId is required for ORDER_ID reconciliation");
@@ -1255,7 +917,6 @@ async fn reconcile_payment(
     } else {
         return validation(ctx, "reconcileType must be ORDER_ID or OUT_TRADE_NO");
     };
-
     match record_result {
         Ok(record) => success_item(ctx, map_payment_record(record)),
         Err(error) if error.code() == "not-found" => not_found(ctx, "payment record was not found"),
@@ -1264,7 +925,6 @@ async fn reconcile_payment(
         }
     }
 }
-
 async fn create_payment(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1331,13 +991,11 @@ async fn create_payment(
         Ok(command) => command,
         Err(error) => return validation(ctx, error.message()),
     };
-
     match state.store.pay_owner_order(command).await {
         Ok(outcome) => success_created_item(ctx, map_checkout_from_outcome(outcome)),
         Err(error) => payment_system_response(ctx, "payment create command failed", error),
     }
 }
-
 async fn close_payment_record(
     State(state): State<AppPaymentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -1367,17 +1025,14 @@ async fn close_payment_record(
         Ok(command) => command,
         Err(error) => return validation(ctx, error.message()),
     };
-
     match state.store.close_payment_record(command).await {
         Ok(()) => success_command_accepted(ctx, Some(payment_id)),
         Err(error) => payment_system_response(ctx, "payment close command failed", error),
     }
 }
-
 fn request_ctx(ext: &Option<Extension<WebRequestContext>>) -> Option<&WebRequestContext> {
     ext.as_ref().map(|Extension(value)| value)
 }
-
 fn map_checkout_from_outcome(value: PayOwnerOrderOutcome) -> CreatePaymentResponse {
     let payment_url = value
         .payment_params
@@ -1398,7 +1053,6 @@ fn map_checkout_from_outcome(value: PayOwnerOrderOutcome) -> CreatePaymentRespon
         payment_url,
     }
 }
-
 fn map_payment_method(value: PaymentMethodItem) -> PaymentMethodResponse {
     let product_types =
         sdkwork_payment_service::wire_product_types_from_scene_codes(&value.scene_codes)
@@ -1418,7 +1072,6 @@ fn map_payment_method(value: PaymentMethodItem) -> PaymentMethodResponse {
         product_types,
     }
 }
-
 fn map_payment_record(value: PaymentRecordItem) -> PaymentRecordResponse {
     let status = map_payment_status_code(&value.status);
     PaymentRecordResponse {
@@ -1432,7 +1085,6 @@ fn map_payment_record(value: PaymentRecordItem) -> PaymentRecordResponse {
         status_name: format_payment_status_name(status),
     }
 }
-
 fn map_payment_attempt_record(value: PaymentRecordItem) -> AppCommercePaymentAttemptRecordResponse {
     let status = map_payment_status_code(&value.status);
     AppCommercePaymentAttemptRecordResponse {
@@ -1444,7 +1096,6 @@ fn map_payment_attempt_record(value: PaymentRecordItem) -> AppCommercePaymentAtt
         status: status.to_owned(),
     }
 }
-
 fn map_payment_statistics(value: PaymentRecordStatistics) -> PaymentStatisticsResponse {
     PaymentStatisticsResponse {
         total_payments: value.total_payments,
@@ -1455,7 +1106,6 @@ fn map_payment_statistics(value: PaymentRecordStatistics) -> PaymentStatisticsRe
         closed_payments: value.closed_payments,
     }
 }
-
 fn map_payment_status_code(status: &str) -> &'static str {
     match status.trim().to_ascii_lowercase().as_str() {
         "success" | "succeeded" | "paid" => "SUCCESS",
@@ -1465,7 +1115,6 @@ fn map_payment_status_code(status: &str) -> &'static str {
         _ => "PENDING",
     }
 }
-
 fn format_payment_status_name(status: &str) -> String {
     match status {
         "SUCCESS" => "Success".to_owned(),
@@ -1475,7 +1124,6 @@ fn format_payment_status_name(status: &str) -> String {
         _ => "Pending".to_owned(),
     }
 }
-
 fn payment_system_response(
     context: Option<&WebRequestContext>,
     _label: &str,

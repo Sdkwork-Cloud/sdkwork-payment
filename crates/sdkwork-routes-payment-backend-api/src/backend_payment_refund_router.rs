@@ -13,17 +13,16 @@ use sdkwork_payment_providers::{
 };
 use sdkwork_payment_repository_sqlx::{
     ensure_provider_account_matches, load_payment_attempt_provider_context_by_id_postgres,
-    load_payment_attempt_provider_context_by_id_sqlite,
     load_provider_account_for_existing_payment_postgres,
-    load_provider_account_for_existing_payment_sqlite, PaymentProviderAccountRecord,
-    PostgresCommerceRefundStore, SqliteCommerceRefundStore,
+    PaymentProviderAccountRecord,
+    PostgresCommerceRefundStore,
 };
 use sdkwork_payment_service::{CreateOwnerRefundCommand, RefundView};
 use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
+use sqlx::{postgres::PgRow, PgPool, Row};
 
 use crate::api_response::{
     map_service_error, not_found, success_command_accepted, success_created_item, success_item,
@@ -45,7 +44,6 @@ const REFUND_REASON_CODES: &[&str] = &[
 
 #[derive(Clone)]
 enum BackendRefundPool {
-    Sqlite(SqlitePool),
     Postgres(PgPool),
 }
 
@@ -114,13 +112,6 @@ struct BackendRefundView {
 struct BackendRefundListPage {
     items: Vec<BackendRefundView>,
     total_items: i64,
-}
-
-pub fn backend_payment_refund_router_with_sqlite_pool(pool: SqlitePool) -> Router {
-    build_router(BackendRefundState {
-        pool: BackendRefundPool::Sqlite(pool),
-        credentials: ProviderCredentialBundle::from_env(),
-    })
 }
 
 pub fn backend_payment_refund_router_with_postgres_pool(pool: PgPool) -> Router {
@@ -463,49 +454,6 @@ impl BackendRefundPool {
             .filter(|value| !value.is_empty())
             .map(|value| format!("%{}%", value.to_ascii_lowercase()));
         match self {
-            Self::Sqlite(pool) => {
-                let rows = sqlx::query(
-                    r#"
-                    SELECT r.id, r.refund_no, r.order_id, r.payment_attempt_id,
-                           a.payment_intent_id, a.provider_code, a.provider_account_id,
-                           CAST(r.amount AS TEXT) AS amount, r.currency_code, r.status,
-                           r.refund_reason_code, r.requested_by_type, r.requested_by,
-                           r.created_at, r.updated_at, COUNT(*) OVER() AS total_count
-                    FROM commerce_refund r
-                    INNER JOIN commerce_payment_attempt a ON a.id = r.payment_attempt_id
-                    WHERE r.tenant_id = CAST(? AS TEXT)
-                      AND ((r.organization_id = CAST(? AS TEXT)) OR (r.organization_id IS NULL AND ? IS NULL))
-                      AND (? IS NULL OR LOWER(r.status) = LOWER(CAST(? AS TEXT)))
-                      AND (? IS NULL OR r.order_id = CAST(? AS TEXT))
-                      AND (? IS NULL OR a.payment_intent_id = CAST(? AS TEXT))
-                      AND (? IS NULL OR LOWER(r.refund_no) LIKE ? OR LOWER(r.order_id) LIKE ?)
-                      AND r.deleted_at IS NULL
-                    ORDER BY r.created_at DESC, r.id DESC
-                    LIMIT ? OFFSET ?
-                    "#,
-                )
-                .bind(&subject.tenant_id)
-                .bind(subject.organization_id.as_deref())
-                .bind(subject.organization_id.as_deref())
-                .bind(params.status.as_deref())
-                .bind(params.status.as_deref())
-                .bind(params.order_id.as_deref())
-                .bind(params.order_id.as_deref())
-                .bind(params.payment_intent_id.as_deref())
-                .bind(params.payment_intent_id.as_deref())
-                .bind(q.as_deref())
-                .bind(q.as_deref())
-                .bind(q.as_deref())
-                .bind(page.page_size)
-                .bind(page.offset)
-                .fetch_all(pool)
-                .await
-                .map_err(|error| CommerceServiceError::storage(format!("failed to list refunds: {error}")))?;
-                Ok(BackendRefundListPage {
-                    total_items: sqlite_total(&rows),
-                    items: rows.iter().map(map_sqlite_refund).collect(),
-                })
-            }
             Self::Postgres(pool) => {
                 let rows = sqlx::query(
                     r#"
@@ -555,28 +503,6 @@ impl BackendRefundPool {
         refund_id: &str,
     ) -> Result<Option<BackendRefundView>, CommerceServiceError> {
         match self {
-            Self::Sqlite(pool) => sqlx::query(
-                r#"
-                SELECT r.id, r.refund_no, r.order_id, r.payment_attempt_id,
-                       a.payment_intent_id, a.provider_code, a.provider_account_id,
-                       CAST(r.amount AS TEXT) AS amount, r.currency_code, r.status,
-                       r.refund_reason_code, r.requested_by_type, r.requested_by,
-                       r.created_at, r.updated_at
-                FROM commerce_refund r
-                INNER JOIN commerce_payment_attempt a ON a.id = r.payment_attempt_id
-                WHERE r.id = CAST(? AS TEXT) AND r.tenant_id = CAST(? AS TEXT)
-                  AND ((r.organization_id = CAST(? AS TEXT)) OR (r.organization_id IS NULL AND ? IS NULL))
-                  AND r.deleted_at IS NULL LIMIT 1
-                "#,
-            )
-            .bind(refund_id)
-            .bind(&subject.tenant_id)
-            .bind(subject.organization_id.as_deref())
-            .bind(subject.organization_id.as_deref())
-            .fetch_optional(pool)
-            .await
-            .map(|row| row.as_ref().map(map_sqlite_refund))
-            .map_err(|error| CommerceServiceError::storage(format!("failed to retrieve refund: {error}"))),
             Self::Postgres(pool) => sqlx::query(
                 r#"
                 SELECT r.id, r.refund_no, r.order_id, r.payment_attempt_id,
@@ -609,28 +535,6 @@ impl BackendRefundPool {
         payment_intent_id: &str,
     ) -> Result<Option<RefundPaymentContext>, CommerceServiceError> {
         match self {
-            Self::Sqlite(pool) => sqlx::query(
-                r#"
-                SELECT i.id, i.payment_intent_no, i.owner_user_id, i.order_id, i.currency_code,
-                       a.id AS payment_attempt_id
-                FROM commerce_payment_intent i
-                INNER JOIN commerce_payment_attempt a ON a.payment_intent_id = i.id
-                WHERE i.id = CAST(? AS TEXT) AND i.tenant_id = CAST(? AS TEXT)
-                  AND ((i.organization_id = CAST(? AS TEXT)) OR (i.organization_id IS NULL AND ? IS NULL))
-                  AND LOWER(i.status) IN ('succeeded', 'refunding', 'refunded')
-                  AND LOWER(a.status) = 'succeeded'
-                  AND i.deleted_at IS NULL AND a.deleted_at IS NULL
-                ORDER BY a.created_at DESC, a.id DESC LIMIT 1
-                "#,
-            )
-            .bind(payment_intent_id)
-            .bind(&subject.tenant_id)
-            .bind(subject.organization_id.as_deref())
-            .bind(subject.organization_id.as_deref())
-            .fetch_optional(pool)
-            .await
-            .map(|row| row.as_ref().map(map_sqlite_payment_context))
-            .map_err(|error| CommerceServiceError::storage(format!("failed to load refund payment context: {error}"))),
             Self::Postgres(pool) => sqlx::query(
                 r#"
                 SELECT i.id, i.payment_intent_no, i.owner_user_id, i.order_id, i.currency_code,
@@ -661,11 +565,6 @@ impl BackendRefundPool {
         command: CreateOwnerRefundCommand,
     ) -> Result<RefundView, CommerceServiceError> {
         match self {
-            Self::Sqlite(pool) => {
-                SqliteCommerceRefundStore::new(pool.clone())
-                    .create_owner_refund(command)
-                    .await
-            }
             Self::Postgres(pool) => {
                 PostgresCommerceRefundStore::new(pool.clone())
                     .create_owner_refund(command)
@@ -683,19 +582,6 @@ impl BackendRefundPool {
         actor_id: Option<&str>,
     ) -> Result<RefundView, CommerceServiceError> {
         match self {
-            Self::Sqlite(pool) => {
-                SqliteCommerceRefundStore::new(pool.clone())
-                    .mark_owner_refund_provider_submission_processing(
-                        &subject.tenant_id,
-                        subject.organization_id.as_deref(),
-                        refund_id,
-                        actor_type,
-                        actor_id,
-                        &headers.request_no,
-                        &headers.idempotency_key,
-                    )
-                    .await
-            }
             Self::Postgres(pool) => {
                 PostgresCommerceRefundStore::new(pool.clone())
                     .mark_owner_refund_provider_submission_processing(
@@ -721,19 +607,6 @@ impl BackendRefundPool {
         actor_id: Option<&str>,
     ) -> Result<RefundView, CommerceServiceError> {
         match self {
-            Self::Sqlite(pool) => {
-                SqliteCommerceRefundStore::new(pool.clone())
-                    .mark_owner_refund_provider_submission_failed(
-                        &subject.tenant_id,
-                        subject.organization_id.as_deref(),
-                        refund_id,
-                        actor_type,
-                        actor_id,
-                        &headers.request_no,
-                        &headers.idempotency_key,
-                    )
-                    .await
-            }
             Self::Postgres(pool) => {
                 PostgresCommerceRefundStore::new(pool.clone())
                     .mark_owner_refund_provider_submission_failed(
@@ -759,19 +632,6 @@ impl BackendRefundPool {
         actor_id: Option<&str>,
     ) -> Result<RefundView, CommerceServiceError> {
         match self {
-            Self::Sqlite(pool) => {
-                SqliteCommerceRefundStore::new(pool.clone())
-                    .mark_owner_refund_provider_submission_succeeded(
-                        &subject.tenant_id,
-                        subject.organization_id.as_deref(),
-                        refund_id,
-                        actor_type,
-                        actor_id,
-                        &headers.request_no,
-                        &headers.idempotency_key,
-                    )
-                    .await
-            }
             Self::Postgres(pool) => {
                 PostgresCommerceRefundStore::new(pool.clone())
                     .mark_owner_refund_provider_submission_succeeded(
@@ -816,45 +676,6 @@ async fn submit_provider_refund(
     reason_code: Option<String>,
 ) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
     match &state.pool {
-        BackendRefundPool::Sqlite(pool) => {
-            let Some(attempt) = load_payment_attempt_provider_context_by_id_sqlite(
-                pool,
-                refund.payment_attempt_id(),
-            )
-            .await?
-            else {
-                return Err(CommerceServiceError::not_found(
-                    "payment attempt provider context was not found",
-                ));
-            };
-            let provider_account_id = attempt.provider_account_id.as_deref().ok_or_else(|| {
-                CommerceServiceError::conflict(
-                    "original payment does not identify a provider account",
-                )
-            })?;
-            ensure_sqlite_account_refund_capability(pool, subject, provider_account_id).await?;
-            let account = load_provider_account_for_existing_payment_sqlite(
-                pool,
-                &subject.tenant_id,
-                subject.organization_id.as_deref(),
-                provider_account_id,
-            )
-            .await?
-            .ok_or_else(|| {
-                CommerceServiceError::conflict("original payment account is unavailable")
-            })?;
-            submit_with_account(
-                &state.credentials,
-                account,
-                attempt.provider_code,
-                attempt.out_trade_no,
-                attempt.provider_transaction_id,
-                attempt.amount,
-                refund,
-                reason_code,
-            )
-            .await
-        }
         BackendRefundPool::Postgres(pool) => {
             let Some(attempt) = load_payment_attempt_provider_context_by_id_postgres(
                 pool,
@@ -991,23 +812,6 @@ fn provider_account_binding(record: &PaymentProviderAccountRecord) -> ProviderAc
     }
 }
 
-async fn ensure_sqlite_account_refund_capability(
-    pool: &SqlitePool,
-    subject: &AppRuntimeSubject,
-    provider_account_id: &str,
-) -> Result<(), CommerceServiceError> {
-    let value = sqlx::query_scalar::<_, String>(
-        "SELECT capabilities FROM commerce_payment_provider_account WHERE id = ? AND tenant_id = ? AND (organization_id = ? OR organization_id = '0' OR organization_id IS NULL) AND status IN ('active','inactive','deprecated') AND deleted_at IS NULL LIMIT 1",
-    )
-    .bind(provider_account_id)
-    .bind(&subject.tenant_id)
-    .bind(subject.organization_id.as_deref())
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| CommerceServiceError::storage(format!("failed to validate payment account refund capability: {error}")))?
-    .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
-    ensure_refund_capability(value.as_ref())
-}
 
 async fn ensure_postgres_account_refund_capability(
     pool: &PgPool,
@@ -1082,25 +886,6 @@ fn validate_backend_write_payload(
     })
 }
 
-fn map_sqlite_refund(row: &SqliteRow) -> BackendRefundView {
-    BackendRefundView {
-        id: sqlite_string(row, "id"),
-        refund_no: sqlite_string(row, "refund_no"),
-        order_id: sqlite_string(row, "order_id"),
-        payment_intent_id: sqlite_string(row, "payment_intent_id"),
-        payment_attempt_id: sqlite_string(row, "payment_attempt_id"),
-        provider_code: sqlite_string(row, "provider_code"),
-        provider_account_id: sqlite_optional_string(row, "provider_account_id"),
-        amount: sqlite_string(row, "amount"),
-        currency_code: sqlite_string(row, "currency_code"),
-        status: sqlite_string(row, "status"),
-        reason_code: sqlite_optional_string(row, "refund_reason_code"),
-        requested_by_type: sqlite_string(row, "requested_by_type"),
-        requested_by: sqlite_optional_string(row, "requested_by"),
-        created_at: sqlite_string(row, "created_at"),
-        updated_at: sqlite_string(row, "updated_at"),
-    }
-}
 
 fn map_postgres_refund(row: &PgRow) -> BackendRefundView {
     BackendRefundView {
@@ -1122,15 +907,6 @@ fn map_postgres_refund(row: &PgRow) -> BackendRefundView {
     }
 }
 
-fn map_sqlite_payment_context(row: &SqliteRow) -> RefundPaymentContext {
-    RefundPaymentContext {
-        payment_intent_no: sqlite_string(row, "payment_intent_no"),
-        owner_user_id: sqlite_string(row, "owner_user_id"),
-        order_id: sqlite_string(row, "order_id"),
-        payment_attempt_id: sqlite_string(row, "payment_attempt_id"),
-        currency_code: sqlite_string(row, "currency_code"),
-    }
-}
 
 fn map_postgres_payment_context(row: &PgRow) -> RefundPaymentContext {
     RefundPaymentContext {
@@ -1142,11 +918,6 @@ fn map_postgres_payment_context(row: &PgRow) -> RefundPaymentContext {
     }
 }
 
-fn sqlite_total(rows: &[SqliteRow]) -> i64 {
-    rows.first()
-        .and_then(|row| row.try_get::<i64, _>("total_count").ok())
-        .unwrap_or(0)
-}
 
 fn postgres_total(rows: &[PgRow]) -> i64 {
     rows.first()
@@ -1154,16 +925,7 @@ fn postgres_total(rows: &[PgRow]) -> i64 {
         .unwrap_or(0)
 }
 
-fn sqlite_string(row: &SqliteRow, name: &str) -> String {
-    sqlite_optional_string(row, name).unwrap_or_default()
-}
 
-fn sqlite_optional_string(row: &SqliteRow, name: &str) -> Option<String> {
-    row.try_get::<Option<String>, _>(name)
-        .ok()
-        .flatten()
-        .or_else(|| row.try_get::<String, _>(name).ok())
-}
 
 fn postgres_string(row: &PgRow, name: &str) -> String {
     postgres_optional_string(row, name).unwrap_or_default()
@@ -1176,48 +938,3 @@ fn postgres_optional_string(row: &PgRow, name: &str) -> Option<String> {
         .or_else(|| row.try_get::<String, _>(name).ok())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn refund_reason_is_allowlisted() {
-        assert_eq!(normalize_reason_code(" Fraud ").unwrap(), "fraud");
-        assert!(normalize_reason_code("free-form provider text").is_err());
-    }
-
-    #[test]
-    fn refund_capability_fails_closed() {
-        assert!(ensure_refund_capability(Some(&serde_json::json!({"refund": true}))).is_ok());
-        assert!(ensure_refund_capability(Some(&serde_json::json!({"pay": true}))).is_err());
-        assert!(ensure_refund_capability(None).is_err());
-    }
-
-    #[tokio::test]
-    async fn default_organization_refund_capability_is_inherited() {
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("sqlite pool");
-        sqlx::query(
-            "CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, capabilities TEXT NOT NULL, status TEXT NOT NULL, deleted_at TEXT)",
-        )
-        .execute(&pool)
-        .await
-        .expect("provider account table");
-        sqlx::query(
-            "INSERT INTO commerce_payment_provider_account VALUES ('account-default', 'tenant-1', '0', '{\"refund\":true}', 'inactive', NULL)",
-        )
-        .execute(&pool)
-        .await
-        .expect("default provider account");
-        let subject = AppRuntimeSubject {
-            tenant_id: "tenant-1".to_owned(),
-            organization_id: Some("organization-1".to_owned()),
-            user_id: "operator-1".to_owned(),
-        };
-
-        ensure_sqlite_account_refund_capability(&pool, &subject, "account-default")
-            .await
-            .expect("default organization refund capability");
-    }
-}

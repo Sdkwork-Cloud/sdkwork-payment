@@ -17,11 +17,10 @@ use sdkwork_payment_providers::{
 };
 use sdkwork_payment_repository_sqlx::{
     ensure_provider_account_matches, load_active_provider_account_postgres,
-    load_active_provider_account_sqlite, load_payment_attempt_provider_context_by_id_postgres,
-    load_payment_attempt_provider_context_by_id_sqlite,
+    load_payment_attempt_provider_context_by_id_postgres,
     load_provider_account_for_existing_payment_postgres,
-    load_provider_account_for_existing_payment_sqlite, PaymentProviderAccountRecord,
-    PostgresCommerceRefundStore, SqliteCommerceRefundStore,
+    PaymentProviderAccountRecord,
+    PostgresCommerceRefundStore,
 };
 use sdkwork_payment_service::{
     CreateOwnerRefundCommand, RefundDetailQuery, RefundListPage, RefundListQuery, RefundView,
@@ -29,7 +28,7 @@ use sdkwork_payment_service::{
 use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, SqlitePool};
+use sqlx::PgPool;
 
 use crate::api_response::{
     map_service_error, not_found, success_created_item, success_item, success_list, unauthorized,
@@ -95,11 +94,6 @@ struct RefundResponse {
     reason_code: Option<String>,
 }
 
-struct ProviderEnrichedSqliteRefundStore {
-    inner: Arc<SqliteCommerceRefundStore>,
-    pool: SqlitePool,
-    credentials: ProviderCredentialBundle,
-}
 
 struct ProviderEnrichedPostgresRefundStore {
     inner: Arc<PostgresCommerceRefundStore>,
@@ -122,28 +116,6 @@ fn provider_account_binding(record: &PaymentProviderAccountRecord) -> ProviderAc
     }
 }
 
-impl CommerceRefundStore for SqliteCommerceRefundStore {
-    fn create_owner_refund<'a>(
-        &'a self,
-        command: CreateOwnerRefundCommand,
-    ) -> CommerceRefundFuture<'a, RefundView> {
-        Box::pin(async move { self.create_owner_refund(command).await })
-    }
-
-    fn list_owner_refunds<'a>(
-        &'a self,
-        query: RefundListQuery,
-    ) -> CommerceRefundFuture<'a, RefundListPage> {
-        Box::pin(async move { self.list_owner_refunds(query).await })
-    }
-
-    fn retrieve_owner_refund<'a>(
-        &'a self,
-        query: RefundDetailQuery,
-    ) -> CommerceRefundFuture<'a, Option<RefundView>> {
-        Box::pin(async move { self.retrieve_owner_refund(query).await })
-    }
-}
 
 impl CommerceRefundStore for PostgresCommerceRefundStore {
     fn create_owner_refund<'a>(
@@ -168,79 +140,6 @@ impl CommerceRefundStore for PostgresCommerceRefundStore {
     }
 }
 
-async fn submit_provider_refund(
-    credentials: &ProviderCredentialBundle,
-    pool: &SqlitePool,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    refund: &RefundView,
-    reason_code: Option<String>,
-) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
-    let Some(ctx) =
-        load_payment_attempt_provider_context_by_id_sqlite(pool, &refund.payment_attempt_id)
-            .await?
-    else {
-        return Err(CommerceServiceError::not_found(
-            "payment attempt provider context was not found for refund submission",
-        ));
-    };
-    let account = match ctx.provider_account_id.as_deref() {
-        Some(provider_account_id) => load_provider_account_for_existing_payment_sqlite(
-            pool,
-            tenant_id,
-            organization_id,
-            provider_account_id,
-        )
-        .await?
-        .map(Some)
-        .ok_or_else(|| {
-            CommerceServiceError::conflict(
-                "original payment provider account is unavailable for refund",
-            )
-        })?,
-        None if ctx.channel_id.is_some() => None,
-        None => {
-            load_active_provider_account_sqlite(
-                pool,
-                tenant_id,
-                organization_id,
-                &ctx.provider_code,
-            )
-            .await?
-        }
-    };
-    ensure_provider_account_matches(account.as_ref(), &ctx.provider_code)?;
-    let registry = provider_registry_for_account(
-        credentials,
-        account.map(|record| provider_account_binding(&record)),
-    );
-    let total_amount = sdkwork_contract_service::CommerceMoney::new(&ctx.amount)
-        .map_err(CommerceServiceError::storage)?;
-    if refund.status == "processing" {
-        if let Some(state) = query_provider_refund(
-            &registry,
-            &ctx.provider_code,
-            &ctx.out_trade_no,
-            ctx.provider_transaction_id.as_deref(),
-            &refund.refund_no,
-        )
-        .await?
-        {
-            return Ok(state);
-        }
-    }
-    create_provider_refund(
-        &registry,
-        &ctx.provider_code,
-        &ctx.out_trade_no,
-        ctx.provider_transaction_id.as_deref(),
-        &refund.refund_no,
-        &refund.amount,
-        &total_amount,
-        reason_code,
-    )
-    .await
-}
 
 async fn submit_provider_refund_postgres(
     credentials: &ProviderCredentialBundle,
@@ -333,36 +232,6 @@ fn refund_requires_processing_claim(status: &str) -> bool {
     matches!(status, "submitted" | "failed")
 }
 
-async fn submit_provider_refund_with_retry(
-    credentials: &ProviderCredentialBundle,
-    pool: &SqlitePool,
-    tenant_id: &str,
-    organization_id: Option<&str>,
-    refund: &RefundView,
-    reason_code: Option<String>,
-) -> Result<ProviderRefundSubmissionState, CommerceServiceError> {
-    let mut last_error = None;
-    for attempt in 0..REFUND_PROVIDER_SUBMIT_ATTEMPTS {
-        if attempt > 0 {
-            tokio::time::sleep(Duration::from_millis(150 * (1 << (attempt - 1)))).await;
-        }
-        match submit_provider_refund(
-            credentials,
-            pool,
-            tenant_id,
-            organization_id,
-            refund,
-            reason_code.clone(),
-        )
-        .await
-        {
-            Ok(state) => return Ok(state),
-            Err(error) if refund_submission_retryable(&error) => last_error = Some(error),
-            Err(error) => return Err(error),
-        }
-    }
-    Err(last_error.expect("refund submission attempted at least once"))
-}
 
 async fn submit_provider_refund_postgres_with_retry(
     credentials: &ProviderCredentialBundle,
@@ -395,112 +264,6 @@ async fn submit_provider_refund_postgres_with_retry(
     Err(last_error.expect("refund submission attempted at least once"))
 }
 
-impl CommerceRefundStore for ProviderEnrichedSqliteRefundStore {
-    fn create_owner_refund<'a>(
-        &'a self,
-        command: CreateOwnerRefundCommand,
-    ) -> CommerceRefundFuture<'a, RefundView> {
-        let inner = self.inner.clone();
-        let pool = self.pool.clone();
-        let credentials = self.credentials.clone();
-        let tenant_id = command.tenant_id.clone();
-        let organization_id = command.organization_id.clone();
-        let reason_code = command.reason_code.clone();
-        let requested_by = command.requested_by.clone();
-        let requested_by_type = command.requested_by_type.clone();
-        let request_no = command.request_no.clone();
-        let idempotency_key = command.idempotency_key.clone();
-        Box::pin(async move {
-            let mut refund = inner.create_owner_refund(command).await?;
-            if refund_requires_provider_submission(&refund.status) {
-                if refund_requires_processing_claim(&refund.status) {
-                    refund = inner
-                        .mark_owner_refund_provider_submission_processing(
-                            &tenant_id,
-                            organization_id.as_deref(),
-                            &refund.refund_id,
-                            &requested_by_type,
-                            Some(&requested_by),
-                            &request_no,
-                            &idempotency_key,
-                        )
-                        .await?;
-                }
-                match submit_provider_refund_with_retry(
-                    &credentials,
-                    &pool,
-                    &tenant_id,
-                    organization_id.as_deref(),
-                    &refund,
-                    reason_code,
-                )
-                .await
-                {
-                    Ok(ProviderRefundSubmissionState::Processing) => {}
-                    Ok(ProviderRefundSubmissionState::Succeeded) => {
-                        refund = inner
-                            .mark_owner_refund_provider_submission_succeeded(
-                                &tenant_id,
-                                organization_id.as_deref(),
-                                &refund.refund_id,
-                                &requested_by_type,
-                                Some(&requested_by),
-                                &request_no,
-                                &idempotency_key,
-                            )
-                            .await?;
-                    }
-                    Ok(ProviderRefundSubmissionState::Failed) => {
-                        refund = inner
-                            .mark_owner_refund_provider_submission_failed(
-                                &tenant_id,
-                                organization_id.as_deref(),
-                                &refund.refund_id,
-                                &requested_by_type,
-                                Some(&requested_by),
-                                &request_no,
-                                &idempotency_key,
-                            )
-                            .await?;
-                    }
-                    Err(error) => {
-                        if !refund_submission_retryable(&error) {
-                            let _ = inner
-                                .mark_owner_refund_provider_submission_failed(
-                                    &tenant_id,
-                                    organization_id.as_deref(),
-                                    &refund.refund_id,
-                                    &requested_by_type,
-                                    Some(&requested_by),
-                                    &request_no,
-                                    &idempotency_key,
-                                )
-                                .await;
-                        }
-                        return Err(error);
-                    }
-                }
-            }
-            Ok(refund)
-        })
-    }
-
-    fn list_owner_refunds<'a>(
-        &'a self,
-        query: RefundListQuery,
-    ) -> CommerceRefundFuture<'a, RefundListPage> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.list_owner_refunds(query).await })
-    }
-
-    fn retrieve_owner_refund<'a>(
-        &'a self,
-        query: RefundDetailQuery,
-    ) -> CommerceRefundFuture<'a, Option<RefundView>> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.retrieve_owner_refund(query).await })
-    }
-}
 
 impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
     fn create_owner_refund<'a>(
@@ -609,17 +372,6 @@ impl CommerceRefundStore for ProviderEnrichedPostgresRefundStore {
     }
 }
 
-pub fn app_refund_router_with_sqlite_pool(
-    pool: SqlitePool,
-    _registry: Arc<PaymentProviderRegistry>,
-    credentials: ProviderCredentialBundle,
-) -> Router {
-    build_app_refund_router(Arc::new(ProviderEnrichedSqliteRefundStore {
-        inner: Arc::new(SqliteCommerceRefundStore::new(pool.clone())),
-        pool,
-        credentials,
-    }))
-}
 
 pub fn app_refund_router_with_postgres_pool(
     pool: PgPool,

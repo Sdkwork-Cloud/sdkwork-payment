@@ -924,7 +924,8 @@ mod tests {
 
     #[test]
     fn owner_payment_queries_project_numeric_amounts_as_minor_unit_text() {
-        let source = include_str!("postgres_owner_order_payment.rs");
+        // 工作树可能为 CRLF（Windows），归一化后断言保证跨平台可靠。
+        let source = include_str!("postgres_owner_order_payment.rs").replace("\r\n", "\n");
 
         assert!(source.contains("CAST(pa.amount AS BIGINT)::TEXT AS amount"));
         assert!(source.contains(") AS BIGINT\n                )::TEXT AS total_amount"));

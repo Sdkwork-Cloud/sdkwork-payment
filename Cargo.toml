@@ -24,7 +24,7 @@ axum = "0.8"
 tokio = { version = "1.51", features = ["macros", "rt-multi-thread", "net", "sync", "signal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "json", "uuid", "chrono"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 tower = "0.5"
@@ -52,7 +52,7 @@ sdkwork_iam_context_service = { path = "../sdkwork-iam/crates/sdkwork-iam-contex
 sdkwork-database-config = { path = "../sdkwork-database/crates/sdkwork-database-config" }
 sdkwork-database-lifecycle = { path = "../sdkwork-database/crates/sdkwork-database-lifecycle" }
 sdkwork-database-spi = { path = "../sdkwork-database/crates/sdkwork-database-spi" }
-sdkwork-database-sqlx = { path = "../sdkwork-database/crates/sdkwork-database-sqlx", features = ["postgres", "sqlite"] }
+sdkwork-database-sqlx = { path = "../sdkwork-database/crates/sdkwork-database-sqlx", features = ["postgres"] }
 sdkwork_payment_service = { path = "crates/sdkwork-payment-service", package = "sdkwork-payment-service" }
 sdkwork_payment_providers = { path = "crates/sdkwork-payment-providers", package = "sdkwork-payment-providers" }
 sdkwork_payment_repository_sqlx = { path = "crates/sdkwork-payment-repository-sqlx", package = "sdkwork-payment-repository-sqlx" }

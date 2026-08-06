@@ -1,14 +1,10 @@
 use sdkwork_contract_service::CommerceServiceError;
 use sqlx::{Pool, Postgres, Row};
-
 use crate::payment_attempt_context::{
     load_attempt_by_out_trade_no_postgres, load_payment_webhook_attempt_context_by_id_postgres,
-    PaymentWebhookAttemptIdentity,
+    PaymentWebhookAttemptContext, PaymentWebhookAttemptIdentity,
 };
 use crate::shared::{current_timestamp_string, store_error, string_cell};
-use crate::sqlite_webhook_ingestion::{
-    empty_ingest_outcome, IngestProviderWebhookCommand, IngestProviderWebhookOutcome,
-};
 use crate::webhook_event_payload::{
     build_stored_webhook_payload, parse_stored_webhook_payload, provider_scoped_webhook_event_id,
     validate_stored_webhook_scope, webhook_event_storage_id, StoredWebhookPayload,
@@ -16,6 +12,42 @@ use crate::webhook_event_payload::{
     WEBHOOK_EVENT_STATUS_PROCESSED, WEBHOOK_EVENT_STATUS_QUEUED,
 };
 use crate::webhook_status::map_provider_payment_status;
+
+
+#[derive(Clone, Debug)]
+pub struct IngestProviderWebhookCommand {
+    pub provider_code: String,
+    pub provider_event_id: String,
+    pub event_type: Option<String>,
+    pub out_trade_no: Option<String>,
+    pub payment_status: Option<String>,
+    pub payload: serde_json::Value,
+    /// Scope for persisting unmatched events when `out_trade_no` cannot be resolved.
+    pub tenant_id: Option<String>,
+    pub organization_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IngestProviderWebhookOutcome {
+    pub webhook_event_id: String,
+    pub replayed: bool,
+    pub payment_attempt_id: Option<String>,
+    pub applied_status: Option<String>,
+    pub payment_attempt_context: Option<PaymentWebhookAttemptContext>,
+}
+
+pub fn empty_ingest_outcome(
+    webhook_event_id: String,
+    replayed: bool,
+) -> IngestProviderWebhookOutcome {
+    IngestProviderWebhookOutcome {
+        webhook_event_id,
+        replayed,
+        payment_attempt_id: None,
+        applied_status: None,
+        payment_attempt_context: None,
+    }
+}
 
 async fn persist_webhook_event_postgres(
     tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -46,7 +78,6 @@ async fn persist_webhook_event_postgres(
     .map_err(|error| store_error("failed to insert webhook event", error))?;
     Ok(result.rows_affected() == 1)
 }
-
 pub async fn ingest_provider_webhook_postgres(
     pool: &Pool<Postgres>,
     command: IngestProviderWebhookCommand,
@@ -137,7 +168,6 @@ pub async fn ingest_provider_webhook_postgres(
         attempt_identity: attempt_identity.as_ref(),
         unmatched_reason,
     })?;
-
     let proposed_event_status = if attempt_identity.is_some() {
         WEBHOOK_EVENT_STATUS_QUEUED
     } else {
@@ -182,7 +212,6 @@ pub async fn ingest_provider_webhook_postgres(
     )
     .await?;
     let payment_attempt_id = Some(attempt_identity.payment_attempt_id.clone());
-
     let payment_attempt_context = if applied_status.as_deref() == Some("succeeded") {
         load_payment_webhook_attempt_context_by_id_postgres(
             &mut tx,
@@ -195,7 +224,6 @@ pub async fn ingest_provider_webhook_postgres(
     } else {
         None
     };
-
     sqlx::query(
         r#"
         UPDATE commerce_payment_webhook_event
@@ -214,11 +242,9 @@ pub async fn ingest_provider_webhook_postgres(
     .execute(&mut *tx)
     .await
     .map_err(|error| store_error("failed to mark webhook event processed", error))?;
-
     tx.commit()
         .await
         .map_err(|error| store_error("failed to commit webhook ingestion transaction", error))?;
-
     Ok(IngestProviderWebhookOutcome {
         webhook_event_id: internal_id,
         replayed: !inserted,
@@ -227,7 +253,6 @@ pub async fn ingest_provider_webhook_postgres(
         payment_attempt_context,
     })
 }
-
 async fn load_existing_webhook_event_postgres(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tenant_id: &str,
@@ -269,7 +294,6 @@ async fn load_existing_webhook_event_postgres(
     )?;
     Ok(stored)
 }
-
 pub(crate) async fn apply_webhook_payment_status_postgres(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     identity: &PaymentWebhookAttemptIdentity,
@@ -308,7 +332,6 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
             "stored webhook payment attempt identity no longer exists",
         )
     })?;
-
     let attempt_id = string_cell(&row, "id");
     let payment_intent_id = string_cell(&row, "payment_intent_id");
     let resolved_tenant_id = string_cell(&row, "tenant_id");
@@ -322,7 +345,6 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
     else {
         return Ok(None);
     };
-
     let order_row = sqlx::query(
         r#"
         SELECT id
@@ -347,7 +369,6 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
             "payment webhook attempt references a missing or deleted order",
         ));
     }
-
     let identity_rows = sqlx::query(
         r#"
         SELECT id, payment_intent_id
@@ -384,7 +405,6 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
             ));
         }
     }
-
     let intent_row = sqlx::query(
         r#"
         SELECT status
@@ -413,7 +433,6 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
         )
     })?;
     let intent_status = string_cell(&intent_row, "status");
-
     let attempt_row = sqlx::query(
         r#"
         SELECT status
@@ -446,7 +465,6 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
         CommerceServiceError::storage("payment webhook attempt changed identity during settlement")
     })?;
     let attempt_status = string_cell(&attempt_row, "status");
-
     if !intent_status.eq_ignore_ascii_case(target_status) {
         crate::shared::ensure_payment_status_transition(&intent_status, target_status)?;
         let updated = sqlx::query(
@@ -471,7 +489,6 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
             ));
         }
     }
-
     if !attempt_status.eq_ignore_ascii_case(target_status) {
         crate::shared::ensure_payment_status_transition(&attempt_status, target_status)?;
         let updated = sqlx::query(
@@ -503,6 +520,5 @@ pub(crate) async fn apply_webhook_payment_status_postgres(
             ));
         }
     }
-
     Ok(Some(target_status.to_owned()))
 }

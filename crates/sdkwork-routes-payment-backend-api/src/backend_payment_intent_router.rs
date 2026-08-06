@@ -1,7 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-
 use axum::extract::{Extension, Path, Query, State};
 use axum::response::Response;
 use axum::routing::get;
@@ -11,27 +10,22 @@ use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
-
+use sqlx::{postgres::PgRow, PgPool, Row};
 use crate::api_response::{map_service_error, not_found, success_item, success_list, unauthorized};
 use crate::subject::backend_runtime_subject_from_extension;
-
 pub type CommerceBackendPaymentIntentFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CommerceServiceError>> + Send + 'a>>;
-
 pub trait CommerceBackendPaymentIntentStore: Send + Sync {
     fn list_payment_intents<'a>(
         &'a self,
         query: BackendPaymentIntentListQuery,
     ) -> CommerceBackendPaymentIntentFuture<'a, BackendPaymentIntentListPage>;
-
     fn retrieve_payment_intent<'a>(
         &'a self,
         payment_intent_id: String,
         tenant_scope: TenantScope,
     ) -> CommerceBackendPaymentIntentFuture<'a, Option<BackendPaymentIntentView>>;
 }
-
 /// Phase 1.3：标准分页结果，store 一次性返回当前页 items + 满足条件的总记录数。
 ///
 /// `total_items` 来自 SQL `COUNT(*) OVER()` 窗口函数（单次往返），
@@ -41,19 +35,16 @@ pub struct BackendPaymentIntentListPage {
     pub items: Vec<BackendPaymentIntentView>,
     pub total_items: i64,
 }
-
 /// C12 修复：Backend 查询必须携带租户范围，避免跨租户数据泄露。
 #[derive(Debug, Clone)]
 pub struct TenantScope {
     pub tenant_id: String,
     pub organization_id: Option<String>,
 }
-
 #[derive(Clone)]
 struct BackendPaymentIntentState {
     store: Arc<dyn CommerceBackendPaymentIntentStore>,
 }
-
 /// C12 修复：Backend 内部查询结构，tenant_scope 由 IAM context 注入，
 /// 不允许从 URL 反序列化，杜绝跨租户越权读取。
 ///
@@ -67,7 +58,6 @@ pub struct BackendPaymentIntentListQuery {
     pub offset: i64,
     pub limit: i64,
 }
-
 /// C12 修复：URL 查询参数仅暴露过滤/分页字段，tenant_scope 强制从 IAM context 解析。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,7 +69,6 @@ struct BackendPaymentIntentListQueryParams {
     #[serde(default, rename = "page_size")]
     page_size: Option<i64>,
 }
-
 #[derive(Clone, Debug)]
 pub struct BackendPaymentIntentView {
     pub payment_intent_id: String,
@@ -96,7 +85,6 @@ pub struct BackendPaymentIntentView {
     pub created_at: String,
     pub updated_at: String,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendPaymentIntentResponse {
@@ -115,112 +103,15 @@ struct BackendPaymentIntentResponse {
     created_at: String,
     updated_at: String,
 }
-
-#[derive(Clone)]
-struct SqliteBackendPaymentIntentStore {
-    pool: SqlitePool,
-}
-
 #[derive(Clone)]
 struct PostgresBackendPaymentIntentStore {
     pool: PgPool,
 }
-
-impl SqliteBackendPaymentIntentStore {
-    fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
 impl PostgresBackendPaymentIntentStore {
     fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
-
-impl CommerceBackendPaymentIntentStore for SqliteBackendPaymentIntentStore {
-    fn list_payment_intents<'a>(
-        &'a self,
-        query: BackendPaymentIntentListQuery,
-    ) -> CommerceBackendPaymentIntentFuture<'a, BackendPaymentIntentListPage> {
-        Box::pin(async move {
-            // C12 修复：强制 tenant_id 谓词，organization_id 可空匹配，杜绝跨租户数据泄露。
-            // Phase 1.3：LIMIT/OFFSET 下推到 SQL，COUNT(*) OVER() 一次往返给出总记录数，
-            // 禁止 fetch_all + 进程内 skip/take（PAGINATION_SPEC §2）。
-            let rows = sqlx::query(
-                r#"
-                SELECT id, tenant_id, organization_id, owner_user_id, order_id, payment_intent_no,
-                       payment_method, provider_code, CAST(amount AS TEXT) AS amount,
-                       currency_code, status, created_at, updated_at,
-                       COUNT(*) OVER() AS total_count
-                FROM commerce_payment_intent
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
-                  AND (? IS NULL OR LOWER(COALESCE(status, '')) = LOWER(CAST(? AS TEXT)))
-                ORDER BY created_at DESC, id DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(&query.tenant_scope.tenant_id)
-            .bind(query.tenant_scope.organization_id.as_deref())
-            .bind(query.tenant_scope.organization_id.as_deref())
-            .bind(query.status.as_deref())
-            .bind(query.status.as_deref())
-            .bind(query.limit)
-            .bind(query.offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!("failed to list payment intents: {error}"))
-            })?;
-
-            // COUNT(*) OVER() emits the same total on every row; read it from the
-            // first row, or default to 0 when the page is empty.
-            let total_items = rows
-                .first()
-                .and_then(|row| row.try_get::<i64, _>("total_count").ok())
-                .unwrap_or(0);
-
-            let items = rows.iter().map(map_payment_intent_row_sqlite).collect();
-
-            Ok(BackendPaymentIntentListPage { items, total_items })
-        })
-    }
-
-    fn retrieve_payment_intent<'a>(
-        &'a self,
-        payment_intent_id: String,
-        tenant_scope: TenantScope,
-    ) -> CommerceBackendPaymentIntentFuture<'a, Option<BackendPaymentIntentView>> {
-        Box::pin(async move {
-            // C12 修复：retrieve 也必须带 tenant 谓词。
-            let row = sqlx::query(
-                r#"
-                SELECT id, tenant_id, organization_id, owner_user_id, order_id, payment_intent_no,
-                       payment_method, provider_code, CAST(amount AS TEXT) AS amount,
-                       currency_code, status, created_at, updated_at
-                FROM commerce_payment_intent
-                WHERE id = CAST(? AS TEXT)
-                  AND tenant_id = CAST(? AS TEXT)
-                  AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
-                LIMIT 1
-                "#,
-            )
-            .bind(&payment_intent_id)
-            .bind(&tenant_scope.tenant_id)
-            .bind(tenant_scope.organization_id.as_deref())
-            .bind(tenant_scope.organization_id.as_deref())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!("failed to retrieve payment intent: {error}"))
-            })?;
-
-            Ok(row.as_ref().map(map_payment_intent_row_sqlite))
-        })
-    }
-}
-
 impl CommerceBackendPaymentIntentStore for PostgresBackendPaymentIntentStore {
     fn list_payment_intents<'a>(
         &'a self,
@@ -254,18 +145,14 @@ impl CommerceBackendPaymentIntentStore for PostgresBackendPaymentIntentStore {
             .map_err(|error| {
                 CommerceServiceError::storage(format!("failed to list payment intents: {error}"))
             })?;
-
             let total_items = rows
                 .first()
                 .and_then(|row| row.try_get::<i64, _>("total_count").ok())
                 .unwrap_or(0);
-
             let items = rows.iter().map(map_payment_intent_row_pg).collect();
-
             Ok(BackendPaymentIntentListPage { items, total_items })
         })
     }
-
     fn retrieve_payment_intent<'a>(
         &'a self,
         payment_intent_id: String,
@@ -293,20 +180,13 @@ impl CommerceBackendPaymentIntentStore for PostgresBackendPaymentIntentStore {
             .map_err(|error| {
                 CommerceServiceError::storage(format!("failed to retrieve payment intent: {error}"))
             })?;
-
             Ok(row.as_ref().map(map_payment_intent_row_pg))
         })
     }
 }
-
-pub fn backend_payment_intent_router_with_sqlite_pool(pool: SqlitePool) -> Router {
-    build_backend_payment_intent_router(Arc::new(SqliteBackendPaymentIntentStore::new(pool)))
-}
-
 pub fn backend_payment_intent_router_with_postgres_pool(pool: PgPool) -> Router {
     build_backend_payment_intent_router(Arc::new(PostgresBackendPaymentIntentStore::new(pool)))
 }
-
 pub fn build_backend_payment_intent_router(
     store: Arc<dyn CommerceBackendPaymentIntentStore>,
 ) -> Router {
@@ -321,7 +201,6 @@ pub fn build_backend_payment_intent_router(
         )
         .with_state(BackendPaymentIntentState { store })
 }
-
 async fn list_payment_intents(
     State(state): State<BackendPaymentIntentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -334,7 +213,6 @@ async fn list_payment_intents(
         Ok(subject) => subject,
         Err(message) => return unauthorized(ctx, message),
     };
-
     // Phase 1.3：在 handler 解析标准分页参数（page/page_size），下推为 offset/limit 到 SQL。
     // 默认 page=1, page_size=20，page_size 上限 200（PAGINATION_SPEC §2）。
     let page_params = OffsetListPageParams::parse(params.page, params.page_size);
@@ -347,7 +225,6 @@ async fn list_payment_intents(
         offset: page_params.offset,
         limit: page_params.page_size,
     };
-
     match state.store.list_payment_intents(query).await {
         Ok(page) => {
             // Phase 1.3：store 已在 SQL 层完成 LIMIT/OFFSET 并返回真实 total_items，
@@ -362,7 +239,6 @@ async fn list_payment_intents(
         ),
     }
 }
-
 async fn retrieve_payment_intent(
     State(state): State<BackendPaymentIntentState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -375,12 +251,10 @@ async fn retrieve_payment_intent(
         Ok(subject) => subject,
         Err(message) => return unauthorized(ctx, message),
     };
-
     let tenant_scope = TenantScope {
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
     };
-
     match state
         .store
         .retrieve_payment_intent(payment_intent_id, tenant_scope)
@@ -395,7 +269,6 @@ async fn retrieve_payment_intent(
         ),
     }
 }
-
 fn backend_payment_intent_error_response(
     ctx: Option<&WebRequestContext>,
     _context: &str,
@@ -403,25 +276,6 @@ fn backend_payment_intent_error_response(
 ) -> Response {
     map_service_error(ctx, error)
 }
-
-fn map_payment_intent_row_sqlite(row: &SqliteRow) -> BackendPaymentIntentView {
-    BackendPaymentIntentView {
-        payment_intent_id: sqlite_string(row, "id"),
-        tenant_id: sqlite_string(row, "tenant_id"),
-        organization_id: sqlite_optional_string(row, "organization_id"),
-        owner_user_id: sqlite_string(row, "owner_user_id"),
-        order_id: sqlite_string(row, "order_id"),
-        payment_intent_no: sqlite_string(row, "payment_intent_no"),
-        payment_method: sqlite_string(row, "payment_method"),
-        provider_code: sqlite_string(row, "provider_code"),
-        amount: sqlite_string(row, "amount"),
-        currency_code: sqlite_string(row, "currency_code"),
-        status: sqlite_string(row, "status"),
-        created_at: sqlite_string(row, "created_at"),
-        updated_at: sqlite_string(row, "updated_at"),
-    }
-}
-
 fn map_payment_intent_row_pg(row: &PgRow) -> BackendPaymentIntentView {
     BackendPaymentIntentView {
         payment_intent_id: pg_string(row, "id"),
@@ -439,7 +293,6 @@ fn map_payment_intent_row_pg(row: &PgRow) -> BackendPaymentIntentView {
         updated_at: pg_string(row, "updated_at"),
     }
 }
-
 fn map_payment_intent(value: BackendPaymentIntentView) -> BackendPaymentIntentResponse {
     BackendPaymentIntentResponse {
         id: value.payment_intent_id,
@@ -457,11 +310,9 @@ fn map_payment_intent(value: BackendPaymentIntentView) -> BackendPaymentIntentRe
         updated_at: value.updated_at,
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::{map_payment_intent, BackendPaymentIntentView};
-
     #[test]
     fn payment_intent_response_uses_the_openapi_id_field() {
         let response = map_payment_intent(BackendPaymentIntentView {
@@ -480,24 +331,13 @@ mod tests {
             updated_at: "2026-07-20T00:00:01Z".to_owned(),
         });
         let value = serde_json::to_value(response).expect("serialize payment intent response");
-
         assert_eq!(value["id"], "intent-1");
         assert!(value.get("paymentIntentId").is_none());
     }
 }
-
-fn sqlite_optional_string(row: &SqliteRow, column: &str) -> Option<String> {
-    row.try_get::<Option<String>, _>(column).ok().flatten()
-}
-
-fn sqlite_string(row: &SqliteRow, column: &str) -> String {
-    sqlite_optional_string(row, column).unwrap_or_default()
-}
-
 fn pg_optional_string(row: &PgRow, column: &str) -> Option<String> {
     row.try_get::<Option<String>, _>(column).ok().flatten()
 }
-
 fn pg_string(row: &PgRow, column: &str) -> String {
     pg_optional_string(row, column).unwrap_or_default()
 }

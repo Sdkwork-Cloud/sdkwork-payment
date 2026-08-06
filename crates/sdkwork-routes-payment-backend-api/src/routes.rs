@@ -33,11 +33,10 @@ pub fn build_payment_backend_router(host: Arc<PaymentServiceHost>) -> Router {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
-    use crate::backend_payment_integration_router::backend_payment_integration_router_with_sqlite_pool;
     use crate::{
-        backend_payment_admin_router_with_sqlite_pool,
-        backend_payment_intent_router_with_sqlite_pool,
-        backend_payment_refund_router_with_sqlite_pool,
+        backend_payment_admin_router_with_postgres_pool,
+        backend_payment_intent_router_with_postgres_pool,
+        backend_payment_refund_router_with_postgres_pool,
     };
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
@@ -46,14 +45,21 @@ mod tests {
 
     #[tokio::test]
     async fn every_manifest_operation_has_a_runtime_handler() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+        // 服务端测试必须使用 PostgreSQL（DATABASE_SPEC：authoritative-server）
+        let Some(url) = std::env::var("SDKWORK_DATABASE_TEST_POSTGRES_URL").ok() else {
+            eprintln!("SKIP: SDKWORK_DATABASE_TEST_POSTGRES_URL is not configured");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
             .await
-            .expect("sqlite pool");
+            .expect("postgres pool");
         let router = Router::new()
-            .merge(backend_payment_admin_router_with_sqlite_pool(pool.clone()))
-            .merge(backend_payment_intent_router_with_sqlite_pool(pool.clone()))
-            .merge(backend_payment_refund_router_with_sqlite_pool(pool.clone()))
-            .merge(backend_payment_integration_router_with_sqlite_pool(pool));
+            .merge(backend_payment_admin_router_with_postgres_pool(pool.clone()))
+            .merge(backend_payment_intent_router_with_postgres_pool(pool.clone()))
+            .merge(backend_payment_refund_router_with_postgres_pool(pool.clone()))
+            .merge(crate::backend_payment_integration_router::backend_payment_integration_router_with_postgres_pool(pool));
 
         for route in crate::http_route_manifest::backend_route_manifest().routes() {
             let method = match route.method {

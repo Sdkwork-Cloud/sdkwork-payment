@@ -11,9 +11,8 @@ use sdkwork_contract_service::CommerceServiceError;
 use sdkwork_iam_context_service::IamAppContext;
 use sdkwork_payment_providers::{PaymentProviderRegistry, ProviderCredentialBundle};
 use sdkwork_payment_repository_sqlx::{
-    enrich_owner_payment_attempt_postgres, enrich_owner_payment_attempt_sqlite,
+    enrich_owner_payment_attempt_postgres,
     OwnerOrderPaymentEnrichmentContext, PostgresCommercePaymentIntentStore,
-    SqliteCommercePaymentIntentStore,
 };
 use sdkwork_payment_service::{
     CancelOwnerPaymentIntentCommand, CreateOwnerPaymentAttemptCommand,
@@ -22,7 +21,7 @@ use sdkwork_payment_service::{
 };
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, SqlitePool};
+use sqlx::PgPool;
 
 use crate::api_response::{
     map_service_error, not_found, success_command_accepted, success_created_item, success_item,
@@ -61,12 +60,6 @@ struct AppPaymentIntentState {
     store: Arc<dyn CommercePaymentIntentStore>,
 }
 
-struct ProviderEnrichedSqlitePaymentIntents {
-    inner: Arc<SqliteCommercePaymentIntentStore>,
-    pool: SqlitePool,
-    registry: Arc<PaymentProviderRegistry>,
-    credentials: ProviderCredentialBundle,
-}
 
 struct ProviderEnrichedPostgresPaymentIntents {
     inner: Arc<PostgresCommercePaymentIntentStore>,
@@ -110,35 +103,6 @@ struct PaymentAttemptResponse {
     payment_params: std::collections::BTreeMap<String, String>,
 }
 
-impl CommercePaymentIntentStore for SqliteCommercePaymentIntentStore {
-    fn create_owner_payment_intent<'a>(
-        &'a self,
-        command: CreateOwnerPaymentIntentCommand,
-    ) -> CommercePaymentIntentFuture<'a, PaymentIntentView> {
-        Box::pin(async move { self.create_owner_payment_intent(command).await })
-    }
-
-    fn retrieve_owner_payment_intent<'a>(
-        &'a self,
-        query: PaymentIntentDetailQuery,
-    ) -> CommercePaymentIntentFuture<'a, Option<PaymentIntentView>> {
-        Box::pin(async move { self.retrieve_owner_payment_intent(query).await })
-    }
-
-    fn cancel_owner_payment_intent<'a>(
-        &'a self,
-        command: CancelOwnerPaymentIntentCommand,
-    ) -> CommercePaymentIntentFuture<'a, PaymentIntentView> {
-        Box::pin(async move { self.cancel_owner_payment_intent(command).await })
-    }
-
-    fn create_owner_payment_attempt<'a>(
-        &'a self,
-        command: CreateOwnerPaymentAttemptCommand,
-    ) -> CommercePaymentIntentFuture<'a, CreateOwnerPaymentAttemptOutcome> {
-        Box::pin(async move { self.create_owner_payment_attempt(command).await })
-    }
-}
 
 impl CommercePaymentIntentStore for PostgresCommercePaymentIntentStore {
     fn create_owner_payment_intent<'a>(
@@ -170,60 +134,6 @@ impl CommercePaymentIntentStore for PostgresCommercePaymentIntentStore {
     }
 }
 
-impl CommercePaymentIntentStore for ProviderEnrichedSqlitePaymentIntents {
-    fn create_owner_payment_intent<'a>(
-        &'a self,
-        command: CreateOwnerPaymentIntentCommand,
-    ) -> CommercePaymentIntentFuture<'a, PaymentIntentView> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.create_owner_payment_intent(command).await })
-    }
-
-    fn retrieve_owner_payment_intent<'a>(
-        &'a self,
-        query: PaymentIntentDetailQuery,
-    ) -> CommercePaymentIntentFuture<'a, Option<PaymentIntentView>> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.retrieve_owner_payment_intent(query).await })
-    }
-
-    fn cancel_owner_payment_intent<'a>(
-        &'a self,
-        command: CancelOwnerPaymentIntentCommand,
-    ) -> CommercePaymentIntentFuture<'a, PaymentIntentView> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.cancel_owner_payment_intent(command).await })
-    }
-
-    fn create_owner_payment_attempt<'a>(
-        &'a self,
-        command: CreateOwnerPaymentAttemptCommand,
-    ) -> CommercePaymentIntentFuture<'a, CreateOwnerPaymentAttemptOutcome> {
-        let registry = self.registry.clone();
-        let credentials = self.credentials.clone();
-        let pool = self.pool.clone();
-        let inner = self.inner.clone();
-        Box::pin(async move {
-            let tenant_id = command.tenant_id.clone();
-            let organization_id = command.organization_id.clone();
-            let outcome = inner.create_owner_payment_attempt(command).await?;
-            let order_id = outcome.order_id.clone();
-            enrich_owner_payment_attempt_sqlite(
-                &pool,
-                OwnerOrderPaymentEnrichmentContext {
-                    deployment_registry: &registry,
-                    credentials: &credentials,
-                    tenant_id: &tenant_id,
-                    organization_id: organization_id.as_deref(),
-                    order_id: &order_id,
-                    payment_scene: None,
-                },
-                outcome,
-            )
-            .await
-        })
-    }
-}
 
 impl CommercePaymentIntentStore for ProviderEnrichedPostgresPaymentIntents {
     fn create_owner_payment_intent<'a>(
@@ -280,18 +190,6 @@ impl CommercePaymentIntentStore for ProviderEnrichedPostgresPaymentIntents {
     }
 }
 
-pub fn app_payment_intent_router_with_sqlite_pool(
-    pool: SqlitePool,
-    registry: Arc<PaymentProviderRegistry>,
-    credentials: ProviderCredentialBundle,
-) -> Router {
-    build_app_payment_intent_router(Arc::new(ProviderEnrichedSqlitePaymentIntents {
-        inner: Arc::new(SqliteCommercePaymentIntentStore::new(pool.clone())),
-        pool,
-        registry,
-        credentials,
-    }))
-}
 
 pub fn app_payment_intent_router_with_postgres_pool(
     pool: PgPool,

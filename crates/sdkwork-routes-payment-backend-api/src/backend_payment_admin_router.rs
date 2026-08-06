@@ -1,7 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -13,8 +12,7 @@ use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
-
+use sqlx::{postgres::PgRow, PgPool, Row};
 use crate::api_response::{
     conflict, map_service_error, not_found, success_command_accepted, success_created_item,
     success_item, success_list, success_no_content, unauthorized, validation,
@@ -23,12 +21,9 @@ use crate::command_headers::{
     validate_write_payload, AppWriteCommandHeaders, WriteCommandHeaderError,
 };
 use crate::subject::backend_runtime_subject_from_extension;
-
 pub type CommerceBackendPaymentAdminFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CommerceServiceError>> + Send + 'a>>;
-
 use sdkwork_payment_repository_sqlx::WEBHOOK_STORED_REPLAY_MAX_RETRIES;
-
 /// C15 修复：webhook 重放结果，用于 handler 区分 404/409/200。
 #[derive(Debug, Clone, Serialize)]
 pub enum WebhookReplayResult {
@@ -36,34 +31,28 @@ pub enum WebhookReplayResult {
     NotFound,
     LimitExceeded { current_retries: i64 },
 }
-
 pub trait CommerceBackendPaymentAdminStore: Send + Sync {
     fn list_payment_methods<'a>(
         &'a self,
         query: BackendPaymentMethodListQuery,
     ) -> CommerceBackendPaymentAdminFuture<'a, BackendPaymentMethodListPage>;
-
     fn upsert_payment_method<'a>(
         &'a self,
         command: UpsertBackendPaymentMethodCommand,
     ) -> CommerceBackendPaymentAdminFuture<'a, BackendPaymentMethodView>;
-
     fn list_provider_accounts<'a>(
         &'a self,
         query: BackendTenantListQuery,
     ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
-
     fn upsert_provider_account<'a>(
         &'a self,
         payload: BackendProviderAccountPayload,
     ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value>;
-
     fn provider_account_ready_for_activation<'a>(
         &'a self,
         scope: BackendTenantScope,
         provider_account_id: String,
     ) -> CommerceBackendPaymentAdminFuture<'a, bool>;
-
     /// Soft-deletes a provider account (marks deleted_at). Returns
     /// `Conflict` while non-deleted channels or sub-merchants still reference
     /// the account, and `NotFound` when the account does not exist or was
@@ -73,71 +62,58 @@ pub trait CommerceBackendPaymentAdminStore: Send + Sync {
         scope: BackendTenantScope,
         provider_account_id: String,
     ) -> CommerceBackendPaymentAdminFuture<'a, ()>;
-
     fn list_channels<'a>(
         &'a self,
         query: BackendTenantListQuery,
     ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
-
     fn upsert_channel<'a>(
         &'a self,
         payload: BackendPaymentChannelPayload,
     ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value>;
-
     fn list_route_rules<'a>(
         &'a self,
         query: BackendTenantListQuery,
     ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
-
     fn upsert_route_rule<'a>(
         &'a self,
         payload: BackendRouteRulePayload,
     ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value>;
-
     fn delete_route_rule<'a>(
         &'a self,
         scope: BackendTenantScope,
         route_rule_id: String,
     ) -> CommerceBackendPaymentAdminFuture<'a, ()>;
-
     fn list_attempts<'a>(
         &'a self,
         query: BackendTenantListQuery,
     ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
-
     fn list_webhook_events<'a>(
         &'a self,
         query: BackendTenantListQuery,
     ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
-
     fn replay_webhook_event<'a>(
         &'a self,
         scope: BackendTenantScope,
         event_id: String,
     ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult>;
-
     fn list_reconciliation_runs<'a>(
         &'a self,
         query: BackendTenantListQuery,
     ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage>;
-
     fn create_reconciliation_run<'a>(
         &'a self,
         payload: BackendReconciliationRunPayload,
     ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value>;
 }
-
 #[derive(Clone)]
 struct BackendPaymentAdminState {
     store: Arc<dyn CommerceBackendPaymentAdminStore>,
 }
-
 #[derive(Debug, Clone)]
 pub struct BackendTenantScope {
     pub tenant_id: String,
     pub organization_id: Option<String>,
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendPaymentMethodListParams {
@@ -148,7 +124,6 @@ struct BackendPaymentMethodListParams {
     #[serde(default, rename = "page_size")]
     page_size: Option<i64>,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendListQueryParams {
@@ -157,7 +132,6 @@ struct BackendListQueryParams {
     #[serde(default, rename = "page_size")]
     page_size: Option<i64>,
 }
-
 #[derive(Debug, Clone)]
 pub struct BackendPaymentMethodListQuery {
     pub tenant_id: String,
@@ -166,24 +140,20 @@ pub struct BackendPaymentMethodListQuery {
     pub offset: i64,
     pub limit: i64,
 }
-
 #[derive(Debug, Clone)]
 pub struct BackendTenantListQuery {
     pub scope: BackendTenantScope,
     pub offset: i64,
     pub limit: i64,
 }
-
 /// Phase 1.3：标准分页结果，store 一次性返回当前页 items + 满足条件的总记录数。
 #[derive(Debug, Clone, Serialize)]
 pub struct BackendListPage<T> {
     pub items: Vec<T>,
     pub total_items: i64,
 }
-
 pub type BackendPaymentMethodListPage = BackendListPage<BackendPaymentMethodView>;
 pub type BackendJsonListPage = BackendListPage<serde_json::Value>;
-
 #[derive(Debug, Clone)]
 pub struct BackendPaymentMethodView {
     pub id: String,
@@ -197,7 +167,6 @@ pub struct BackendPaymentMethodView {
     pub created_at: String,
     pub updated_at: String,
 }
-
 #[derive(Debug, Clone)]
 pub struct UpsertBackendPaymentMethodCommand {
     pub tenant_id: String,
@@ -210,7 +179,6 @@ pub struct UpsertBackendPaymentMethodCommand {
     pub request_no: String,
     pub idempotency_key: String,
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpsertPaymentMethodBody {
@@ -220,7 +188,6 @@ struct UpsertPaymentMethodBody {
     status: Option<String>,
     sort_order: Option<i64>,
 }
-
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpsertProviderAccountBody {
@@ -243,7 +210,6 @@ struct UpsertProviderAccountBody {
     metadata: Option<Value>,
     status: Option<String>,
 }
-
 #[derive(Clone)]
 pub struct BackendProviderAccountPayload {
     pub id: Option<String>,
@@ -266,7 +232,6 @@ pub struct BackendProviderAccountPayload {
     pub metadata: Option<Value>,
     pub status: Option<String>,
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpsertChannelBody {
@@ -279,7 +244,6 @@ struct UpsertChannelBody {
     status: Option<String>,
     priority: Option<i64>,
 }
-
 #[derive(Debug, Clone)]
 pub struct BackendPaymentChannelPayload {
     pub id: Option<String>,
@@ -294,7 +258,6 @@ pub struct BackendPaymentChannelPayload {
     pub status: String,
     pub priority: i64,
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpsertRouteRuleBody {
@@ -313,7 +276,6 @@ struct UpsertRouteRuleBody {
     starts_at: Option<String>,
     ends_at: Option<String>,
 }
-
 #[derive(Debug, Clone)]
 pub struct BackendRouteRulePayload {
     pub id: Option<String>,
@@ -334,7 +296,6 @@ pub struct BackendRouteRulePayload {
     pub starts_at: Option<String>,
     pub ends_at: Option<String>,
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateReconciliationRunBody {
@@ -347,7 +308,6 @@ struct CreateReconciliationRunBody {
     period_end: Option<String>,
     currency_code: Option<String>,
 }
-
 #[derive(Debug, Clone)]
 pub struct BackendReconciliationRunPayload {
     pub tenant_id: String,
@@ -361,7 +321,6 @@ pub struct BackendReconciliationRunPayload {
     pub request_no: String,
     pub idempotency_key: String,
 }
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendPaymentMethodResponse {
@@ -372,831 +331,15 @@ struct BackendPaymentMethodResponse {
     status: String,
     sort_order: i64,
 }
-
-#[derive(Clone)]
-struct SqliteBackendPaymentAdminStore {
-    pool: SqlitePool,
-}
-
 #[derive(Clone)]
 struct PostgresBackendPaymentAdminStore {
     pool: PgPool,
 }
-
-impl SqliteBackendPaymentAdminStore {
-    fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-}
-
 impl PostgresBackendPaymentAdminStore {
     fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
-
-impl CommerceBackendPaymentAdminStore for SqliteBackendPaymentAdminStore {
-    fn list_payment_methods<'a>(
-        &'a self,
-        query: BackendPaymentMethodListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, BackendPaymentMethodListPage> {
-        Box::pin(async move {
-            let rows = sqlx::query(
-                r#"
-                SELECT id, tenant_id, organization_id, method_key, display_name, provider_code,
-                       status, sort_order, created_at, updated_at,
-                       COUNT(*) OVER() AS total_count
-                FROM commerce_payment_method
-                WHERE tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                  AND (? IS NULL OR LOWER(COALESCE(status, '')) = LOWER(CAST(? AS TEXT)))
-                ORDER BY sort_order ASC, created_at ASC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(&query.tenant_id)
-            .bind(query.organization_id.as_deref())
-            .bind(query.organization_id.as_deref())
-            .bind(query.status.as_deref())
-            .bind(query.status.as_deref())
-            .bind(query.limit)
-            .bind(query.offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!("failed to list payment methods: {error}"))
-            })?;
-
-            let total_items = sqlite_total_count(&rows);
-            let items = rows.iter().map(map_method_row_sqlite).collect();
-
-            Ok(BackendPaymentMethodListPage { items, total_items })
-        })
-    }
-
-    fn upsert_payment_method<'a>(
-        &'a self,
-        command: UpsertBackendPaymentMethodCommand,
-    ) -> CommerceBackendPaymentAdminFuture<'a, BackendPaymentMethodView> {
-        Box::pin(async move {
-            let now = current_timestamp_string();
-            let id = stable_storage_id(&[
-                "payment-method",
-                &command.tenant_id,
-                command.organization_id.as_deref().unwrap_or("global"),
-                &command.method_key,
-            ]);
-
-            let row = sqlx::query(
-                r#"
-                INSERT INTO commerce_payment_method
-                    (id, tenant_id, organization_id, method_key, display_name, provider_code,
-                     status, sort_order, request_no, idempotency_key, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (tenant_id, organization_id, method_key) DO UPDATE SET
-                    display_name = EXCLUDED.display_name,
-                    provider_code = EXCLUDED.provider_code,
-                    status = EXCLUDED.status,
-                    sort_order = EXCLUDED.sort_order,
-                    updated_at = EXCLUDED.updated_at
-                RETURNING id, tenant_id, organization_id, method_key, display_name, provider_code,
-                          status, sort_order, created_at, updated_at
-                "#,
-            )
-            .bind(&id)
-            .bind(&command.tenant_id)
-            .bind(command.organization_id.as_deref())
-            .bind(&command.method_key)
-            .bind(&command.display_name)
-            .bind(&command.provider_code)
-            .bind(&command.status)
-            .bind(command.sort_order)
-            .bind(&command.request_no)
-            .bind(&command.idempotency_key)
-            .bind(&now)
-            .bind(&now)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!("failed to upsert payment method: {error}"))
-            })?;
-
-            Ok(map_method_row_sqlite(&row))
-        })
-    }
-
-    fn list_provider_accounts<'a>(
-        &'a self,
-        query: BackendTenantListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
-        Box::pin(async move {
-            let scope = query.scope;
-            let rows = sqlx::query(
-                r#"
-                SELECT id, account_no, provider_code, merchant_id, account_name,
-                       account_name_i18n, account_mode,
-                       partner_provider_account_id, environment, country_code,
-                       settlement_currency, secret_ref, webhook_secret_ref, certificate_ref,
-                       capabilities, metadata, status, last_tested_at, last_test_status,
-                       certificate_expires_at, created_at, updated_at,
-                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'primary_secret' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_primary_secret,
-                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'webhook_secret' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_webhook_secret,
-                       EXISTS (SELECT 1 FROM commerce_payment_provider_credential credential WHERE credential.provider_account_id = commerce_payment_provider_account.id AND credential.tenant_id = commerce_payment_provider_account.tenant_id AND credential.credential_kind = 'certificate' AND credential.status = 'active' AND credential.deleted_at IS NULL) AS has_certificate,
-                       COUNT(*) OVER() AS total_count
-                FROM commerce_payment_provider_account
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                  AND deleted_at IS NULL
-                ORDER BY created_at DESC, id DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .bind(query.limit)
-            .bind(query.offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!("failed to list provider accounts: {error}"))
-            })?;
-            let total_items = sqlite_total_count(&rows);
-            let items = rows
-                .iter()
-                .map(|row| {
-                    serde_json::json!({
-                        "id": sqlite_string(row, "id"),
-                        "accountNo": sqlite_string(row, "account_no"),
-                        "providerCode": sqlite_string(row, "provider_code"),
-                        "merchantId": sqlite_string(row, "merchant_id"),
-                        "accountName": sqlite_optional_string(row, "account_name"),
-                        "accountNameI18n": sqlite_json(row, "account_name_i18n"),
-                        "accountMode": sqlite_string(row, "account_mode"),
-                        "partnerProviderAccountId": sqlite_string(row, "partner_provider_account_id"),
-                        "environment": sqlite_string(row, "environment"),
-                        "countryCode": sqlite_string(row, "country_code"),
-                        "settlementCurrency": sqlite_string(row, "settlement_currency"),
-                        "hasPrimarySecret": sqlite_bool(row, "has_primary_secret"),
-                        "hasWebhookSecret": sqlite_bool(row, "has_webhook_secret"),
-                        "hasCertificate": sqlite_bool(row, "has_certificate"),
-                        "credentialStorage": credential_storage(&sqlite_string(row, "secret_ref")),
-                        "capabilities": sqlite_json(row, "capabilities"),
-                        "metadata": sqlite_json(row, "metadata"),
-                        "status": sqlite_string(row, "status"),
-                        "lastTestedAt": sqlite_optional_string(row, "last_tested_at"),
-                        "lastTestStatus": sqlite_optional_string(row, "last_test_status"),
-                        "certificateExpiresAt": sqlite_optional_string(row, "certificate_expires_at"),
-                        "createdAt": sqlite_string(row, "created_at"),
-                        "updatedAt": sqlite_string(row, "updated_at"),
-                    })
-                })
-                .collect();
-            Ok(BackendJsonListPage { items, total_items })
-        })
-    }
-
-    fn upsert_provider_account<'a>(
-        &'a self,
-        payload: BackendProviderAccountPayload,
-    ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value> {
-        Box::pin(async move {
-            let id = payload.id.clone().unwrap_or_else(|| {
-                stable_storage_id(&["provider-account", &payload.tenant_id, &payload.account_no])
-            });
-            let now = current_timestamp_string();
-            let capabilities = payload.capabilities.as_ref().map(Value::to_string);
-            let metadata = payload.metadata.as_ref().map(Value::to_string);
-            let credential_write = payload.credential_write.clone();
-            let row = if payload.id.is_some() {
-                sqlx::query(
-                    r#"
-                    UPDATE commerce_payment_provider_account SET
-                        provider_code = COALESCE(?, provider_code),
-                        merchant_id = COALESCE(?, merchant_id),
-                        account_name = COALESCE(?, account_name),
-                        account_mode = COALESCE(?, account_mode),
-                        partner_provider_account_id = COALESCE(?, partner_provider_account_id),
-                        environment = COALESCE(?, environment),
-                        country_code = COALESCE(?, country_code),
-                        settlement_currency = COALESCE(?, settlement_currency),
-                        secret_ref = COALESCE(?, secret_ref),
-                        webhook_secret_ref = COALESCE(?, webhook_secret_ref),
-                        certificate_ref = COALESCE(?, certificate_ref),
-                        capabilities = COALESCE(?, capabilities),
-                        metadata = COALESCE(?, metadata),
-                        status = COALESCE(?, status),
-                        version = version + 1,
-                        updated_at = ?
-                    WHERE id = CAST(? AS TEXT)
-                      AND tenant_id = CAST(? AS TEXT)
-                      AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
-                      AND deleted_at IS NULL
-                    RETURNING id, account_no, provider_code, merchant_id, account_name,
-                              account_name_i18n, account_mode,
-                              partner_provider_account_id, environment, country_code, settlement_currency,
-                              secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
-                              status, created_at, updated_at
-                    "#,
-                )
-                .bind(payload.provider_code.as_deref())
-                .bind(payload.merchant_id.as_deref())
-                .bind(payload.account_name.as_deref())
-                .bind(payload.account_mode.as_deref())
-                .bind(payload.partner_provider_account_id.as_deref())
-                .bind(payload.environment.as_deref())
-                .bind(payload.country_code.as_deref())
-                .bind(payload.settlement_currency.as_deref())
-                .bind(payload.secret_ref.as_deref())
-                .bind(payload.webhook_secret_ref.as_deref())
-                .bind(payload.certificate_ref.as_deref())
-                .bind(capabilities.as_deref())
-                .bind(metadata.as_deref())
-                .bind(payload.status.as_deref())
-                .bind(&now)
-                .bind(&id)
-                .bind(&payload.tenant_id)
-                .bind(payload.organization_id.as_deref())
-                .bind(payload.organization_id.as_deref())
-                .fetch_one(&self.pool)
-                .await
-            } else {
-                sqlx::query(
-                    r#"
-                    INSERT INTO commerce_payment_provider_account
-                        (id, tenant_id, organization_id, account_no, provider_code, merchant_id, account_name, account_mode,
-                         partner_provider_account_id, environment, country_code, settlement_currency, secret_ref,
-                         webhook_secret_ref, certificate_ref, capabilities, metadata, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (tenant_id, COALESCE(organization_id, ''), account_no)
-                    WHERE deleted_at IS NULL DO UPDATE SET
-                        provider_code = EXCLUDED.provider_code,
-                        merchant_id = EXCLUDED.merchant_id,
-                        account_name = EXCLUDED.account_name,
-                        account_mode = EXCLUDED.account_mode,
-                        partner_provider_account_id = EXCLUDED.partner_provider_account_id,
-                        environment = EXCLUDED.environment,
-                        country_code = EXCLUDED.country_code,
-                        settlement_currency = EXCLUDED.settlement_currency,
-                        secret_ref = EXCLUDED.secret_ref,
-                        webhook_secret_ref = EXCLUDED.webhook_secret_ref,
-                        certificate_ref = EXCLUDED.certificate_ref,
-                        capabilities = EXCLUDED.capabilities,
-                        metadata = EXCLUDED.metadata,
-                        status = EXCLUDED.status,
-                        version = commerce_payment_provider_account.version + 1,
-                        updated_at = EXCLUDED.updated_at
-                    RETURNING id, account_no, provider_code, merchant_id, account_name,
-                              account_name_i18n, account_mode,
-                              partner_provider_account_id, environment, country_code, settlement_currency,
-                              secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata,
-                              status, created_at, updated_at
-                    "#,
-                )
-                .bind(&id)
-                .bind(&payload.tenant_id)
-                .bind(payload.organization_id.as_deref())
-                .bind(&payload.account_no)
-                .bind(payload.provider_code.as_deref())
-                .bind(payload.merchant_id.as_deref())
-                .bind(payload.account_name.as_deref())
-                .bind(payload.account_mode.as_deref())
-                .bind(payload.partner_provider_account_id.as_deref())
-                .bind(payload.environment.as_deref())
-                .bind(payload.country_code.as_deref())
-                .bind(payload.settlement_currency.as_deref())
-                .bind(payload.secret_ref.as_deref())
-                .bind(payload.webhook_secret_ref.as_deref())
-                .bind(payload.certificate_ref.as_deref())
-                .bind(capabilities.as_deref())
-                .bind(metadata.as_deref())
-                .bind(payload.status.as_deref())
-                .bind(&now)
-                .bind(&now)
-                .fetch_one(&self.pool)
-                .await
-            }
-            .map_err(|error| CommerceServiceError::storage(format!("failed to upsert provider account: {error}")))?;
-            sdkwork_payment_repository_sqlx::rotate_provider_credentials_sqlite(
-                &self.pool,
-                &payload.tenant_id,
-                payload.organization_id.as_deref(),
-                &id,
-                credential_write,
-            )
-            .await?;
-            Ok(sqlite_provider_account_value(&row))
-        })
-    }
-
-    fn provider_account_ready_for_activation<'a>(
-        &'a self,
-        scope: BackendTenantScope,
-        provider_account_id: String,
-    ) -> CommerceBackendPaymentAdminFuture<'a, bool> {
-        Box::pin(async move {
-            let ready = sqlx::query(
-                r#"
-                SELECT 1
-                FROM commerce_payment_provider_account
-                WHERE id = CAST(? AS TEXT)
-                  AND tenant_id = CAST(? AS TEXT)
-                  AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL))
-                  AND last_test_status = 'success'
-                  AND last_tested_at IS NOT NULL
-                  AND updated_at IS NOT NULL
-                  AND datetime(last_tested_at) >= datetime(updated_at)
-                  AND CAST(metadata AS TEXT) NOT LIKE '%"configurationState":"mock"%'
-                  AND CAST(metadata AS TEXT) NOT LIKE '%"configureBeforeActivation":true%'
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM commerce_payment_provider_account active_account
-                      WHERE active_account.tenant_id = commerce_payment_provider_account.tenant_id
-                        AND ((active_account.organization_id = commerce_payment_provider_account.organization_id)
-                             OR (active_account.organization_id IS NULL AND commerce_payment_provider_account.organization_id IS NULL))
-                        AND LOWER(active_account.provider_code) = LOWER(commerce_payment_provider_account.provider_code)
-                        AND active_account.id <> commerce_payment_provider_account.id
-                        AND active_account.status = 'active'
-                        AND active_account.deleted_at IS NULL
-                  )
-                  AND deleted_at IS NULL
-                LIMIT 1
-                "#,
-            )
-            .bind(&provider_account_id)
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!(
-                    "failed to validate provider account activation readiness: {error}"
-                ))
-            })?;
-            Ok(ready.is_some())
-        })
-    }
-
-    fn delete_provider_account<'a>(
-        &'a self,
-        scope: BackendTenantScope,
-        provider_account_id: String,
-    ) -> CommerceBackendPaymentAdminFuture<'a, ()> {
-        Box::pin(async move {
-            let channel_reference = sqlx::query(
-                r#"
-                SELECT 1
-                FROM commerce_payment_channel
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                  AND provider_account_id = CAST(? AS TEXT)
-                  AND deleted_at IS NULL
-                LIMIT 1
-                "#,
-            )
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .bind(&provider_account_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!(
-                    "failed to check provider account channel references: {error}"
-                ))
-            })?;
-            if channel_reference.is_some() {
-                return Err(CommerceServiceError::conflict(
-                    "provider account is referenced by payment channels; unbind them before deleting the account",
-                ));
-            }
-            let sub_merchant_reference = sqlx::query(
-                r#"
-                SELECT 1
-                FROM commerce_payment_sub_merchant
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND organization_id = CAST(? AS TEXT)
-                  AND provider_account_id = CAST(? AS TEXT)
-                  AND deleted_at IS NULL
-                LIMIT 1
-                "#,
-            )
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(&provider_account_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!(
-                    "failed to check provider account sub-merchant references: {error}"
-                ))
-            })?;
-            if sub_merchant_reference.is_some() {
-                return Err(CommerceServiceError::conflict(
-                    "provider account is referenced by sub-merchants; unbind them before deleting the account",
-                ));
-            }
-            let result = sqlx::query(
-                r#"
-                UPDATE commerce_payment_provider_account
-                SET deleted_at = ?
-                WHERE id = CAST(? AS TEXT)
-                  AND tenant_id = CAST(? AS TEXT)
-                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                  AND deleted_at IS NULL
-                "#,
-            )
-            .bind(current_timestamp_string())
-            .bind(&provider_account_id)
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .execute(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!("failed to delete provider account: {error}"))
-            })?;
-            if result.rows_affected() == 0 {
-                return Err(CommerceServiceError::not_found("provider account not found"));
-            }
-            Ok(())
-        })
-    }
-
-    fn list_channels<'a>(
-        &'a self,
-        query: BackendTenantListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
-        Box::pin(async move {
-            let scope = query.scope;
-            let rows = sqlx::query(
-                r#"
-                SELECT id, channel_no, provider_account_id, method_id, scene_code, currency_code,
-                       country_code, status, priority, COUNT(*) OVER() AS total_count
-                FROM commerce_payment_channel
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                ORDER BY priority ASC, created_at ASC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .bind(query.limit)
-            .bind(query.offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| {
-                CommerceServiceError::storage(format!("failed to list channels: {error}"))
-            })?;
-            let total_items = sqlite_total_count(&rows);
-            let items = rows
-                .iter()
-                .map(|row| {
-                    serde_json::json!({
-                        "id": sqlite_string(row, "id"),
-                        "channelNo": sqlite_string(row, "channel_no"),
-                        "providerAccountId": sqlite_string(row, "provider_account_id"),
-                        "methodId": sqlite_string(row, "method_id"),
-                        "sceneCode": sqlite_string(row, "scene_code"),
-                        "currencyCode": sqlite_string(row, "currency_code"),
-                        "countryCode": sqlite_string(row, "country_code"),
-                        "status": sqlite_string(row, "status"),
-                        "priority": row.try_get::<i64,_>("priority").unwrap_or(0),
-                    })
-                })
-                .collect();
-            Ok(BackendJsonListPage { items, total_items })
-        })
-    }
-
-    fn upsert_channel<'a>(
-        &'a self,
-        payload: BackendPaymentChannelPayload,
-    ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value> {
-        Box::pin(async move {
-            let id = payload.id.clone().unwrap_or_else(|| {
-                stable_storage_id(&["payment-channel", &payload.tenant_id, &payload.channel_no])
-            });
-            let now = current_timestamp_string();
-            let row = sqlx::query(
-                r#"
-                INSERT INTO commerce_payment_channel
-                    (id, tenant_id, organization_id, channel_no, provider_account_id, method_id, scene_code, currency_code, country_code, status, priority, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (tenant_id, channel_no) DO UPDATE SET
-                    provider_account_id = EXCLUDED.provider_account_id,
-                    method_id = EXCLUDED.method_id,
-                    scene_code = EXCLUDED.scene_code,
-                    currency_code = EXCLUDED.currency_code,
-                    country_code = EXCLUDED.country_code,
-                    status = EXCLUDED.status,
-                    priority = EXCLUDED.priority,
-                    updated_at = EXCLUDED.updated_at
-                RETURNING id, channel_no, provider_account_id, method_id, scene_code, currency_code, country_code, status, priority
-                "#,
-            )
-            .bind(&id)
-            .bind(&payload.tenant_id)
-            .bind(payload.organization_id.as_deref())
-            .bind(&payload.channel_no)
-            .bind(&payload.provider_account_id)
-            .bind(&payload.method_id)
-            .bind(&payload.scene_code)
-            .bind(&payload.currency_code)
-            .bind(&payload.country_code)
-            .bind(&payload.status)
-            .bind(payload.priority)
-            .bind(&now)
-            .bind(&now)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to upsert channel: {error}")))?;
-            Ok(serde_json::json!({
-                "id": sqlite_string(&row, "id"),
-                "channelNo": sqlite_string(&row, "channel_no"),
-                "providerAccountId": sqlite_string(&row, "provider_account_id"),
-                "methodId": sqlite_string(&row, "method_id"),
-                "sceneCode": sqlite_string(&row, "scene_code"),
-                "currencyCode": sqlite_string(&row, "currency_code"),
-                "countryCode": sqlite_string(&row, "country_code"),
-                "status": sqlite_string(&row, "status"),
-                "priority": row.try_get::<i64,_>("priority").unwrap_or(0),
-            }))
-        })
-    }
-
-    fn list_route_rules<'a>(
-        &'a self,
-        query: BackendTenantListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
-        Box::pin(async move {
-            let scope = query.scope;
-            let rows = sqlx::query(
-                r#"
-                SELECT id, rule_no, priority, purchase_type, country_code, currency_code, client_platform,
-                       amount_min, amount_max, user_segment, risk_level, channel_id, status, starts_at,
-                       ends_at, COUNT(*) OVER() AS total_count
-                FROM commerce_payment_route_rule
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                ORDER BY priority ASC, created_at ASC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .bind(query.limit)
-            .bind(query.offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to list route rules: {error}")))?;
-            let total_items = sqlite_total_count(&rows);
-            let items = rows.iter().map(map_route_rule_sqlite).collect();
-            Ok(BackendJsonListPage { items, total_items })
-        })
-    }
-
-    fn upsert_route_rule<'a>(
-        &'a self,
-        payload: BackendRouteRulePayload,
-    ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value> {
-        Box::pin(async move {
-            let id = payload.id.clone().unwrap_or_else(|| {
-                stable_storage_id(&["payment-route-rule", &payload.tenant_id, &payload.rule_no])
-            });
-            let now = current_timestamp_string();
-            let row = sqlx::query(
-                r#"
-                INSERT INTO commerce_payment_route_rule
-                    (id, tenant_id, organization_id, rule_no, priority, purchase_type, country_code, currency_code, client_platform, amount_min, amount_max, user_segment, risk_level, channel_id, status, starts_at, ends_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (tenant_id, rule_no) DO UPDATE SET
-                    priority = EXCLUDED.priority,
-                    purchase_type = EXCLUDED.purchase_type,
-                    country_code = EXCLUDED.country_code,
-                    currency_code = EXCLUDED.currency_code,
-                    client_platform = EXCLUDED.client_platform,
-                    amount_min = EXCLUDED.amount_min,
-                    amount_max = EXCLUDED.amount_max,
-                    user_segment = EXCLUDED.user_segment,
-                    risk_level = EXCLUDED.risk_level,
-                    channel_id = EXCLUDED.channel_id,
-                    status = EXCLUDED.status,
-                    starts_at = EXCLUDED.starts_at,
-                    ends_at = EXCLUDED.ends_at,
-                    updated_at = EXCLUDED.updated_at
-                RETURNING id, rule_no, priority, purchase_type, country_code, currency_code, client_platform, amount_min, amount_max, user_segment, risk_level, channel_id, status, starts_at, ends_at
-                "#,
-            )
-            .bind(&id)
-            .bind(&payload.tenant_id)
-            .bind(payload.organization_id.as_deref())
-            .bind(&payload.rule_no)
-            .bind(payload.priority)
-            .bind(payload.purchase_type.as_deref())
-            .bind(payload.country_code.as_deref())
-            .bind(payload.currency_code.as_deref())
-            .bind(payload.client_platform.as_deref())
-            .bind(payload.amount_min.as_deref())
-            .bind(payload.amount_max.as_deref())
-            .bind(payload.user_segment.as_deref())
-            .bind(payload.risk_level.as_deref())
-            .bind(&payload.channel_id)
-            .bind(&payload.status)
-            .bind(payload.starts_at.as_deref())
-            .bind(payload.ends_at.as_deref())
-            .bind(&now)
-            .bind(&now)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to upsert route rule: {error}")))?;
-            Ok(map_route_rule_sqlite(&row))
-        })
-    }
-
-    fn delete_route_rule<'a>(
-        &'a self,
-        scope: BackendTenantScope,
-        route_rule_id: String,
-    ) -> CommerceBackendPaymentAdminFuture<'a, ()> {
-        Box::pin(async move {
-            sqlx::query("DELETE FROM commerce_payment_route_rule WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))")
-                .bind(&route_rule_id)
-                .bind(&scope.tenant_id)
-                .bind(scope.organization_id.as_deref())
-                .bind(scope.organization_id.as_deref())
-                .execute(&self.pool)
-                .await
-                .map_err(|error| {
-                    CommerceServiceError::storage(format!("failed to delete route rule: {error}"))
-                })?;
-            Ok(())
-        })
-    }
-
-    fn list_attempts<'a>(
-        &'a self,
-        query: BackendTenantListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
-        Box::pin(async move {
-            let scope = query.scope;
-            let rows = sqlx::query(
-                r#"
-                SELECT id, payment_intent_id, attempt_no, provider_code, channel_id, amount, currency_code,
-                       status, provider_transaction_id, created_at, COUNT(*) OVER() AS total_count
-                FROM commerce_payment_attempt
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                ORDER BY created_at DESC, id DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .bind(query.limit)
-            .bind(query.offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to list attempts: {error}")))?;
-            let total_items = sqlite_total_count(&rows);
-            let items = rows.iter().map(map_attempt_sqlite).collect();
-            Ok(BackendJsonListPage { items, total_items })
-        })
-    }
-
-    fn list_webhook_events<'a>(
-        &'a self,
-        query: BackendTenantListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
-        Box::pin(async move {
-            let scope = query.scope;
-            let rows = sqlx::query(
-                r#"
-                SELECT id, event_id, provider_code, event_type, status, received_at, processed_at, retries,
-                       COUNT(*) OVER() AS total_count
-                FROM commerce_payment_webhook_event
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                ORDER BY received_at DESC, id DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .bind(query.limit)
-            .bind(query.offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to list webhook events: {error}")))?;
-            let total_items = sqlite_total_count(&rows);
-            let items = rows.iter().map(map_webhook_event_sqlite).collect();
-            Ok(BackendJsonListPage { items, total_items })
-        })
-    }
-
-    fn replay_webhook_event<'a>(
-        &'a self,
-        scope: BackendTenantScope,
-        event_id: String,
-    ) -> CommerceBackendPaymentAdminFuture<'a, WebhookReplayResult> {
-        Box::pin(async move {
-            use sdkwork_payment_repository_sqlx::{
-                replay_stored_webhook_event_sqlite, StoredWebhookReplayResult,
-                WebhookStoredReplayScope,
-            };
-
-            let replay_scope = WebhookStoredReplayScope {
-                tenant_id: scope.tenant_id,
-                organization_id: scope.organization_id,
-            };
-            match replay_stored_webhook_event_sqlite(&self.pool, replay_scope, event_id).await? {
-                StoredWebhookReplayResult::Applied { webhook_event, .. } => {
-                    Ok(WebhookReplayResult::Queued(webhook_event.to_json()))
-                }
-                StoredWebhookReplayResult::NotFound => Ok(WebhookReplayResult::NotFound),
-                StoredWebhookReplayResult::LimitExceeded { current_retries } => {
-                    Ok(WebhookReplayResult::LimitExceeded { current_retries })
-                }
-            }
-        })
-    }
-
-    fn list_reconciliation_runs<'a>(
-        &'a self,
-        query: BackendTenantListQuery,
-    ) -> CommerceBackendPaymentAdminFuture<'a, BackendJsonListPage> {
-        Box::pin(async move {
-            let scope = query.scope;
-            let rows = sqlx::query(
-                r#"
-                SELECT id, run_no, provider_code, provider_account_id, reconciliation_type, period_start,
-                       period_end, status, matched_count, mismatched_count, currency_code, created_at,
-                       COUNT(*) OVER() AS total_count
-                FROM commerce_payment_reconciliation_run
-                WHERE tenant_id = CAST(? AS TEXT)
-                  AND (organization_id IS NULL AND ? IS NULL OR organization_id = CAST(? AS TEXT))
-                ORDER BY created_at DESC, id DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(&scope.tenant_id)
-            .bind(scope.organization_id.as_deref())
-            .bind(scope.organization_id.as_deref())
-            .bind(query.limit)
-            .bind(query.offset)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to list reconciliation runs: {error}")))?;
-            let total_items = sqlite_total_count(&rows);
-            let items = rows.iter().map(map_reconciliation_run_sqlite).collect();
-            Ok(BackendJsonListPage { items, total_items })
-        })
-    }
-
-    fn create_reconciliation_run<'a>(
-        &'a self,
-        payload: BackendReconciliationRunPayload,
-    ) -> CommerceBackendPaymentAdminFuture<'a, serde_json::Value> {
-        Box::pin(async move {
-            let now = current_timestamp_string();
-            let id = stable_storage_id(&[
-                "reconciliation-run",
-                &payload.tenant_id,
-                &payload.provider_account_id,
-                &payload.period_start,
-            ]);
-            let run_no =
-                stable_storage_id(&["recon", &payload.provider_code, &payload.period_start]);
-            let row = sqlx::query(
-                "INSERT INTO commerce_payment_reconciliation_run (id, tenant_id, organization_id, run_no, provider_code, provider_account_id, reconciliation_type, period_start, period_end, status, matched_count, mismatched_count, unmatched_count, total_difference_amount, currency_code, request_no, idempotency_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, 0, 0, '0', ?, ?, ?, ?, ?) RETURNING id, run_no, provider_code, provider_account_id, reconciliation_type, period_start, period_end, status, matched_count, mismatched_count, currency_code, created_at",
-            )
-            .bind(&id)
-            .bind(&payload.tenant_id)
-            .bind(payload.organization_id.as_deref())
-            .bind(&run_no)
-            .bind(&payload.provider_code)
-            .bind(&payload.provider_account_id)
-            .bind(&payload.reconciliation_type)
-            .bind(&payload.period_start)
-            .bind(&payload.period_end)
-            .bind(&payload.currency_code)
-            .bind(&payload.request_no)
-            .bind(&payload.idempotency_key)
-            .bind(&now)
-            .bind(&now)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| CommerceServiceError::storage(format!("failed to create reconciliation run: {error}")))?;
-            Ok(map_reconciliation_run_sqlite(&row))
-        })
-    }
-}
-
 impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
     fn list_payment_methods<'a>(
         &'a self,
@@ -1225,14 +368,11 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             .map_err(|error| {
                 CommerceServiceError::storage(format!("failed to list payment methods: {error}"))
             })?;
-
             let total_items = pg_total_count(&rows);
             let items = rows.iter().map(map_method_row_pg).collect();
-
             Ok(BackendPaymentMethodListPage { items, total_items })
         })
     }
-
     fn upsert_payment_method<'a>(
         &'a self,
         command: UpsertBackendPaymentMethodCommand,
@@ -1245,7 +385,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                 command.organization_id.as_deref().unwrap_or("global"),
                 &command.method_key,
             ]);
-
             let row = sqlx::query(
                 r#"
                 INSERT INTO commerce_payment_method
@@ -1278,11 +417,9 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             .map_err(|error| {
                 CommerceServiceError::storage(format!("failed to upsert payment method: {error}"))
             })?;
-
             Ok(map_method_row_pg(&row))
         })
     }
-
     fn list_provider_accounts<'a>(
         &'a self,
         query: BackendTenantListQuery,
@@ -1352,7 +489,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(BackendJsonListPage { items, total_items })
         })
     }
-
     fn upsert_provider_account<'a>(
         &'a self,
         payload: BackendProviderAccountPayload,
@@ -1483,7 +619,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(pg_provider_account_value(&row))
         })
     }
-
     fn provider_account_ready_for_activation<'a>(
         &'a self,
         scope: BackendTenantScope,
@@ -1530,7 +665,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(ready.is_some())
         })
     }
-
     fn delete_provider_account<'a>(
         &'a self,
         scope: BackendTenantScope,
@@ -1614,7 +748,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(())
         })
     }
-
     fn list_channels<'a>(
         &'a self,
         query: BackendTenantListQuery,
@@ -1659,7 +792,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(BackendJsonListPage { items, total_items })
         })
     }
-
     fn upsert_channel<'a>(
         &'a self,
         payload: BackendPaymentChannelPayload,
@@ -1714,7 +846,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             }))
         })
     }
-
     fn list_route_rules<'a>(
         &'a self,
         query: BackendTenantListQuery,
@@ -1745,7 +876,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(BackendJsonListPage { items, total_items })
         })
     }
-
     fn upsert_route_rule<'a>(
         &'a self,
         payload: BackendRouteRulePayload,
@@ -1802,7 +932,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(map_route_rule_pg(&row))
         })
     }
-
     fn delete_route_rule<'a>(
         &'a self,
         scope: BackendTenantScope,
@@ -1823,7 +952,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(())
         })
     }
-
     fn list_attempts<'a>(
         &'a self,
         query: BackendTenantListQuery,
@@ -1853,7 +981,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(BackendJsonListPage { items, total_items })
         })
     }
-
     fn list_webhook_events<'a>(
         &'a self,
         query: BackendTenantListQuery,
@@ -1883,7 +1010,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(BackendJsonListPage { items, total_items })
         })
     }
-
     fn replay_webhook_event<'a>(
         &'a self,
         scope: BackendTenantScope,
@@ -1894,7 +1020,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
                 replay_stored_webhook_event_postgres, StoredWebhookReplayResult,
                 WebhookStoredReplayScope,
             };
-
             let replay_scope = WebhookStoredReplayScope {
                 tenant_id: scope.tenant_id,
                 organization_id: scope.organization_id,
@@ -1910,7 +1035,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             }
         })
     }
-
     fn list_reconciliation_runs<'a>(
         &'a self,
         query: BackendTenantListQuery,
@@ -1941,7 +1065,6 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
             Ok(BackendJsonListPage { items, total_items })
         })
     }
-
     fn create_reconciliation_run<'a>(
         &'a self,
         payload: BackendReconciliationRunPayload,
@@ -1979,15 +1102,9 @@ impl CommerceBackendPaymentAdminStore for PostgresBackendPaymentAdminStore {
         })
     }
 }
-
-pub fn backend_payment_admin_router_with_sqlite_pool(pool: SqlitePool) -> Router {
-    build_backend_payment_admin_router(Arc::new(SqliteBackendPaymentAdminStore::new(pool)))
-}
-
 pub fn backend_payment_admin_router_with_postgres_pool(pool: PgPool) -> Router {
     build_backend_payment_admin_router(Arc::new(PostgresBackendPaymentAdminStore::new(pool)))
 }
-
 pub fn build_backend_payment_admin_router(
     store: Arc<dyn CommerceBackendPaymentAdminStore>,
 ) -> Router {
@@ -2035,7 +1152,6 @@ pub fn build_backend_payment_admin_router(
         )
         .with_state(BackendPaymentAdminState { store })
 }
-
 async fn list_methods(
     State(state): State<BackendPaymentAdminState>,
     Query(params): Query<BackendPaymentMethodListParams>,
@@ -2055,7 +1171,6 @@ async fn list_methods(
         offset: page_params.offset,
         limit: page_params.page_size,
     };
-
     match state.store.list_payment_methods(query).await {
         Ok(page) => {
             let items: Vec<_> = page.items.into_iter().map(map_method).collect();
@@ -2066,7 +1181,6 @@ async fn list_methods(
         }
     }
 }
-
 async fn create_method(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2098,7 +1212,6 @@ async fn create_method(
     };
     let status = body.status.unwrap_or_else(|| "active".to_owned());
     let sort_order = body.sort_order.unwrap_or(0);
-
     let command = UpsertBackendPaymentMethodCommand {
         tenant_id: subject.tenant_id,
         organization_id: subject.organization_id,
@@ -2110,13 +1223,11 @@ async fn create_method(
         request_no: write_headers.request_no,
         idempotency_key: write_headers.idempotency_key,
     };
-
     match state.store.upsert_payment_method(command).await {
         Ok(view) => success_created_item(ctx, map_method(view)),
         Err(error) => backend_payment_error_response(ctx, "payment method upsert failed", error),
     }
 }
-
 async fn update_method(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2154,13 +1265,11 @@ async fn update_method(
         request_no: write_headers.request_no,
         idempotency_key: write_headers.idempotency_key,
     };
-
     match state.store.upsert_payment_method(command).await {
         Ok(view) => success_item(ctx, map_method(view)),
         Err(error) => backend_payment_error_response(ctx, "payment method upsert failed", error),
     }
 }
-
 async fn list_provider_accounts(
     State(state): State<BackendPaymentAdminState>,
     Query(params): Query<BackendListQueryParams>,
@@ -2190,7 +1299,6 @@ async fn list_provider_accounts(
         ),
     }
 }
-
 async fn create_provider_account(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2201,7 +1309,6 @@ async fn create_provider_account(
     let ctx = request_context.as_ref().map(|Extension(value)| value);
     upsert_provider_account_inner(state, runtime_context, ctx, headers, None, body).await
 }
-
 async fn update_provider_account(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2221,7 +1328,6 @@ async fn update_provider_account(
     )
     .await
 }
-
 async fn delete_provider_account(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2248,7 +1354,6 @@ async fn delete_provider_account(
         }
     }
 }
-
 async fn upsert_provider_account_inner(
     state: BackendPaymentAdminState,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2506,7 +1611,6 @@ async fn upsert_provider_account_inner(
         }
     }
 }
-
 async fn list_channels(
     State(state): State<BackendPaymentAdminState>,
     Query(params): Query<BackendListQueryParams>,
@@ -2534,7 +1638,6 @@ async fn list_channels(
         }
     }
 }
-
 async fn create_channel(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2600,7 +1703,6 @@ async fn create_channel(
         Err(error) => backend_payment_error_response(ctx, "payment channel upsert failed", error),
     }
 }
-
 async fn list_route_rules(
     State(state): State<BackendPaymentAdminState>,
     Query(params): Query<BackendListQueryParams>,
@@ -2628,7 +1730,6 @@ async fn list_route_rules(
         }
     }
 }
-
 async fn create_route_rule(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2639,7 +1740,6 @@ async fn create_route_rule(
     let ctx = request_context.as_ref().map(|Extension(value)| value);
     upsert_route_rule_inner(state, runtime_context, ctx, headers, None, body).await
 }
-
 async fn update_route_rule(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2659,7 +1759,6 @@ async fn update_route_rule(
     )
     .await
 }
-
 async fn upsert_route_rule_inner(
     state: BackendPaymentAdminState,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2724,7 +1823,6 @@ async fn upsert_route_rule_inner(
         }
     }
 }
-
 async fn delete_route_rule(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2747,7 +1845,6 @@ async fn delete_route_rule(
         }
     }
 }
-
 async fn list_attempts(
     State(state): State<BackendPaymentAdminState>,
     Query(params): Query<BackendListQueryParams>,
@@ -2775,7 +1872,6 @@ async fn list_attempts(
         }
     }
 }
-
 async fn list_webhook_events(
     State(state): State<BackendPaymentAdminState>,
     Query(params): Query<BackendListQueryParams>,
@@ -2803,7 +1899,6 @@ async fn list_webhook_events(
         }
     }
 }
-
 async fn replay_webhook_event(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2845,7 +1940,6 @@ async fn replay_webhook_event(
         Err(error) => backend_payment_error_response(ctx, "payment webhook replay failed", error),
     }
 }
-
 async fn list_reconciliation_runs(
     State(state): State<BackendPaymentAdminState>,
     Query(params): Query<BackendListQueryParams>,
@@ -2875,7 +1969,6 @@ async fn list_reconciliation_runs(
         ),
     }
 }
-
 async fn create_reconciliation_run(
     State(state): State<BackendPaymentAdminState>,
     runtime_context: Option<Extension<IamAppContext>>,
@@ -2962,7 +2055,6 @@ async fn create_reconciliation_run(
         }
     }
 }
-
 fn map_method(value: BackendPaymentMethodView) -> BackendPaymentMethodResponse {
     BackendPaymentMethodResponse {
         id: value.id,
@@ -2973,7 +2065,6 @@ fn map_method(value: BackendPaymentMethodView) -> BackendPaymentMethodResponse {
         sort_order: value.sort_order,
     }
 }
-
 fn backend_payment_error_response(
     ctx: Option<&WebRequestContext>,
     _context: &str,
@@ -2981,26 +2072,9 @@ fn backend_payment_error_response(
 ) -> Response {
     map_service_error(ctx, error)
 }
-
 fn unauthorized_response(ctx: Option<&WebRequestContext>, message: impl Into<String>) -> Response {
     unauthorized(ctx, message)
 }
-
-fn map_method_row_sqlite(row: &SqliteRow) -> BackendPaymentMethodView {
-    BackendPaymentMethodView {
-        id: sqlite_string(row, "id"),
-        tenant_id: sqlite_string(row, "tenant_id"),
-        organization_id: sqlite_optional_string(row, "organization_id"),
-        method_key: sqlite_string(row, "method_key"),
-        display_name: sqlite_string(row, "display_name"),
-        provider_code: sqlite_string(row, "provider_code"),
-        status: sqlite_string(row, "status"),
-        sort_order: row.try_get::<i64, _>("sort_order").unwrap_or(0),
-        created_at: sqlite_string(row, "created_at"),
-        updated_at: sqlite_string(row, "updated_at"),
-    }
-}
-
 fn map_method_row_pg(row: &PgRow) -> BackendPaymentMethodView {
     BackendPaymentMethodView {
         id: pg_string(row, "id"),
@@ -3015,27 +2089,6 @@ fn map_method_row_pg(row: &PgRow) -> BackendPaymentMethodView {
         updated_at: pg_string(row, "updated_at"),
     }
 }
-
-fn map_route_rule_sqlite(row: &SqliteRow) -> serde_json::Value {
-    serde_json::json!({
-        "id": sqlite_string(row, "id"),
-        "ruleNo": sqlite_string(row, "rule_no"),
-        "priority": row.try_get::<i64,_>("priority").unwrap_or(0),
-        "purchaseType": sqlite_optional_string(row, "purchase_type"),
-        "countryCode": sqlite_optional_string(row, "country_code"),
-        "currencyCode": sqlite_optional_string(row, "currency_code"),
-        "clientPlatform": sqlite_optional_string(row, "client_platform"),
-        "amountMin": sqlite_optional_string(row, "amount_min"),
-        "amountMax": sqlite_optional_string(row, "amount_max"),
-        "userSegment": sqlite_optional_string(row, "user_segment"),
-        "riskLevel": sqlite_optional_string(row, "risk_level"),
-        "channelId": sqlite_string(row, "channel_id"),
-        "status": sqlite_string(row, "status"),
-        "startsAt": sqlite_optional_string(row, "starts_at"),
-        "endsAt": sqlite_optional_string(row, "ends_at"),
-    })
-}
-
 fn map_route_rule_pg(row: &PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": pg_string(row, "id"),
@@ -3055,22 +2108,6 @@ fn map_route_rule_pg(row: &PgRow) -> serde_json::Value {
         "endsAt": pg_optional_string(row, "ends_at"),
     })
 }
-
-fn map_attempt_sqlite(row: &SqliteRow) -> serde_json::Value {
-    serde_json::json!({
-        "id": sqlite_string(row, "id"),
-        "paymentIntentId": sqlite_string(row, "payment_intent_id"),
-        "attemptNo": sqlite_string(row, "attempt_no"),
-        "providerCode": sqlite_string(row, "provider_code"),
-        "channelId": sqlite_string(row, "channel_id"),
-        "amount": sqlite_string(row, "amount"),
-        "currencyCode": sqlite_string(row, "currency_code"),
-        "status": sqlite_string(row, "status"),
-        "providerTransactionId": sqlite_optional_string(row, "provider_transaction_id"),
-        "createdAt": sqlite_string(row, "created_at"),
-    })
-}
-
 fn map_attempt_pg(row: &PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": pg_string(row, "id"),
@@ -3085,20 +2122,6 @@ fn map_attempt_pg(row: &PgRow) -> serde_json::Value {
         "createdAt": pg_string(row, "created_at"),
     })
 }
-
-fn map_webhook_event_sqlite(row: &SqliteRow) -> serde_json::Value {
-    serde_json::json!({
-        "id": sqlite_string(row, "id"),
-        "eventId": sqlite_string(row, "event_id"),
-        "providerCode": sqlite_string(row, "provider_code"),
-        "eventType": sqlite_string(row, "event_type"),
-        "status": sqlite_string(row, "status"),
-        "receivedAt": sqlite_string(row, "received_at"),
-        "processedAt": sqlite_optional_string(row, "processed_at"),
-        "retries": row.try_get::<i64,_>("retries").unwrap_or(0),
-    })
-}
-
 fn map_webhook_event_pg(row: &PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": pg_string(row, "id"),
@@ -3111,24 +2134,6 @@ fn map_webhook_event_pg(row: &PgRow) -> serde_json::Value {
         "retries": row.try_get::<i64,_>("retries").unwrap_or(0),
     })
 }
-
-fn map_reconciliation_run_sqlite(row: &SqliteRow) -> serde_json::Value {
-    serde_json::json!({
-        "id": sqlite_string(row, "id"),
-        "runNo": sqlite_string(row, "run_no"),
-        "providerCode": sqlite_string(row, "provider_code"),
-        "providerAccountId": sqlite_string(row, "provider_account_id"),
-        "reconciliationType": sqlite_string(row, "reconciliation_type"),
-        "periodStart": sqlite_string(row, "period_start"),
-        "periodEnd": sqlite_string(row, "period_end"),
-        "status": sqlite_string(row, "status"),
-        "matchedCount": row.try_get::<i64,_>("matched_count").unwrap_or(0),
-        "mismatchedCount": row.try_get::<i64,_>("mismatched_count").unwrap_or(0),
-        "currencyCode": sqlite_string(row, "currency_code"),
-        "createdAt": sqlite_string(row, "created_at"),
-    })
-}
-
 fn map_reconciliation_run_pg(row: &PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": pg_string(row, "id"),
@@ -3145,23 +2150,11 @@ fn map_reconciliation_run_pg(row: &PgRow) -> serde_json::Value {
         "createdAt": pg_string(row, "created_at"),
     })
 }
-
-fn sqlite_optional_string(row: &SqliteRow, column: &str) -> Option<String> {
-    row.try_get::<Option<String>, _>(column).ok().flatten()
-}
-
-fn sqlite_total_count(rows: &[SqliteRow]) -> i64 {
-    rows.first()
-        .and_then(|row| row.try_get::<i64, _>("total_count").ok())
-        .unwrap_or(0)
-}
-
 fn pg_total_count(rows: &[PgRow]) -> i64 {
     rows.first()
         .and_then(|row| row.try_get::<i64, _>("total_count").ok())
         .unwrap_or(0)
 }
-
 #[allow(clippy::result_large_err)]
 fn require_trimmed_string(
     ctx: Option<&WebRequestContext>,
@@ -3173,23 +2166,6 @@ fn require_trimmed_string(
         _ => Err(validation(ctx, format!("{field} is required"))),
     }
 }
-
-fn sqlite_string(row: &SqliteRow, column: &str) -> String {
-    sqlite_optional_string(row, column).unwrap_or_default()
-}
-
-fn sqlite_json(row: &SqliteRow, column: &str) -> Value {
-    sqlite_optional_string(row, column)
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_else(|| serde_json::json!({}))
-}
-
-fn sqlite_bool(row: &SqliteRow, column: &str) -> bool {
-    row.try_get::<bool, _>(column)
-        .or_else(|_| row.try_get::<i64, _>(column).map(|value| value != 0))
-        .unwrap_or(false)
-}
-
 fn credential_storage(secret_ref: &str) -> &'static str {
     if secret_ref.starts_with("database:") {
         "database_encrypted"
@@ -3199,32 +2175,6 @@ fn credential_storage(secret_ref: &str) -> &'static str {
         "legacy_reference"
     }
 }
-
-fn sqlite_provider_account_value(row: &SqliteRow) -> Value {
-    serde_json::json!({
-        "id": sqlite_string(row, "id"),
-        "accountNo": sqlite_string(row, "account_no"),
-        "providerCode": sqlite_string(row, "provider_code"),
-        "merchantId": sqlite_string(row, "merchant_id"),
-        "accountName": sqlite_optional_string(row, "account_name"),
-        "accountNameI18n": sqlite_json(row, "account_name_i18n"),
-        "accountMode": sqlite_string(row, "account_mode"),
-        "partnerProviderAccountId": sqlite_optional_string(row, "partner_provider_account_id"),
-        "environment": sqlite_string(row, "environment"),
-        "countryCode": sqlite_string(row, "country_code"),
-        "settlementCurrency": sqlite_string(row, "settlement_currency"),
-        "hasPrimarySecret": sqlite_bool(row, "has_primary_secret") || sqlite_string(row, "secret_ref").starts_with("database:"),
-        "hasWebhookSecret": sqlite_bool(row, "has_webhook_secret") || sqlite_optional_string(row, "webhook_secret_ref").is_some_and(|value| value.starts_with("database:")),
-        "hasCertificate": sqlite_bool(row, "has_certificate") || sqlite_optional_string(row, "certificate_ref").is_some_and(|value| value.starts_with("database:")),
-        "credentialStorage": credential_storage(&sqlite_string(row, "secret_ref")),
-        "capabilities": sqlite_json(row, "capabilities"),
-        "metadata": sqlite_json(row, "metadata"),
-        "status": sqlite_string(row, "status"),
-        "createdAt": sqlite_string(row, "created_at"),
-        "updatedAt": sqlite_string(row, "updated_at"),
-    })
-}
-
 fn pg_optional_string(row: &PgRow, column: &str) -> Option<String> {
     row.try_get::<Option<String>, _>(column)
         .ok()
@@ -3238,20 +2188,16 @@ fn pg_optional_string(row: &PgRow, column: &str) -> Option<String> {
             .map(|value| value.to_rfc3339())
         })
 }
-
 fn pg_string(row: &PgRow, column: &str) -> String {
     pg_optional_string(row, column).unwrap_or_default()
 }
-
 fn pg_bool(row: &PgRow, column: &str) -> bool {
     row.try_get::<bool, _>(column).unwrap_or(false)
 }
-
 fn pg_json(row: &PgRow, column: &str) -> Value {
     row.try_get::<Value, _>(column)
         .unwrap_or_else(|_| serde_json::json!({}))
 }
-
 fn pg_provider_account_value(row: &PgRow) -> Value {
     serde_json::json!({
         "id": pg_string(row, "id"),
@@ -3276,7 +2222,6 @@ fn pg_provider_account_value(row: &PgRow) -> Value {
         "updatedAt": pg_string(row, "updated_at"),
     })
 }
-
 #[allow(clippy::result_large_err)]
 fn validate_backend_write_payload(
     ctx: Option<&WebRequestContext>,
@@ -3290,7 +2235,6 @@ fn validate_backend_write_payload(
     })
     .map_err(|error| backend_write_header_error(ctx, error))
 }
-
 fn backend_write_header_error(
     ctx: Option<&WebRequestContext>,
     error: WriteCommandHeaderError,
@@ -3300,332 +2244,9 @@ fn backend_write_header_error(
     };
     validation(ctx, message)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn sqlite_provider_account_upsert_preserves_commercial_configuration() {
-        crate::ensure_test_payment_credential_cipher();
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("sqlite pool");
-        sqlx::query(
-            r#"
-            CREATE TABLE commerce_payment_provider_account (
-                id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                organization_id TEXT,
-                account_no TEXT NOT NULL,
-                provider_code TEXT NOT NULL,
-                merchant_id TEXT,
-                account_name TEXT,
-                account_name_i18n TEXT NOT NULL DEFAULT '{}',
-                account_mode TEXT NOT NULL DEFAULT 'direct',
-                partner_provider_account_id TEXT,
-                environment TEXT NOT NULL,
-                country_code TEXT,
-                settlement_currency TEXT NOT NULL,
-                secret_ref TEXT NOT NULL,
-                webhook_secret_ref TEXT,
-                certificate_ref TEXT,
-                capabilities TEXT NOT NULL DEFAULT '{}',
-                metadata TEXT NOT NULL DEFAULT '{}',
-                status TEXT NOT NULL,
-                certificate_expires_at TEXT,
-                last_tested_at TEXT,
-                last_test_status TEXT,
-                version INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                deleted_at TEXT
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .expect("provider account table");
-        sqlx::query(
-            "CREATE TABLE commerce_payment_provider_credential (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, credential_kind TEXT NOT NULL, ciphertext TEXT NOT NULL, encryption_key_id TEXT NOT NULL, encryption_algorithm TEXT NOT NULL, fingerprint_sha256 TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, rotated_at TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT)",
-        )
-        .execute(&pool)
-        .await
-        .expect("provider credential table");
-        sqlx::query(
-            "CREATE UNIQUE INDEX ux_provider_account_scope ON commerce_payment_provider_account (tenant_id, COALESCE(organization_id, ''), account_no) WHERE deleted_at IS NULL",
-        )
-        .execute(&pool)
-        .await
-        .expect("provider account unique index");
-
-        let store = SqliteBackendPaymentAdminStore::new(pool);
-        let payload = BackendProviderAccountPayload {
-            id: None,
-            tenant_id: "100001".to_owned(),
-            organization_id: Some("0".to_owned()),
-            account_no: "wechat-live-primary".to_owned(),
-            provider_code: Some("wechat_pay".to_owned()),
-            merchant_id: Some("1900000109".to_owned()),
-            account_name: Some("WeChat Pay Live Primary".to_owned()),
-            environment: Some("production".to_owned()),
-            country_code: Some("CN".to_owned()),
-            settlement_currency: Some("CNY".to_owned()),
-            secret_ref: Some("WECHAT_PAY_PRIVATE_KEY_PEM".to_owned()),
-            webhook_secret_ref: Some("WECHAT_PAY_API_V3_KEY".to_owned()),
-            certificate_ref: Some("WECHAT_PAY_PLATFORM_PUBLIC_KEY_PEM".to_owned()),
-            credential_write: sdkwork_payment_repository_sqlx::ProviderCredentialWrite {
-                primary_secret: Some("test-private-key-material".to_owned()),
-                ..sdkwork_payment_repository_sqlx::ProviderCredentialWrite::default()
-            },
-            account_mode: Some("direct".to_owned()),
-            partner_provider_account_id: None,
-            capabilities: Some(serde_json::json!({"pay": true, "refund": true})),
-            metadata: Some(serde_json::json!({
-                "appId": "wx-live-app-id",
-                "merchantSerialNo": "SERIAL-001"
-            })),
-            status: Some("active".to_owned()),
-        };
-
-        let saved = store
-            .upsert_provider_account(payload.clone())
-            .await
-            .expect("upsert provider account");
-        assert_eq!(saved["metadata"]["appId"], "wx-live-app-id");
-        assert_eq!(saved["capabilities"]["refund"], true);
-        assert_eq!(saved["accountName"], "WeChat Pay Live Primary");
-        assert_eq!(saved["accountNameI18n"], serde_json::json!({}));
-        assert_eq!(saved["hasPrimarySecret"], false);
-        assert_eq!(saved["credentialStorage"], "legacy_reference");
-        store
-            .upsert_provider_account(payload)
-            .await
-            .expect("idempotently upsert provider account");
-
-        let updated = store
-            .upsert_provider_account(BackendProviderAccountPayload {
-                id: saved["id"].as_str().map(str::to_owned),
-                tenant_id: "100001".to_owned(),
-                organization_id: Some("0".to_owned()),
-                account_no: "wechat-live-primary".to_owned(),
-                provider_code: None,
-                merchant_id: None,
-                account_name: None,
-                environment: None,
-                country_code: None,
-                settlement_currency: None,
-                secret_ref: None,
-                webhook_secret_ref: None,
-                certificate_ref: None,
-                credential_write: sdkwork_payment_repository_sqlx::ProviderCredentialWrite::default(
-                ),
-                account_mode: None,
-                partner_provider_account_id: None,
-                capabilities: None,
-                metadata: Some(serde_json::json!({
-                    "appId": "wx-live-app-id-2",
-                    "merchantSerialNo": "SERIAL-002"
-                })),
-                status: None,
-            })
-            .await
-            .expect("partially update provider account");
-        assert_eq!(updated["merchantId"], "1900000109");
-        assert_eq!(updated["providerCode"], "wechat_pay");
-        assert_eq!(updated["metadata"]["merchantSerialNo"], "SERIAL-002");
-
-        let page = store
-            .list_provider_accounts(BackendTenantListQuery {
-                scope: BackendTenantScope {
-                    tenant_id: "100001".to_owned(),
-                    organization_id: Some("0".to_owned()),
-                },
-                offset: 0,
-                limit: 20,
-            })
-            .await
-            .expect("list provider accounts");
-        assert_eq!(page.total_items, 1);
-        assert_eq!(page.items[0]["metadata"]["merchantSerialNo"], "SERIAL-002");
-        assert_eq!(page.items[0]["hasPrimarySecret"], true);
-        assert_eq!(page.items[0]["hasWebhookSecret"], false);
-        assert!(page.items[0].get("secretRef").is_none());
-        assert!(page.items[0].get("ciphertext").is_none());
-        let ciphertext = sqlx::query_scalar::<_, String>("SELECT ciphertext FROM commerce_payment_provider_credential WHERE provider_account_id = ? AND status = 'active' AND credential_kind = 'primary_secret'")
-            .bind(saved["id"].as_str().expect("provider account id"))
-            .fetch_one(&store.pool)
-            .await
-            .expect("stored encrypted primary secret");
-        assert!(!ciphertext.contains("test-private-key-material"));
-
-        sqlx::query(
-            "UPDATE commerce_payment_provider_account SET last_tested_at = '2026-07-19T12:00:00Z', last_test_status = 'success', updated_at = '2026-07-19T12:00:00Z' WHERE id = ?",
-        )
-        .bind(saved["id"].as_str())
-        .execute(&store.pool)
-        .await
-        .expect("mark dry-run success");
-        assert!(store
-            .provider_account_ready_for_activation(
-                BackendTenantScope {
-                    tenant_id: "100001".to_owned(),
-                    organization_id: Some("0".to_owned()),
-                },
-                saved["id"].as_str().unwrap().to_owned(),
-            )
-            .await
-            .expect("activation readiness"));
-        sqlx::query(
-            "INSERT INTO commerce_payment_provider_account SELECT 'provider-account-duplicate', tenant_id, organization_id, 'wechat-live-secondary', provider_code, merchant_id, account_name, account_name_i18n, account_mode, partner_provider_account_id, environment, country_code, settlement_currency, secret_ref, webhook_secret_ref, certificate_ref, capabilities, metadata, 'active', certificate_expires_at, last_tested_at, last_test_status, version, created_at, updated_at, deleted_at FROM commerce_payment_provider_account WHERE id = ?",
-        )
-        .bind(saved["id"].as_str())
-        .execute(&store.pool)
-        .await
-        .expect("insert active duplicate provider account");
-        assert!(!store
-            .provider_account_ready_for_activation(
-                BackendTenantScope {
-                    tenant_id: "100001".to_owned(),
-                    organization_id: Some("0".to_owned()),
-                },
-                saved["id"].as_str().unwrap().to_owned(),
-            )
-            .await
-            .expect("duplicate provider activation readiness"));
-        sqlx::query(
-            "DELETE FROM commerce_payment_provider_account WHERE id = 'provider-account-duplicate'",
-        )
-        .execute(&store.pool)
-        .await
-        .expect("remove active duplicate provider account");
-        sqlx::query(
-            "UPDATE commerce_payment_provider_account SET metadata = '{\"configurationState\":\"mock\"}' WHERE id = ?",
-        )
-        .bind(saved["id"].as_str())
-        .execute(&store.pool)
-        .await
-        .expect("mark mock configuration");
-        assert!(!store
-            .provider_account_ready_for_activation(
-                BackendTenantScope {
-                    tenant_id: "100001".to_owned(),
-                    organization_id: Some("0".to_owned()),
-                },
-                saved["id"].as_str().unwrap().to_owned(),
-            )
-            .await
-            .expect("mock activation readiness"));
-    }
-
-    #[tokio::test]
-    async fn sqlite_provider_account_delete_soft_deletes_and_guards_references() {
-        crate::ensure_test_payment_credential_cipher();
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("sqlite pool");
-        for statement in [
-            "CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, account_no TEXT NOT NULL, provider_code TEXT NOT NULL, merchant_id TEXT, account_name TEXT, account_name_i18n TEXT NOT NULL DEFAULT '{}', account_mode TEXT NOT NULL DEFAULT 'direct', partner_provider_account_id TEXT, environment TEXT NOT NULL, country_code TEXT, settlement_currency TEXT NOT NULL, secret_ref TEXT NOT NULL, webhook_secret_ref TEXT, certificate_ref TEXT, capabilities TEXT NOT NULL DEFAULT '{}', metadata TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, certificate_expires_at TEXT, last_tested_at TEXT, last_test_status TEXT, version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
-            "CREATE TABLE commerce_payment_channel (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT, method_id TEXT, provider_code TEXT NOT NULL, scene_code TEXT NOT NULL DEFAULT 'api', currency_code TEXT NOT NULL DEFAULT 'CNY', status TEXT NOT NULL DEFAULT 'active', priority INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, deleted_at TEXT)",
-            "CREATE TABLE commerce_payment_sub_merchant (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, external_sub_merchant_id TEXT NOT NULL, sub_appid TEXT, sub_mch_id TEXT, display_name TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
-            "CREATE TABLE commerce_payment_provider_credential (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, credential_kind TEXT NOT NULL, ciphertext TEXT NOT NULL, encryption_key_id TEXT NOT NULL, encryption_algorithm TEXT NOT NULL, fingerprint_sha256 TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, rotated_at TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT)",
-        ] {
-            sqlx::query(sqlx::AssertSqlSafe(statement))
-                .execute(&pool)
-                .await
-                .expect("test schema");
-        }
-        let store = SqliteBackendPaymentAdminStore::new(pool);
-        let scope = BackendTenantScope {
-            tenant_id: "tenant-delete".to_owned(),
-            organization_id: Some("org-delete".to_owned()),
-        };
-        sqlx::query("INSERT INTO commerce_payment_provider_account (id, tenant_id, organization_id, account_no, provider_code, environment, settlement_currency, secret_ref, status, created_at, updated_at) VALUES ('account-delete-1', 'tenant-delete', 'org-delete', 'delete-me', 'sandbox', 'sandbox', 'CNY', 'ref', 'inactive', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
-            .execute(&store.pool)
-            .await
-            .expect("provider account");
-
-        // 删除成功后列表不再返回该账户。
-        store
-            .delete_provider_account(scope.clone(), "account-delete-1".to_owned())
-            .await
-            .expect("delete provider account");
-        let page = store
-            .list_provider_accounts(BackendTenantListQuery {
-                scope: scope.clone(),
-                offset: 0,
-                limit: 20,
-            })
-            .await
-            .expect("list provider accounts");
-        assert_eq!(page.total_items, 0);
-
-        // 重复删除返回 NotFound。
-        let error = store
-            .delete_provider_account(scope.clone(), "account-delete-1".to_owned())
-            .await
-            .expect_err("delete already-deleted provider account");
-        assert_eq!(error.code(), "not-found");
-
-        // 其他租户删除返回 NotFound（租户隔离）。
-        let error = store
-            .delete_provider_account(
-                BackendTenantScope {
-                    tenant_id: "tenant-other".to_owned(),
-                    organization_id: Some("org-other".to_owned()),
-                },
-                "account-delete-1".to_owned(),
-            )
-            .await
-            .expect_err("delete provider account across tenants");
-        assert_eq!(error.code(), "not-found");
-
-        // 被未删除渠道引用时返回 Conflict。
-        sqlx::query("INSERT INTO commerce_payment_provider_account (id, tenant_id, organization_id, account_no, provider_code, environment, settlement_currency, secret_ref, status, created_at, updated_at) VALUES ('account-referenced', 'tenant-delete', 'org-delete', 'referenced', 'sandbox', 'sandbox', 'CNY', 'ref', 'inactive', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
-            .execute(&store.pool)
-            .await
-            .expect("referenced provider account");
-        sqlx::query("INSERT INTO commerce_payment_channel (id, tenant_id, organization_id, provider_account_id, provider_code, status) VALUES ('channel-1', 'tenant-delete', 'org-delete', 'account-referenced', 'sandbox', 'active')")
-            .execute(&store.pool)
-            .await
-            .expect("referencing channel");
-        let error = store
-            .delete_provider_account(scope.clone(), "account-referenced".to_owned())
-            .await
-            .expect_err("delete referenced provider account");
-        assert_eq!(error.code(), "conflict");
-
-        // 解除渠道引用后删除成功。
-        sqlx::query("DELETE FROM commerce_payment_channel WHERE id = 'channel-1'")
-            .execute(&store.pool)
-            .await
-            .expect("remove referencing channel");
-        store
-            .delete_provider_account(scope.clone(), "account-referenced".to_owned())
-            .await
-            .expect("delete provider account after unbinding");
-
-        // 被未删除子商户引用时返回 Conflict。
-        sqlx::query("INSERT INTO commerce_payment_provider_account (id, tenant_id, organization_id, account_no, provider_code, environment, settlement_currency, secret_ref, status, created_at, updated_at) VALUES ('account-submerchant', 'tenant-delete', 'org-delete', 'with-sub', 'stripe', 'sandbox', 'CNY', 'ref', 'inactive', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
-            .execute(&store.pool)
-            .await
-            .expect("sub-merchant provider account");
-        sqlx::query("INSERT INTO commerce_payment_sub_merchant (id, tenant_id, organization_id, provider_account_id, external_sub_merchant_id, status, created_at, updated_at) VALUES ('sub-1', 'tenant-delete', 'org-delete', 'account-submerchant', 'ext-sub-1', 'active', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
-            .execute(&store.pool)
-            .await
-            .expect("referencing sub-merchant");
-        let error = store
-            .delete_provider_account(scope.clone(), "account-submerchant".to_owned())
-            .await
-            .expect_err("delete provider account referenced by sub-merchant");
-        assert_eq!(error.code(), "conflict");
-    }
-}
-
 fn current_timestamp_string() -> String {
     sqlx::types::chrono::Utc::now().to_rfc3339()
 }
-
 fn stable_storage_id(parts: &[&str]) -> String {
     parts
         .iter()

@@ -14,9 +14,8 @@ use sdkwork_payment_providers::{
     ProviderCredentialBundle,
 };
 use sdkwork_payment_repository_sqlx::{
-    enrich_owner_payment_attempt_postgres, enrich_owner_payment_attempt_sqlite,
+    enrich_owner_payment_attempt_postgres,
     OwnerOrderPaymentEnrichmentContext, PostgresCommercePaymentIntentStore,
-    SqliteCommercePaymentIntentStore,
 };
 use sdkwork_payment_service::{
     CreateOwnerPaymentAttemptCommand, CreateOwnerPaymentAttemptOutcome,
@@ -27,7 +26,7 @@ use sdkwork_utils_rust::OffsetListPageParams;
 use sdkwork_web_core::WebRequestContext;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::{postgres::PgRow, sqlite::SqliteRow, PgPool, Row, SqlitePool};
+use sqlx::{postgres::PgRow, PgPool, Row};
 
 use crate::api_response::{
     accepted_async_command, conflict, map_service_error, not_found, success_created_item,
@@ -38,7 +37,6 @@ use crate::subject::{backend_runtime_subject_from_extension, AppRuntimeSubject};
 
 #[derive(Clone)]
 enum IntegrationPool {
-    Sqlite(SqlitePool),
     Postgres(PgPool),
 }
 
@@ -213,11 +211,6 @@ pub fn build_backend_payment_integration_router(host: Arc<PaymentServiceHost>) -
     build_router(IntegrationState { pool })
 }
 
-pub fn backend_payment_integration_router_with_sqlite_pool(pool: SqlitePool) -> Router {
-    build_router(IntegrationState {
-        pool: IntegrationPool::Sqlite(pool),
-    })
-}
 
 pub fn backend_payment_integration_router_with_postgres_pool(pool: PgPool) -> Router {
     build_router(IntegrationState {
@@ -811,48 +804,7 @@ struct TestPaymentMethodRecord {
 /// Provider-enriched intent store for the test payment flow. Mirrors the
 /// app-api `ProviderEnriched*PaymentIntents` wrappers so the attempt checkout
 /// drives the real provider adapter (WeChat native code_url, Alipay QR, ...).
-struct SqliteTestPaymentStore {
-    inner: Arc<SqliteCommercePaymentIntentStore>,
-    pool: SqlitePool,
-    registry: Arc<PaymentProviderRegistry>,
-    credentials: ProviderCredentialBundle,
-}
 
-impl SqliteTestPaymentStore {
-    async fn create_owner_payment_intent(
-        &self,
-        command: CreateOwnerPaymentIntentCommand,
-    ) -> Result<PaymentIntentView, sdkwork_contract_service::CommerceServiceError> {
-        self.inner.create_owner_payment_intent(command).await
-    }
-
-    async fn create_owner_payment_attempt(
-        &self,
-        command: CreateOwnerPaymentAttemptCommand,
-    ) -> Result<CreateOwnerPaymentAttemptOutcome, sdkwork_contract_service::CommerceServiceError> {
-        let registry = self.registry.clone();
-        let credentials = self.credentials.clone();
-        let pool = self.pool.clone();
-        let inner = self.inner.clone();
-        let tenant_id = command.tenant_id.clone();
-        let organization_id = command.organization_id.clone();
-        let outcome = inner.create_owner_payment_attempt(command).await?;
-        let order_id = outcome.order_id.clone();
-        enrich_owner_payment_attempt_sqlite(
-            &pool,
-            OwnerOrderPaymentEnrichmentContext {
-                deployment_registry: &registry,
-                credentials: &credentials,
-                tenant_id: &tenant_id,
-                organization_id: organization_id.as_deref(),
-                order_id: &order_id,
-                payment_scene: None,
-            },
-            outcome,
-        )
-        .await
-    }
-}
 
 struct PostgresTestPaymentStore {
     inner: Arc<PostgresCommercePaymentIntentStore>,
@@ -1033,19 +985,6 @@ async fn create_test_payment_checkout(
         )
     };
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            let store = SqliteTestPaymentStore {
-                inner: Arc::new(SqliteCommercePaymentIntentStore::new(pool.clone())),
-                pool: pool.clone(),
-                registry,
-                credentials,
-            };
-            let intent = store.create_owner_payment_intent(intent_command).await?;
-            let attempt = store
-                .create_owner_payment_attempt(build_attempt(&intent.payment_intent_id)?)
-                .await?;
-            Ok((intent, attempt))
-        }
         IntegrationPool::Postgres(pool) => {
             let store = PostgresTestPaymentStore {
                 inner: Arc::new(PostgresCommercePaymentIntentStore::new(pool.clone())),
@@ -1068,22 +1007,6 @@ async fn load_payment_method_for_test(
     method_key: &str,
 ) -> Result<Option<TestPaymentMethodRecord>, sdkwork_contract_service::CommerceServiceError> {
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            let row = sqlx::query(
-                "SELECT method_key, provider_code, status FROM commerce_payment_method WHERE tenant_id = CAST(? AS TEXT) AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL)) AND method_key = CAST(? AS TEXT) AND deleted_at IS NULL LIMIT 1",
-            )
-            .bind(&subject.tenant_id)
-            .bind(&subject.organization_id)
-            .bind(&subject.organization_id)
-            .bind(method_key)
-            .fetch_optional(pool)
-            .await
-            .map_err(storage)?;
-            Ok(row.map(|row| TestPaymentMethodRecord {
-                provider_code: row.try_get("provider_code").unwrap_or_default(),
-                status: row.try_get("status").unwrap_or_default(),
-            }))
-        }
         IntegrationPool::Postgres(pool) => {
             let row = sqlx::query(
                 "SELECT method_key, provider_code, status FROM commerce_payment_method WHERE tenant_id = CAST($1 AS TEXT) AND ((organization_id = CAST($2 AS TEXT)) OR (organization_id IS NULL AND $2::text IS NULL)) AND method_key = CAST($3 AS TEXT) AND deleted_at IS NULL LIMIT 1",
@@ -1114,38 +1037,6 @@ async fn insert_test_order(
 ) -> Result<(), sdkwork_contract_service::CommerceServiceError> {
     let breakdown_id = stable_id("test-payment-breakdown", order_id);
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            sqlx::query(
-                "INSERT OR IGNORE INTO commerce_order (id, tenant_id, organization_id, owner_user_id, order_no, status, subject, currency_code, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending_payment', ?, ?, ?, ?)",
-            )
-            .bind(order_id)
-            .bind(&subject.tenant_id)
-            .bind(&subject.organization_id)
-            .bind(&subject.user_id)
-            .bind(order_no)
-            .bind(TEST_PAYMENT_ORDER_SUBJECT)
-            .bind(currency_code)
-            .bind(now)
-            .bind(now)
-            .execute(pool)
-            .await
-            .map_err(storage)?;
-            sqlx::query(
-                "INSERT OR IGNORE INTO commerce_order_amount_breakdown (id, tenant_id, organization_id, order_id, allocation_type, original_amount, discount_amount, payable_amount, currency_code, created_at) VALUES (?, ?, ?, ?, 'order_total', ?, '0', ?, ?, ?)",
-            )
-            .bind(&breakdown_id)
-            .bind(&subject.tenant_id)
-            .bind(&subject.organization_id)
-            .bind(order_id)
-            .bind(amount)
-            .bind(amount)
-            .bind(currency_code)
-            .bind(now)
-            .execute(pool)
-            .await
-            .map_err(storage)?;
-            Ok(())
-        }
         IntegrationPool::Postgres(pool) => {
             sqlx::query(
                 "INSERT INTO commerce_order (id, tenant_id, organization_id, owner_user_id, order_no, status, subject, currency_code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 'pending_payment', $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING",
@@ -1482,38 +1373,6 @@ async fn load_provider_account(
     id: &str,
 ) -> Result<Option<ProviderAccountRecord>, sdkwork_contract_service::CommerceServiceError> {
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            let row = sqlx::query(
-                "SELECT id, provider_code, merchant_id, environment, secret_ref, webhook_secret_ref, certificate_ref, metadata FROM commerce_payment_provider_account WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL)) AND deleted_at IS NULL LIMIT 1",
-            )
-            .bind(id)
-            .bind(&subject.tenant_id)
-            .bind(&subject.organization_id)
-            .bind(&subject.organization_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(storage)?;
-            match row {
-                Some(row) => {
-                    let mut account = map_provider_account_sqlite(row);
-                    if uses_database_credentials(&account) {
-                        let credentials =
-                            sdkwork_payment_repository_sqlx::load_provider_credentials_sqlite(
-                                pool,
-                                &subject.tenant_id,
-                                subject.organization_id.as_deref(),
-                                id,
-                            )
-                            .await?;
-                        account.primary_secret = credentials.primary_secret;
-                        account.webhook_secret = credentials.webhook_secret;
-                        account.certificate = credentials.certificate;
-                    }
-                    Ok(Some(account))
-                }
-                None => Ok(None),
-            }
-        }
         IntegrationPool::Postgres(pool) => {
             let row = sqlx::query(
                 "SELECT id, provider_code, merchant_id, environment, secret_ref, webhook_secret_ref, certificate_ref, CAST(metadata AS TEXT) AS metadata FROM commerce_payment_provider_account WHERE id = CAST($1 AS TEXT) AND tenant_id = CAST($2 AS TEXT) AND ((organization_id = CAST($3 AS TEXT)) OR (organization_id IS NULL AND $3::text IS NULL)) AND deleted_at IS NULL LIMIT 1",
@@ -1548,21 +1407,6 @@ async fn load_provider_account(
     }
 }
 
-fn map_provider_account_sqlite(row: SqliteRow) -> ProviderAccountRecord {
-    ProviderAccountRecord {
-        id: row.try_get("id").unwrap_or_default(),
-        provider_code: row.try_get("provider_code").unwrap_or_default(),
-        merchant_id: row.try_get("merchant_id").ok().flatten(),
-        environment: row.try_get("environment").unwrap_or_default(),
-        secret_ref: row.try_get("secret_ref").unwrap_or_default(),
-        webhook_secret_ref: row.try_get("webhook_secret_ref").ok().flatten(),
-        certificate_ref: row.try_get("certificate_ref").ok().flatten(),
-        primary_secret: None,
-        webhook_secret: None,
-        certificate: None,
-        metadata: parse_json(row.try_get("metadata").ok()),
-    }
-}
 
 fn map_provider_account_pg(row: PgRow) -> ProviderAccountRecord {
     ProviderAccountRecord {
@@ -1600,11 +1444,6 @@ async fn update_provider_test_status(
     status: &str,
 ) -> Result<(), sdkwork_contract_service::CommerceServiceError> {
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            sqlx::query("UPDATE commerce_payment_provider_account SET last_tested_at = ?, last_test_status = ?, updated_at = ? WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL)) AND deleted_at IS NULL")
-                .bind(tested_at).bind(status).bind(tested_at).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(&subject.organization_id)
-                .execute(pool).await.map_err(storage)?;
-        }
         IntegrationPool::Postgres(pool) => {
             sqlx::query("UPDATE commerce_payment_provider_account SET last_tested_at = CAST($1 AS TIMESTAMPTZ), last_test_status = $2, updated_at = CAST($1 AS TIMESTAMPTZ) WHERE id = CAST($3 AS TEXT) AND tenant_id = CAST($4 AS TEXT) AND ((organization_id = CAST($5 AS TEXT)) OR (organization_id IS NULL AND $5::text IS NULL)) AND deleted_at IS NULL")
                 .bind(tested_at).bind(status).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id)
@@ -1626,23 +1465,6 @@ async fn rotate_credentials(
     let rotated_at = now_string();
     let metadata_patch = json!({"previousCredentialsInvalidated": invalidate_previous, "credentialsRotatedAt": rotated_at});
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            sdkwork_payment_repository_sqlx::rotate_provider_credentials_sqlite(
-                pool,
-                &subject.tenant_id,
-                subject.organization_id.as_deref(),
-                id,
-                sdkwork_payment_repository_sqlx::ProviderCredentialWrite {
-                    primary_secret: Some(primary_secret),
-                    webhook_secret,
-                    certificate,
-                },
-            )
-            .await?;
-            sqlx::query("UPDATE commerce_payment_provider_account SET metadata = json_patch(COALESCE(metadata, '{}'), ?), last_tested_at = NULL, last_test_status = NULL, updated_at = ? WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND ((organization_id = CAST(? AS TEXT)) OR (organization_id IS NULL AND ? IS NULL)) AND deleted_at IS NULL")
-                .bind(metadata_patch.to_string()).bind(&rotated_at).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(&subject.organization_id)
-                .execute(pool).await.map_err(storage)?;
-        }
         IntegrationPool::Postgres(pool) => {
             sdkwork_payment_repository_sqlx::rotate_provider_credentials_postgres(
                 pool,
@@ -1687,16 +1509,6 @@ async fn query_sub_merchants(
     page: OffsetListPageParams,
 ) -> Result<(Vec<Value>, i64), sdkwork_contract_service::CommerceServiceError> {
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            let rows = sqlx::query("SELECT sm.id, sm.provider_account_id, sm.external_sub_merchant_id, sm.sub_appid, sm.sub_mch_id, sm.display_name, sm.status, sm.metadata, sm.created_at, sm.updated_at, pa.provider_code, COUNT(*) OVER() AS total_count FROM commerce_payment_sub_merchant sm JOIN commerce_payment_provider_account pa ON pa.id = sm.provider_account_id AND pa.tenant_id = sm.tenant_id WHERE sm.tenant_id = CAST(? AS TEXT) AND sm.organization_id = CAST(? AS TEXT) AND sm.deleted_at IS NULL AND (? IS NULL OR sm.provider_account_id = CAST(? AS TEXT)) AND (? IS NULL OR sm.status = CAST(? AS TEXT)) AND (? IS NULL OR sm.external_sub_merchant_id LIKE '%' || CAST(? AS TEXT) || '%' OR COALESCE(sm.display_name, '') LIKE '%' || CAST(? AS TEXT) || '%') ORDER BY sm.updated_at DESC, sm.id DESC LIMIT ? OFFSET ?")
-                .bind(&subject.tenant_id).bind(&subject.organization_id).bind(&query.provider_account_id).bind(&query.provider_account_id).bind(&query.status).bind(&query.status).bind(&query.q).bind(&query.q).bind(&query.q).bind(page.page_size).bind(page.offset)
-                .fetch_all(pool).await.map_err(storage)?;
-            let total = sqlite_total(&rows);
-            Ok((
-                rows.into_iter().map(map_sub_merchant_sqlite).collect(),
-                total,
-            ))
-        }
         IntegrationPool::Postgres(pool) => {
             let rows = sqlx::query("SELECT sm.id, sm.provider_account_id, sm.external_sub_merchant_id, sm.sub_appid, sm.sub_mch_id, sm.display_name, sm.status, CAST(sm.metadata AS TEXT) AS metadata, CAST(sm.created_at AS TEXT) AS created_at, CAST(sm.updated_at AS TEXT) AS updated_at, pa.provider_code, COUNT(*) OVER() AS total_count FROM commerce_payment_sub_merchant sm JOIN commerce_payment_provider_account pa ON pa.id = sm.provider_account_id AND pa.tenant_id = sm.tenant_id WHERE sm.tenant_id = CAST($1 AS TEXT) AND sm.organization_id = CAST($2 AS TEXT) AND sm.deleted_at IS NULL AND ($3 IS NULL OR sm.provider_account_id = CAST($3 AS TEXT)) AND ($4 IS NULL OR sm.status = CAST($4 AS TEXT)) AND ($5 IS NULL OR sm.external_sub_merchant_id ILIKE '%' || CAST($5 AS TEXT) || '%' OR COALESCE(sm.display_name, '') ILIKE '%' || CAST($5 AS TEXT) || '%') ORDER BY sm.updated_at DESC, sm.id DESC LIMIT $6 OFFSET $7")
                 .bind(&subject.tenant_id).bind(&subject.organization_id).bind(&query.provider_account_id).bind(&query.status).bind(&query.q).bind(page.page_size).bind(page.offset)
@@ -1707,9 +1519,6 @@ async fn query_sub_merchants(
     }
 }
 
-fn map_sub_merchant_sqlite(row: SqliteRow) -> Value {
-    map_sub_merchant(&row, false)
-}
 fn map_sub_merchant_pg(row: PgRow) -> Value {
     map_sub_merchant(&row, true)
 }
@@ -1764,11 +1573,6 @@ async fn insert_sub_merchant(
         .to_string();
     let status = body.status.as_deref().unwrap_or("active");
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            sqlx::query("INSERT INTO commerce_payment_sub_merchant (id, tenant_id, organization_id, provider_account_id, external_sub_merchant_id, sub_appid, sub_mch_id, display_name, status, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
-                .bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(provider_account_id).bind(external_id).bind(&body.sub_app_id).bind(&body.sub_mch_id).bind(&body.sub_merchant_name).bind(status).bind(&metadata).bind(&now).bind(&now)
-                .execute(pool).await.map_err(storage)?;
-        }
         IntegrationPool::Postgres(pool) => {
             sqlx::query("INSERT INTO commerce_payment_sub_merchant (id, tenant_id, organization_id, provider_account_id, external_sub_merchant_id, sub_appid, sub_mch_id, display_name, status, metadata, created_at, updated_at) VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), CAST($4 AS TEXT), $5, $6, $7, $8, $9, CAST($10 AS JSONB), CAST($11 AS TIMESTAMPTZ), CAST($11 AS TIMESTAMPTZ)) ON CONFLICT(id) DO NOTHING")
                 .bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(provider_account_id).bind(external_id).bind(&body.sub_app_id).bind(&body.sub_mch_id).bind(&body.sub_merchant_name).bind(status).bind(&metadata).bind(&now)
@@ -1800,14 +1604,6 @@ async fn patch_sub_merchant(
     let now = now_string();
     let metadata = body.metadata.as_ref().map(Value::to_string);
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            let result = sqlx::query("UPDATE commerce_payment_sub_merchant SET display_name = COALESCE(?, display_name), sub_appid = COALESCE(?, sub_appid), sub_mch_id = COALESCE(?, sub_mch_id), external_sub_merchant_id = COALESCE(?, external_sub_merchant_id), status = COALESCE(?, status), metadata = COALESCE(?, metadata), version = version + 1, updated_at = ? WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL")
-                .bind(&body.sub_merchant_name).bind(&body.sub_app_id).bind(&body.sub_mch_id).bind(&body.stripe_connected_account_id).bind(&body.status).bind(&metadata).bind(&now).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id)
-                .execute(pool).await.map_err(storage)?;
-            if result.rows_affected() == 0 {
-                return Ok(None);
-            }
-        }
         IntegrationPool::Postgres(pool) => {
             let result = sqlx::query("UPDATE commerce_payment_sub_merchant SET display_name = COALESCE($1, display_name), sub_appid = COALESCE($2, sub_appid), sub_mch_id = COALESCE($3, sub_mch_id), external_sub_merchant_id = COALESCE($4, external_sub_merchant_id), status = COALESCE($5, status), metadata = COALESCE(CAST($6 AS JSONB), metadata), version = version + 1, updated_at = CAST($7 AS TIMESTAMPTZ) WHERE id = CAST($8 AS TEXT) AND tenant_id = CAST($9 AS TEXT) AND organization_id = CAST($10 AS TEXT) AND deleted_at IS NULL")
                 .bind(&body.sub_merchant_name).bind(&body.sub_app_id).bind(&body.sub_mch_id).bind(&body.stripe_connected_account_id).bind(&body.status).bind(&metadata).bind(&now).bind(id).bind(&subject.tenant_id).bind(&subject.organization_id)
@@ -1828,16 +1624,6 @@ async fn query_certificates(
 ) -> Result<(Vec<Value>, i64), sdkwork_contract_service::CommerceServiceError> {
     let kind = query.certificate_type.as_deref().map(certificate_kind);
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            let rows = sqlx::query("SELECT id, certificate_no, provider_code, kind, content_ref, fingerprint_sha256, valid_until, issuer_cn, subject_cn, status, metadata, created_at, updated_at, COUNT(*) OVER() AS total_count FROM commerce_payment_certificate WHERE tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL AND (? IS NULL OR provider_code = CAST(? AS TEXT)) AND (? IS NULL OR kind = CAST(? AS TEXT)) AND (? IS NULL OR certificate_no LIKE '%' || CAST(? AS TEXT) || '%' OR COALESCE(subject_cn, '') LIKE '%' || CAST(? AS TEXT) || '%') AND (? IS NULL OR valid_until IS NULL OR valid_until <= datetime('now', '+' || CAST(? AS TEXT) || ' days')) ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?")
-                .bind(&subject.tenant_id).bind(&subject.organization_id).bind(&query.provider_code).bind(&query.provider_code).bind(kind).bind(kind).bind(&query.q).bind(&query.q).bind(&query.q).bind(query.expiring_within_days).bind(query.expiring_within_days).bind(page.page_size).bind(page.offset)
-                .fetch_all(pool).await.map_err(storage)?;
-            let total = sqlite_total(&rows);
-            Ok((
-                rows.into_iter().map(map_certificate_sqlite).collect(),
-                total,
-            ))
-        }
         IntegrationPool::Postgres(pool) => {
             let rows = sqlx::query("SELECT id, certificate_no, provider_code, kind, content_ref, fingerprint_sha256, CAST(valid_until AS TEXT) AS valid_until, issuer_cn, subject_cn, status, CAST(metadata AS TEXT) AS metadata, CAST(created_at AS TEXT) AS created_at, CAST(updated_at AS TEXT) AS updated_at, COUNT(*) OVER() AS total_count FROM commerce_payment_certificate WHERE tenant_id = CAST($1 AS TEXT) AND organization_id = CAST($2 AS TEXT) AND deleted_at IS NULL AND ($3 IS NULL OR provider_code = CAST($3 AS TEXT)) AND ($4 IS NULL OR kind = CAST($4 AS TEXT)) AND ($5 IS NULL OR certificate_no ILIKE '%' || CAST($5 AS TEXT) || '%' OR COALESCE(subject_cn, '') ILIKE '%' || CAST($5 AS TEXT) || '%') AND ($6 IS NULL OR valid_until IS NULL OR valid_until <= NOW() + (CAST($6 AS TEXT) || ' days')::interval) ORDER BY updated_at DESC, id DESC LIMIT $7 OFFSET $8")
                 .bind(&subject.tenant_id).bind(&subject.organization_id).bind(&query.provider_code).bind(kind).bind(&query.q).bind(query.expiring_within_days).bind(page.page_size).bind(page.offset)
@@ -1848,9 +1634,6 @@ async fn query_certificates(
     }
 }
 
-fn map_certificate_sqlite(row: SqliteRow) -> Value {
-    map_certificate(&row)
-}
 fn map_certificate_pg(row: PgRow) -> Value {
     map_certificate(&row)
 }
@@ -1892,11 +1675,6 @@ async fn insert_certificate(
         .to_string();
     let kind = certificate_kind(&body.certificate_type);
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            sqlx::query("INSERT INTO commerce_payment_certificate (id, tenant_id, organization_id, certificate_no, provider_code, kind, fingerprint_sha256, content_ref, ciphertext, encryption_key_id, encryption_algorithm, status, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'database:certificate_inventory', ?, ?, ?, 'active', ?, ?, ?) ON CONFLICT(id) DO NOTHING")
-                .bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(certificate_no).bind(&body.provider_code).bind(kind).bind(&encrypted.fingerprint_sha256).bind(&encrypted.ciphertext).bind(&encrypted.encryption_key_id).bind(&encrypted.encryption_algorithm).bind(&metadata).bind(&now).bind(&now)
-                .execute(pool).await.map_err(storage)?;
-        }
         IntegrationPool::Postgres(pool) => {
             sqlx::query("INSERT INTO commerce_payment_certificate (id, tenant_id, organization_id, certificate_no, provider_code, kind, fingerprint_sha256, content_ref, ciphertext, encryption_key_id, encryption_algorithm, status, metadata, created_at, updated_at) VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), $4, $5, $6, $7, 'database:certificate_inventory', $8, $9, $10, 'active', CAST($11 AS JSONB), CAST($12 AS TIMESTAMPTZ), CAST($12 AS TIMESTAMPTZ)) ON CONFLICT(id) DO NOTHING")
                 .bind(id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(certificate_no).bind(&body.provider_code).bind(kind).bind(&encrypted.fingerprint_sha256).bind(&encrypted.ciphertext).bind(&encrypted.encryption_key_id).bind(&encrypted.encryption_algorithm).bind(&metadata).bind(&now)
@@ -1933,20 +1711,6 @@ async fn load_resource(
         ResourceKind::Certificate => ("commerce_payment_certificate", "id, certificate_no, provider_code, kind, content_ref, fingerprint_sha256, valid_until, issuer_cn, subject_cn, status, metadata, created_at, updated_at"),
     };
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            let sql = format!("SELECT {columns} FROM {table} WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL LIMIT 1");
-            let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
-                .bind(id)
-                .bind(&subject.tenant_id)
-                .bind(&subject.organization_id)
-                .fetch_optional(pool)
-                .await
-                .map_err(storage)?;
-            Ok(row.map(|row| match kind {
-                ResourceKind::SubMerchant => map_sub_merchant_without_provider_sqlite(row),
-                ResourceKind::Certificate => map_certificate_sqlite(row),
-            }))
-        }
         IntegrationPool::Postgres(pool) => {
             let columns = match kind {
                 ResourceKind::SubMerchant => "id, provider_account_id, external_sub_merchant_id, sub_appid, sub_mch_id, display_name, status, CAST(metadata AS TEXT) AS metadata, CAST(created_at AS TEXT) AS created_at, CAST(updated_at AS TEXT) AS updated_at, (SELECT provider_code FROM commerce_payment_provider_account pa WHERE pa.id = provider_account_id AND pa.tenant_id = commerce_payment_sub_merchant.tenant_id LIMIT 1) AS provider_code",
@@ -1968,9 +1732,6 @@ async fn load_resource(
     }
 }
 
-fn map_sub_merchant_without_provider_sqlite(row: SqliteRow) -> Value {
-    map_sub_merchant_without_provider(&row)
-}
 fn map_sub_merchant_without_provider_pg(row: PgRow) -> Value {
     map_sub_merchant_without_provider(&row)
 }
@@ -2005,19 +1766,6 @@ async fn soft_delete_resource(
     };
     let now = now_string();
     let affected = match pool {
-        IntegrationPool::Sqlite(pool) => {
-            let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ?, version = version + 1 WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) AND deleted_at IS NULL");
-            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
-                .bind(&now)
-                .bind(&now)
-                .bind(id)
-                .bind(&subject.tenant_id)
-                .bind(&subject.organization_id)
-                .execute(pool)
-                .await
-                .map_err(storage)?
-                .rows_affected()
-        }
         IntegrationPool::Postgres(pool) => {
             let sql = format!("UPDATE {table} SET deleted_at = CAST($1 AS TIMESTAMPTZ), updated_at = CAST($1 AS TIMESTAMPTZ), version = version + 1 WHERE id = CAST($2 AS TEXT) AND tenant_id = CAST($3 AS TEXT) AND organization_id = CAST($4 AS TEXT) AND deleted_at IS NULL");
             sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
@@ -2044,11 +1792,6 @@ async fn insert_sandbox_webhook_event(
 ) -> Result<(), sdkwork_contract_service::CommerceServiceError> {
     let now = now_string();
     match pool {
-        IntegrationPool::Sqlite(pool) => {
-            sqlx::query("INSERT INTO commerce_payment_webhook_event (id, tenant_id, organization_id, event_id, event_type, provider_code, payload, status, received_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'sdkwork.sandbox.triggered', ?, ?, 'queued', ?, ?, ?) ON CONFLICT(id) DO NOTHING")
-                .bind(operation_id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(event_id).bind(provider_code).bind(payload.to_string()).bind(&now).bind(&now).bind(&now)
-                .execute(pool).await.map_err(storage)?;
-        }
         IntegrationPool::Postgres(pool) => {
             sqlx::query("INSERT INTO commerce_payment_webhook_event (id, tenant_id, organization_id, event_id, event_type, provider_code, payload, status, received_at, created_at, updated_at) VALUES (CAST($1 AS TEXT), CAST($2 AS TEXT), CAST($3 AS TEXT), $4, 'sdkwork.sandbox.triggered', $5, CAST($6 AS JSONB), 'queued', CAST($7 AS TIMESTAMPTZ), CAST($7 AS TIMESTAMPTZ), CAST($7 AS TIMESTAMPTZ)) ON CONFLICT(id) DO NOTHING")
                 .bind(operation_id).bind(&subject.tenant_id).bind(&subject.organization_id).bind(event_id).bind(provider_code).bind(payload.to_string()).bind(&now)
@@ -2056,17 +1799,6 @@ async fn insert_sandbox_webhook_event(
         }
     }
     let stored_payload = match pool {
-        IntegrationPool::Sqlite(pool) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT payload FROM commerce_payment_webhook_event WHERE id = CAST(? AS TEXT) AND tenant_id = CAST(? AS TEXT) AND organization_id = CAST(? AS TEXT) LIMIT 1",
-            )
-            .bind(operation_id)
-            .bind(&subject.tenant_id)
-            .bind(&subject.organization_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(storage)?
-        }
         IntegrationPool::Postgres(pool) => {
             sqlx::query_scalar::<_, String>(
                 "SELECT CAST(payload AS TEXT) FROM commerce_payment_webhook_event WHERE id = CAST($1 AS TEXT) AND tenant_id = CAST($2 AS TEXT) AND organization_id = CAST($3 AS TEXT) LIMIT 1",
@@ -2094,11 +1826,6 @@ async fn insert_sandbox_webhook_event(
     Ok(())
 }
 
-fn sqlite_total(rows: &[SqliteRow]) -> i64 {
-    rows.first()
-        .and_then(|row| row.try_get("total_count").ok())
-        .unwrap_or(0)
-}
 
 fn pg_total(rows: &[PgRow]) -> i64 {
     rows.first()
@@ -2106,247 +1833,3 @@ fn pg_total(rows: &[PgRow]) -> i64 {
         .unwrap_or(0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::body::Body;
-    use axum::http::{Method, Request, StatusCode};
-    use tower::ServiceExt;
-
-    #[tokio::test]
-    async fn every_integration_contract_route_is_mounted() {
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("sqlite pool");
-        let router = build_router(IntegrationState {
-            pool: IntegrationPool::Sqlite(pool),
-        });
-        let routes = [
-            (
-                Method::POST,
-                "/backend/v3/api/payments/provider_accounts/account-1/test",
-            ),
-            (
-                Method::POST,
-                "/backend/v3/api/payments/provider_accounts/account-1/credentials/rotate",
-            ),
-            (Method::GET, "/backend/v3/api/payments/sub_merchants"),
-            (Method::POST, "/backend/v3/api/payments/sub_merchants"),
-            (Method::GET, "/backend/v3/api/payments/sub_merchants/sub-1"),
-            (
-                Method::PATCH,
-                "/backend/v3/api/payments/sub_merchants/sub-1",
-            ),
-            (
-                Method::DELETE,
-                "/backend/v3/api/payments/sub_merchants/sub-1",
-            ),
-            (Method::GET, "/backend/v3/api/payments/certificates"),
-            (Method::POST, "/backend/v3/api/payments/certificates"),
-            (Method::GET, "/backend/v3/api/payments/certificates/cert-1"),
-            (
-                Method::DELETE,
-                "/backend/v3/api/payments/certificates/cert-1",
-            ),
-            (Method::POST, "/backend/v3/api/payments/dev/sandbox_trigger"),
-            (Method::POST, "/backend/v3/api/payments/dev/test_payments"),
-            (
-                Method::POST,
-                "/backend/v3/api/payments/dev/webhook_signature_test",
-            ),
-        ];
-        for (method, path) in routes {
-            let request = Request::builder()
-                .method(method)
-                .uri(path)
-                .header("content-type", "application/json")
-                .body(Body::from("{}"))
-                .expect("request");
-            let status = router
-                .clone()
-                .oneshot(request)
-                .await
-                .expect("response")
-                .status();
-            assert_ne!(status, StatusCode::NOT_FOUND, "route not mounted: {path}");
-            assert_ne!(
-                status,
-                StatusCode::METHOD_NOT_ALLOWED,
-                "method not mounted: {path}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn sqlite_integration_store_persists_and_isolates_admin_resources() {
-        crate::ensure_test_payment_credential_cipher();
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("sqlite pool");
-        for statement in [
-            "CREATE TABLE commerce_payment_provider_account (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_code TEXT NOT NULL, merchant_id TEXT, environment TEXT NOT NULL, secret_ref TEXT NOT NULL, webhook_secret_ref TEXT, certificate_ref TEXT, metadata TEXT NOT NULL DEFAULT '{}', last_tested_at TEXT, last_test_status TEXT, version INTEGER NOT NULL DEFAULT 0, updated_at TEXT, deleted_at TEXT)",
-            "CREATE TABLE commerce_payment_sub_merchant (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, provider_account_id TEXT NOT NULL, external_sub_merchant_id TEXT NOT NULL, sub_appid TEXT, sub_mch_id TEXT, display_name TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
-            "CREATE TABLE commerce_payment_certificate (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, certificate_no TEXT NOT NULL, provider_code TEXT NOT NULL, kind TEXT NOT NULL, content_ref TEXT NOT NULL, ciphertext TEXT, encryption_key_id TEXT, encryption_algorithm TEXT, fingerprint_sha256 TEXT, valid_until TEXT, issuer_cn TEXT, subject_cn TEXT, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT)",
-            "CREATE TABLE commerce_payment_webhook_event (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, organization_id TEXT, event_id TEXT NOT NULL, event_type TEXT NOT NULL, provider_code TEXT, payload TEXT NOT NULL, status TEXT NOT NULL, received_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
-        ] {
-            sqlx::query(sqlx::AssertSqlSafe(statement))
-                .execute(&pool)
-                .await
-                .expect("test schema");
-        }
-        sqlx::query("INSERT INTO commerce_payment_provider_account (id, tenant_id, organization_id, provider_code, environment, secret_ref, updated_at) VALUES ('account-1', 'tenant-1', 'org-1', 'stripe', 'sandbox', 'STRIPE_SECRET_KEY', '2026-01-01T00:00:00Z')")
-            .execute(&pool)
-            .await
-            .expect("provider account");
-
-        let integration_pool = IntegrationPool::Sqlite(pool.clone());
-        let subject = AppRuntimeSubject {
-            tenant_id: "tenant-1".to_owned(),
-            organization_id: Some("org-1".to_owned()),
-            user_id: "operator-1".to_owned(),
-        };
-        let other_subject = AppRuntimeSubject {
-            tenant_id: "tenant-1".to_owned(),
-            organization_id: Some("org-2".to_owned()),
-            user_id: "operator-2".to_owned(),
-        };
-        let sub_body = CreateSubMerchantBody {
-            provider_account_id: "account-1".to_owned(),
-            sub_merchant_no: "sub-no-1".to_owned(),
-            sub_merchant_name: Some("Example merchant".to_owned()),
-            sub_app_id: None,
-            sub_mch_id: None,
-            stripe_connected_account_id: Some("acct_123".to_owned()),
-            provider_code: "stripe".to_owned(),
-            status: Some("active".to_owned()),
-            metadata: Some(json!({"region": "CN"})),
-        };
-        let created_sub = insert_sub_merchant(
-            &integration_pool,
-            &subject,
-            "sub-1",
-            "account-1",
-            "sub-no-1",
-            &sub_body,
-        )
-        .await
-        .expect("create sub merchant")
-        .expect("parent account exists");
-        assert_eq!(created_sub["providerCode"], "stripe");
-        assert_eq!(created_sub["stripeConnectedAccountId"], "acct_123");
-        assert!(load_resource(
-            &integration_pool,
-            &other_subject,
-            "sub-1",
-            ResourceKind::SubMerchant,
-        )
-        .await
-        .expect("isolated read")
-        .is_none());
-
-        let certificate_body = CreateCertificateBody {
-            certificate_no: "cert-no-1".to_owned(),
-            provider_code: "stripe".to_owned(),
-            certificate_type: "provider_public_key".to_owned(),
-            certificate: "test-pem".to_owned(),
-            metadata: None,
-        };
-        let encrypted = payment_credential_cipher()
-            .expect("cipher")
-            .encrypt(
-                CredentialCipherScope {
-                    tenant_id: &subject.tenant_id,
-                    provider_account_id: "cert-1",
-                    credential_kind: "certificate_inventory",
-                },
-                "test-pem",
-            )
-            .expect("encrypt certificate");
-        let certificate = insert_certificate(
-            &integration_pool,
-            &subject,
-            "cert-1",
-            "cert-no-1",
-            &encrypted,
-            &certificate_body,
-        )
-        .await
-        .expect("create certificate");
-        assert_eq!(certificate["certificateType"], "provider_public_key");
-        assert_eq!(certificate["hasContent"], true);
-        assert!(certificate.get("certificateRef").is_none());
-        assert!(certificate.get("ciphertext").is_none());
-        let stored_certificate = sqlx::query(
-            "SELECT content_ref, ciphertext FROM commerce_payment_certificate WHERE id = 'cert-1'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("stored certificate");
-        assert_eq!(
-            stored_certificate
-                .try_get::<String, _>("content_ref")
-                .expect("content marker"),
-            "database:certificate_inventory"
-        );
-        assert!(!stored_certificate
-            .try_get::<String, _>("ciphertext")
-            .expect("ciphertext")
-            .contains("test-pem"));
-        assert!(soft_delete_resource(
-            &integration_pool,
-            &subject,
-            "cert-1",
-            ResourceKind::Certificate,
-        )
-        .await
-        .expect("delete certificate"));
-        assert!(load_resource(
-            &integration_pool,
-            &subject,
-            "cert-1",
-            ResourceKind::Certificate,
-        )
-        .await
-        .expect("reload certificate")
-        .is_none());
-
-        insert_sandbox_webhook_event(
-            &integration_pool,
-            &subject,
-            "operation-1",
-            "event-1",
-            "stripe",
-            json!({"sandbox": true}),
-        )
-        .await
-        .expect("sandbox event");
-        insert_sandbox_webhook_event(
-            &integration_pool,
-            &subject,
-            "operation-1",
-            "event-1",
-            "stripe",
-            json!({"sandbox": true}),
-        )
-        .await
-        .expect("sandbox event replay");
-        let replay_error = insert_sandbox_webhook_event(
-            &integration_pool,
-            &subject,
-            "operation-1",
-            "event-1",
-            "stripe",
-            json!({"sandbox": false}),
-        )
-        .await
-        .expect_err("different replay payload");
-        assert_eq!(replay_error.code(), "conflict");
-        let queued: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM commerce_payment_webhook_event WHERE tenant_id = 'tenant-1' AND organization_id = 'org-1' AND status = 'queued'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("queued event count");
-        assert_eq!(queued, 1);
-    }
-}
