@@ -26,38 +26,6 @@ const SCENE_FILTER_POSTGRES: &str = r#"
 // Catalog methods with configured channels are eligible only while at least
 // one channel and its provider account are active. A channel without an account
 // explicitly opts into deployment-level provider credentials.
-const PROVIDER_ELIGIBILITY_FILTER_SQLITE: &str = r#"
-  AND (
-    NOT EXISTS (
-      SELECT 1
-      FROM commerce_payment_channel c0
-      WHERE c0.tenant_id = m.tenant_id
-        AND (c0.method_id = m.id OR (c0.method_id IS NULL AND c0.provider_code = m.provider_code))
-        AND c0.deleted_at IS NULL
-    )
-    OR EXISTS (
-      SELECT 1
-      FROM commerce_payment_channel c
-      LEFT JOIN commerce_payment_provider_account a
-        ON a.id = c.provider_account_id
-       AND a.deleted_at IS NULL
-      WHERE c.tenant_id = m.tenant_id
-        AND (c.organization_id = CAST(?2 AS TEXT) OR c.organization_id = '0' OR c.organization_id IS NULL)
-        AND (c.method_id = m.id OR (c.method_id IS NULL AND c.provider_code = m.provider_code))
-        AND c.status = 'active'
-        AND c.deleted_at IS NULL
-        AND (
-              c.provider_account_id IS NULL
-              OR (
-                a.status = 'active'
-                AND LOWER(a.provider_code) = LOWER(m.provider_code)
-                AND a.tenant_id = m.tenant_id
-                AND (a.organization_id = CAST(?2 AS TEXT) OR a.organization_id = '0' OR a.organization_id IS NULL)
-              )
-            )
-    )
-  )
-"#;
 const PROVIDER_ELIGIBILITY_FILTER_POSTGRES: &str = r#"
   AND (
     NOT EXISTS (
@@ -89,54 +57,6 @@ const PROVIDER_ELIGIBILITY_FILTER_POSTGRES: &str = r#"
             )
     )
   )
-"#;
-const LIST_PAYMENT_METHODS_BASE_SQLITE: &str = r#"
-WITH scoped_methods AS (
-    SELECT m.*,
-           CASE
-               WHEN m.organization_id = CAST(?2 AS TEXT) THEN 0
-               WHEN m.organization_id = '0' THEN 1
-               ELSE 2
-           END AS scope_rank
-    FROM commerce_payment_method m
-    WHERE m.tenant_id = CAST(?1 AS TEXT)
-      AND (m.organization_id = CAST(?2 AS TEXT) OR m.organization_id = '0' OR m.organization_id IS NULL)
-      AND m.status = 'active'
-      AND m.deleted_at IS NULL
-),
-selected_methods AS (
-    SELECT *
-    FROM (
-        SELECT sm.*,
-               ROW_NUMBER() OVER (
-                   PARTITION BY sm.method_key
-                   ORDER BY sm.scope_rank ASC, sm.sort_order ASC, sm.id ASC
-               ) AS scope_row
-        FROM scoped_methods sm
-    ) ranked
-    WHERE scope_row = 1
-)
-SELECT
-    m.id,
-    m.method_key,
-    m.display_name,
-    m.provider_code,
-    m.sort_order,
-    COALESCE((
-        SELECT GROUP_CONCAT(DISTINCT c.scene_code)
-        FROM commerce_payment_channel c
-        WHERE c.tenant_id = m.tenant_id
-          AND (c.organization_id = CAST(?2 AS TEXT) OR c.organization_id = '0' OR c.organization_id IS NULL)
-          AND (
-                c.method_id = m.id
-                OR (c.method_id IS NULL AND c.provider_code = m.provider_code)
-              )
-          AND c.status = 'active'
-          AND c.deleted_at IS NULL
-    ), 'web') AS scene_codes,
-    COUNT(*) OVER() AS total_count
-FROM selected_methods m
-WHERE 1 = 1
 "#;
 const LIST_PAYMENT_METHODS_BASE_POSTGRES: &str = r#"
 WITH scoped_methods AS (

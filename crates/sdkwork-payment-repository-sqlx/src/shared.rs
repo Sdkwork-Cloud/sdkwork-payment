@@ -12,7 +12,7 @@ use sdkwork_payment_service::{
     PayOwnerOrderOutcome, PaymentIntentView, RefundView,
 };
 use sqlx::postgres::PgRow;
-use sqlx::{Postgres, Row};
+use sqlx::Row;
 pub(crate) fn payment_attempt_is_terminal_success(status: &str) -> bool {
     matches!(
         status.trim().to_ascii_lowercase().as_str(),

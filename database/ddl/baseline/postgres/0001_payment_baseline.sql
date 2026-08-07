@@ -704,25 +704,7 @@ CREATE INDEX IF NOT EXISTS idx_commerce_payment_provider_status
     WHERE deleted_at IS NULL;
 
 -- folded migration: migrations/postgres/0002_provider_credentials.up.sql
-CREATE TABLE IF NOT EXISTS commerce_payment_provider_credential (
-    id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL,
-    organization_id TEXT,
-    provider_account_id TEXT NOT NULL,
-    credential_kind TEXT NOT NULL CHECK (credential_kind IN ('primary_secret', 'webhook_secret', 'certificate')),
-    ciphertext TEXT NOT NULL,
-    encryption_key_id TEXT NOT NULL,
-    encryption_algorithm TEXT NOT NULL,
-    fingerprint_sha256 TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'revoked')),
-    version BIGINT NOT NULL DEFAULT 1,
-    rotated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ,
-    CONSTRAINT fk_commerce_payment_provider_credential_account
-        FOREIGN KEY (provider_account_id) REFERENCES commerce_payment_provider_account(id)
-);
+
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_provider_credential_active
     ON commerce_payment_provider_credential
@@ -757,36 +739,7 @@ ALTER TABLE commerce_payment_provider ADD COLUMN IF NOT EXISTS display_name_i18n
 -- commerce_payment_webhook_event. This table was declared by host table
 -- inventories but never owned by a module baseline; this migration makes the
 -- canonical schema complete so fresh installs can persist deliveries.
-CREATE TABLE IF NOT EXISTS commerce_payment_webhook_delivery (
-    id                   TEXT PRIMARY KEY,
-    tenant_id            TEXT NOT NULL,
-    organization_id      TEXT,
-    delivery_no          TEXT NOT NULL,
-    provider_code        TEXT NOT NULL,
-    provider_account_id  TEXT,
-    event_id             TEXT NOT NULL,
-    nonce                TEXT,
-    request_timestamp    TEXT,
-    signature            TEXT,
-    signature_algorithm  TEXT,
-    headers_json         TEXT,
-    payload_digest       TEXT,
-    payload_ref          TEXT,
-    source_ip            TEXT,
-    user_agent           TEXT,
-    verification_status  TEXT NOT NULL DEFAULT 'PENDING'
-                         CHECK (verification_status IN ('PENDING', 'VERIFIED', 'FAILED')),
-    delivery_status      TEXT NOT NULL DEFAULT 'RECEIVED'
-                         CHECK (delivery_status IN ('RECEIVED', 'SUCCESS', 'FAILED', 'SKIPPED')),
-    failure_code         TEXT,
-    failure_message      TEXT,
-    received_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    verified_at          TIMESTAMPTZ NULL,
-    normalized_event_id  TEXT,
-    processed_at         TIMESTAMPTZ NULL,
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commerce_payment_webhook_delivery_event
     ON commerce_payment_webhook_delivery (tenant_id, provider_code, event_id);

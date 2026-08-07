@@ -2,8 +2,6 @@
 //!
 //! Shared by payment and order app-api routers so `orders.payments.create` and `payments.create`
 //! return the same cashier parameters.
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
 use chrono::{DateTime, Duration, Utc};
 use sdkwork_contract_service::CommerceServiceError;
 use sdkwork_payment_providers::{
@@ -14,7 +12,7 @@ use sdkwork_payment_service::{
     CancelOrderPaymentsCommand, CreateOwnerPaymentAttemptOutcome, PayOwnerOrderOutcome,
     PaymentRecordItem,
 };
-use sqlx::{PgPool, Pool, Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use tokio::time::{sleep, Instant};
 use crate::provider_account::{
     ensure_provider_account_matches, load_active_provider_account_for_channel_postgres,
@@ -44,9 +42,6 @@ use crate::payment_attempt_context::{
 const PROVIDER_CHECKOUT_TTL_SECONDS: i64 = 900;
 const POSTGRES_CHECKOUT_LOCK_RETRY_MILLIS: u64 = 25;
 const POSTGRES_CHECKOUT_LOCK_TIMEOUT_SECONDS: u64 = 30;
-type CheckoutMutex = tokio::sync::Mutex<()>;
-static SQLITE_CHECKOUT_LOCKS: OnceLock<Mutex<HashMap<String, Weak<CheckoutMutex>>>> =
-    OnceLock::new();
 #[derive(Clone, Copy)]
 pub struct OwnerOrderPaymentEnrichmentContext<'a> {
     pub deployment_registry: &'a PaymentProviderRegistry,
