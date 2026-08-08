@@ -58,11 +58,7 @@ fn payment_web_security_policy_from_env() -> (
             "PAYMENT_ENVIRONMENT",
             "SDKWORK_ENV",
         ],
-        &[
-            "SDKWORK_CORS_ALLOWED_ORIGINS",
-            "SDKWORK_PAYMENT_CORS_ALLOWED_ORIGINS",
-            "PAYMENT_API_CORS_ORIGINS",
-        ],
+        &["SDKWORK_CORS_ALLOWED_ORIGINS"],
     )
 }
 
